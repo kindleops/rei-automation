@@ -277,6 +277,7 @@ grant execute on function public.lc_seller_action_receipt_record(uuid, text, tex
 delete from action_gateway.extensions where link = 'PROPOSED_20261029100000_action_gateway_agent_message';
 
 drop function public.action_gateway_agent_lead_pool(text, integer, text);
+drop function public.action_gateway_send_controls();
 drop function public.lc_agent_message_lead(uuid);
 drop function public.lc_agent_message_activation();
 drop function public.action_gateway_message_templates();

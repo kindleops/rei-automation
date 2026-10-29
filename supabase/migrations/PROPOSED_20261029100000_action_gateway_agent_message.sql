@@ -320,6 +320,7 @@ create or replace function action_gateway.t34_capability_refusal(p_action text)
 returns text
 language plpgsql
 stable
+security definer
 set search_path = pg_catalog
 as $fn$
 declare v_stop text; v_switch text; v_policy text; v_enabled boolean; v_code text;
@@ -332,6 +333,9 @@ begin
   end if;
   select lower(btrim(coalesce(value, ''))) into v_stop from public.system_control where key = 'queue_emergency_stop_at';
   if coalesce(v_stop, '') not in ('', '0', 'false', 'off', 'none', 'null', 'cleared', 'clear') then return 'EMERGENCY_STOP_ACTIVE'; end if;
+  -- link #32: the R2 runtime emergency stop refuses every seller-facing send AT REQUEST TIME (the agent message already
+  -- did): a reply / offer requested while the workers are halted is refused, never left queued to run after the stop
+  if exists (select 1 from agent.runtime_limits l where coalesce((to_jsonb(l) ->> 'emergency_stop')::boolean, false)) then return 'EMERGENCY_STOP_ACTIVE'; end if;
   if p_action = 'queue_authorized_reply' then
     select lower(btrim(coalesce(value, ''))) into v_switch from public.system_control where key = 'ai_conversation_send_enabled';
     if coalesce(v_switch, '') <> 'true' then return 'CAPABILITY_UNAVAILABLE'; end if;
@@ -901,6 +905,43 @@ begin
 end
 $fn$;
 
+-- ───────────────────────────────────────────── 10c. the send controls (controls.read, T1) ──
+-- What decides, right now, whether a seller-facing send can be requested and whether it would run: both emergency stops,
+-- the AI send switch + policy, the agent-message switch + policy, the worker runtime and the queue processor mode. No
+-- operator identity (a role label only), no free-text reason, no policy body.
+create function public.action_gateway_send_controls()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = pg_catalog
+as $fn$
+declare l jsonb; v_stop text; v_mode text; v_ai_switch text; v_ai_policy text; v_ai_on boolean := false; v_am_switch text; v_am_on boolean;
+begin
+  if action_gateway.request_org() is null then return null; end if;
+  select to_jsonb(x) into l from agent.runtime_limits x where x.id = 1;
+  select lower(btrim(coalesce(value, ''))) into v_stop from public.system_control where key = 'queue_emergency_stop_at';
+  select lower(btrim(coalesce(value, ''))) into v_mode from public.system_control where key = 'queue_processor_mode';
+  select lower(btrim(coalesce(value, ''))) into v_ai_switch from public.system_control where key = 'ai_conversation_send_enabled';
+  select value into v_ai_policy from public.system_control where key = 'ai_conversation_send_policy';
+  begin v_ai_on := coalesce(v_ai_switch, '') = 'true' and coalesce((v_ai_policy::jsonb ->> 'enabled')::boolean, false); exception when others then v_ai_on := false; end;
+  select lower(btrim(coalesce(value, ''))) into v_am_switch from public.system_control where key = 'ai_agent_message_enabled';
+  v_am_on := coalesce(v_am_switch, '') = 'true' and coalesce((action_gateway.agent_message_policy() ->> 'enabled')::boolean, false);
+  return jsonb_build_object(
+    'runtime_emergency_stop', jsonb_build_object('on', coalesce((l ->> 'emergency_stop')::boolean, false),
+                                                 'at', case when coalesce((l ->> 'emergency_stop')::boolean, false) then l ->> 'emergency_stop_at' end,
+                                                 'reason_code', case when coalesce((l ->> 'emergency_stop')::boolean, false) then 'operator_emergency_stop' end,
+                                                 'set_by_role', case when coalesce((l ->> 'emergency_stop')::boolean, false) and nullif(l ->> 'emergency_stop_by', '') is not null then 'operator' end),
+    'send_emergency_stop', jsonb_build_object('on', coalesce(v_stop, '') not in ('', '0', 'false', 'off', 'none', 'null', 'cleared', 'clear')),
+    'ai_send_enabled', v_ai_on,
+    'agent_message_enabled', v_am_on,
+    'agent_message_refusal', action_gateway.agent_message_refusal(),
+    'worker_runtime_enabled', coalesce((l ->> 'runtime_enabled')::boolean, false),
+    'queue_processor_mode', nullif(v_mode, ''),
+    'as_of', clock_timestamp());
+end
+$fn$;
+
 -- ───────────────────────────────────────────── 11. the registry rows (#27) ──
 insert into action_gateway.extensions (kind, name, link, basis) values
   ('definer_function', 'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
@@ -909,6 +950,7 @@ insert into action_gateway.extensions (kind, name, link, basis) values
   ('definer_function', 'public.action_gateway_lead_assignment_get(uuid,uuid)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('definer_function', 'public.action_gateway_events_since(bigint,integer)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('definer_function', 'public.action_gateway_agent_lead_pool(text,integer,text)', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
+  ('definer_function', 'public.action_gateway_send_controls()', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
   ('standing_t2_action', 'assign_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
   ('standing_t2_action', 'release_lead', 'PROPOSED_20261029100000_action_gateway_agent_message', 'reversible'),
   ('domain_write_action', 'queue_agent_message', 'PROPOSED_20261029100000_action_gateway_agent_message', null),
@@ -924,7 +966,7 @@ begin
       'public.action_gateway_dw_lead_assignment(uuid,uuid)', 'public.action_gateway_lead_assignment_get(uuid,uuid)', 'public.lc_lead_event_append(text,text,text,uuid,jsonb,timestamp with time zone)',
       'public.action_gateway_events_since(bigint,integer)', 'public.lc_agent_message_reserve(uuid)', 'public.lc_agent_message_settle(uuid,text)',
       'public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'public.action_gateway_message_templates()', 'public.lc_agent_message_activation()', 'public.lc_agent_message_lead(uuid)',
-      'public.action_gateway_agent_lead_pool(text,integer,text)', 'action_gateway.property_ref_of(text)', 'action_gateway.campaign_target_of(text,text)',
+      'public.action_gateway_agent_lead_pool(text,integer,text)', 'public.action_gateway_send_controls()', 'action_gateway.property_ref_of(text)', 'action_gateway.campaign_target_of(text,text)',
       'action_gateway.lead_event_ids(jsonb,uuid,text,text,uuid)'] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', f);
   end loop;
@@ -933,7 +975,8 @@ end $$;
 revoke all on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text) from public, anon, authenticated;
 grant execute on function public.lc_seller_action_receipt_record(uuid, text, text, text, jsonb, text) to service_role;
 grant execute on function public.action_gateway_agent_message_state(uuid, uuid, uuid), public.action_gateway_message_templates(), public.action_gateway_dw_lead_assignment(uuid, uuid),
-  public.action_gateway_lead_assignment_get(uuid, uuid), public.action_gateway_events_since(bigint, integer), public.action_gateway_agent_lead_pool(text, integer, text) to lc_action_gateway;
+  public.action_gateway_lead_assignment_get(uuid, uuid), public.action_gateway_events_since(bigint, integer), public.action_gateway_agent_lead_pool(text, integer, text),
+  public.action_gateway_send_controls() to lc_action_gateway;
 grant execute on function public.lc_agent_message_reserve(uuid), public.lc_agent_message_settle(uuid, text), public.lc_agent_message_activation(), public.lc_agent_message_lead(uuid),
   public.lc_lead_event_append(text, text, text, uuid, jsonb, timestamp with time zone) to service_role;
 

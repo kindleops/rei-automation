@@ -46,10 +46,26 @@ export async function permissionDeny(reads, resource) {
 }
 export { isStopRequest }
 
-/** The AI send production activation (kill switch + an enabled send policy, no emergency stop). */
+/**
+ * The R2 runtime emergency stop as the gateway sees it (link #32's public.action_gateway_send_controls). Without link #32
+ * the read does not exist and nothing changes (#28's contract: the system_control stop only); any other failure is a
+ * refusal (fail closed).
+ */
+export async function runtimeStopVerdict(reads) {
+  if (typeof reads?.client?.rpc !== 'function') return null
+  let r
+  try { r = await reads.client.rpc('action_gateway_send_controls', {}) } catch { return { available: false, code: 'SEND_CONTROLS_UNREADABLE' } }
+  if (r?.error) return /PGRST202|42883|does not exist|Could not find the function/i.test(`${r.error.code || ''} ${r.error.message || ''}`) ? null : { available: false, code: 'SEND_CONTROLS_UNREADABLE' }
+  if (r?.data?.runtime_emergency_stop?.on === true) return { available: false, code: 'EMERGENCY_STOP_ACTIVE' }
+  return null
+}
+
+/** The AI send production activation (kill switch + an enabled send policy, no emergency stop: system_control or R2). */
 export async function replyActivation(reads) {
   const sw = await reads.switches([AI_SEND_KILL_SWITCH_KEY, AI_SEND_POLICY_KEY, EMERGENCY_STOP_KEY])
   if (emergencyStopActive(sw[EMERGENCY_STOP_KEY])) return { available: false, code: 'EMERGENCY_STOP_ACTIVE' }
+  const r2 = await runtimeStopVerdict(reads)
+  if (r2) return r2
   if (!parseKillSwitch(sw[AI_SEND_KILL_SWITCH_KEY])) return { available: false, code: 'AI_SEND_KILL_SWITCH_OFF' }
   const policy = normalizeSendPolicy(sw[AI_SEND_POLICY_KEY])
   if (!policy.enabled) return { available: false, code: 'AI_SEND_POLICY_DISABLED' }
@@ -61,6 +77,8 @@ export { threadInPolicyScope }
 export async function negotiationActivation(reads) {
   const sw = await reads.switches([NEGOTIATION_SEND_KEY, EMERGENCY_STOP_KEY])
   if (emergencyStopActive(sw[EMERGENCY_STOP_KEY])) return { available: false, code: 'EMERGENCY_STOP_ACTIVE' }
+  const r2 = await runtimeStopVerdict(reads)
+  if (r2) return r2
   if (String(sw[NEGOTIATION_SEND_KEY] ?? '').trim().toLowerCase() !== 'true') return { available: false, code: 'NEGOTIATION_SEND_OFF' }
   return { available: true }
 }

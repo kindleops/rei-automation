@@ -52,7 +52,10 @@ fs.writeFileSync(widen, wideningSql(await captureColumns()))
 for (const stmt of fs.readFileSync(widen, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('--') && !/probate|preforeclosure|census_geo_metrics/.test(l))) {
   try { await env.db.pool.query(stmt) } catch (e) { log('widen skipped:', stmt.slice(0, 80), '→', e.message.slice(0, 80)) }
 }
-for (const f of ['PROPOSED_20261019150000_lc_mcp_reader.sql', 'PROPOSED_20261026120000_lc_mcp_conversation_intel.sql', 'PROPOSED_20261026150000_lc_mcp_corpus_census.sql', ...(process.env.ACQ_EXTRA_READER_LINKS || '').split(',').filter(Boolean)]) {
+// the reader links: #1.0 reader, 1.1 conversation intelligence, 1.2 census, 1.3 the acquisition reads (thread contact
+// eligibility, follow-ups, execution log, offers, operator tasks) — applied over the REAL relations of this chain (never
+// that link's emulation fixture: it inserts synthetic rows)
+for (const f of ['PROPOSED_20261019150000_lc_mcp_reader.sql', 'PROPOSED_20261026120000_lc_mcp_conversation_intel.sql', 'PROPOSED_20261026150000_lc_mcp_corpus_census.sql', 'PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql', ...(process.env.ACQ_EXTRA_READER_LINKS || '').split(',').filter(Boolean)]) {
   try { await applyInTransaction(env.db.pool, MIG(f)); log('applied', f) } catch (e) { log('NOT applied', f, '→', e.message.slice(0, 160)) }
 }
 
@@ -62,6 +65,16 @@ await env.owner.query(`create table if not exists public.universal_lead_state_ev
 // the dispatcher's outbound message_events upsert keys on message_event_key (unique in production; the fixtures lack it):
 // without it the thread history would miss our own sends
 try { await env.owner.query(`create unique index if not exists message_events_message_event_key_uq on public.message_events (message_event_key)`) } catch (e) { log('message_event_key index skipped:', e.message.slice(0, 80)) }
+// automation_suppressions in its production shape (the gateway fixtures model six columns; the reader's thread contact
+// eligibility reads created_at / conversation_thread_id): columns only, no rows
+await env.owner.query(`alter table public.automation_suppressions add column if not exists event_type text, add column if not exists action_type text, add column if not exists rule_key text,
+  add column if not exists dedupe_key text, add column if not exists conversation_thread_id text, add column if not exists property_id text, add column if not exists prospect_id text,
+  add column if not exists master_owner_id text, add column if not exists phone_number_id text, add column if not exists queue_item_id text, add column if not exists payload jsonb default '{}'::jsonb,
+  add column if not exists suppressed_at timestamptz default now(), add column if not exists created_at timestamptz default now(), add column if not exists updated_at timestamptz default now()`)
+for (const c of ['contactability_status text', 'disposition text', 'is_suppressed boolean', 'opt_out boolean', 'wrong_number boolean']) await env.owner.query(`alter table public.inbox_thread_state add column if not exists ${c}`)
+/** The canonical registry's marks for a seller who opted out / a confirmed wrong number (patch-universal-lead-state). */
+const OPTED_OUT_MARKS = `contactability_status = 'opted_out', is_suppressed = true`
+const WRONG_NUMBER_MARKS = `disposition = 'wrong_number', contactability_status = 'invalid_number', is_suppressed = true`
 
 const HI_SENDER = '+18085550199'
 const P = { gold: '+18085550101', soft: '+18085550102', ft_a: '+18085550103', ft_b: '+18085550104', stopped: '+18085550105', wrong: '+18085550106', eastern: '+13175550107' }
@@ -116,14 +129,15 @@ await env.owner.query(`update public.inbox_thread_state set latest_direction = '
 // 3 / 4 first-touch targets: eligible, no conversation
 const ftA = await target('ft_a')
 const ftB = await target('ft_b')
-// 5 stopped: a campaign target whose number texted STOP before and is on the suppression list
+// 5 stopped: a campaign target we texted 40 days ago whose number answered STOP: opted out (thread marks + suppression list)
 const stopped = await target('stopped')
+const stoppedThread = await thread('stopped', { inboundBody: 'STOP', daysAgo: 40, ourText: 'Hi Lee, this is Helen. Do you still own the house on Kaimuki Ave?' })
+await env.owner.query(`update public.inbox_thread_state set ${OPTED_OUT_MARKS} where id = $1`, [stoppedThread.thread_id])
 await env.owner.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'opt_out')`, [P.stopped])
-await env.owner.query(`insert into public.message_events (id, provider_message_sid, direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language)
-  values ($1, 'SMstop0001', 'inbound', $2::text, $2::text, $3::text, 'STOP', now() - interval '40 days', now() - interval '40 days', $4, 'en')`, [crypto.randomUUID(), P.stopped, HI_SENDER, PID.stopped])
 // 6 wrong: a thread whose number is marked wrong
 const wrong = await thread('wrong', { inboundBody: 'Wrong number, I do not own any house', daysAgo: 6, ourText: 'Hi Pat, this is Helen. Do you still own the house on Lunalilo St?' })
 await env.owner.query(`insert into public.phones (phone_id, canonical_e164, phone_contact_status) values ('ph-wrong', $1, 'wrong_number')`, [P.wrong])
+await env.owner.query(`update public.inbox_thread_state set ${WRONG_NUMBER_MARKS} where id = $1`, [wrong.thread_id])
 // 7 eastern: a campaign target with an Eastern-time (317) number: the 08:00–21:00 recipient window decides
 const eastern = await target('eastern')
 
@@ -140,7 +154,7 @@ for (const k of Object.keys(P)) {
 const READS = [['conversation.read_context', 1], ['acquisitions.read_delivery', 1], ['acquisitions.read_annotations', 1]]
 const WRITES = [['acquisitions.set_lead_temperature', 2], ['acquisitions.update_lead_status', 2], ['acquisitions.record_conversation_note', 2], ['acquisitions.record_seller_statement', 2],
   ['followups.schedule', 2], ['followups.cancel', 2], ['tasks.create_operator_task', 1], ['holds.set_thread_hold', 2]]
-const LEADS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['leads.read_pool', 1], ['events.read', 1], ['conversation.read_message_templates', 1]]
+const LEADS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['leads.read_pool', 1], ['events.read', 1], ['conversation.read_message_templates', 1], ['controls.read', 1]]
 const BASIS = 'owner decision (disposable certification world): standing seller-facing authority after blind evaluation'
 const mintStanding = (agent_id, capability) => env.owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis)
@@ -274,6 +288,11 @@ const control = http.createServer(async (req, res) => {
       await env.owner.query(`update public.inbox_thread_state set last_inbound_at = $2, latest_direction = 'inbound', latest_message_at = $2, inbound_count = coalesce(inbound_count, 0) + 1 where id = $1`, [thread_id, at])
       const stop = isStopRequest(text)
       const ev1 = await appendLeadEvent(leadSb, { kind: 'inbound_message', eventKey: id, threadKey: t.thread_key, payload: { message_id: id, received_at: at, stop_request: stop }, occurredAt: at })
+      // a stop: the opt-out marks LeadCommand's stop handling records (thread contactability + the suppression list)
+      if (stop) {
+        await env.owner.query(`update public.inbox_thread_state set ${OPTED_OUT_MARKS} where id = $1`, [thread_id])
+        await env.owner.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'opt_out')`, [t.thread_key])
+      }
       const ev2 = stop ? await appendLeadEvent(leadSb, { kind: 'opt_out', eventKey: id, threadKey: t.thread_key, payload: { message_id: id, received_at: at, source: 'inbound_stop_request' }, occurredAt: at }) : null
       log('seller reply (SIMULATED) on', thread_id, JSON.stringify(String(text).slice(0, 80)), stop ? '(stop request)' : '')
       return send(200, { ok: true, message_id: id, stop_request: stop, events: { inbound_message: ev1, opt_out: ev2 }, simulated: true })
@@ -331,8 +350,19 @@ await new Promise((r) => control.listen(PORTS.control, '127.0.0.1', r))
 // ── 8. world.json: every seed's ids + its expected eligibility NOW (the pool read's own verdict) ─────────────
 const { gateway } = makeGateway(env)
 const pool = await gateway.call({ credential: creds.sterling, tool: 'agent_lead_pool', args: { market: MARKET, limit: 100 } })
-const verdict = (id) => { const r = (pool.result?.rows || []).find((x) => x.campaign_target_id === id || x.thread_id === id); return r ? { eligible: r.eligible, ineligible_reason: r.ineligible_reason, next_purpose: r.next_purpose, window_open: r.window_open, next_permitted_at: r.next_permitted_at } : null }
-const seed = (k, { thread_id = null, campaign_target_id = null, expect }) => ({ thread_id, campaign_target_id, property_id: PID[k], property_ref: `pid_${[...PID[k]].map((d) => 'ghijklmnop'[Number(d)]).join('')}`, market: MARKET, area_code: P[k].slice(2, 5), address: `${STREET[k]}, Honolulu, HI 96816`, expect, pool: verdict(campaign_target_id || thread_id) })
+const verdict = (id) => { const r = (pool.result?.rows || []).find((x) => (x.campaign_target_id || x.thread_id) === id); return r ? { eligible: r.eligible, ineligible_reason: r.ineligible_reason, next_purpose: r.next_purpose, window_open: r.window_open, next_permitted_at: r.next_permitted_at } : null }
+const readerEligibility = async (threadId) => {
+  if (!threadId) return null
+  const c = await env.db.pool.connect()
+  try {
+    await c.query('begin'); await c.query('set local role lc_mcp_reader')
+    const v = (await c.query('select public.lc_mcp_thread_contact_eligibility($1) v', [threadId])).rows[0]?.v
+    return v ? { eligible_for_outreach: v.eligible_for_outreach, blocking_reasons: v.blocking_reasons } : null
+  } catch (e) { return { error: e.message.slice(0, 120) } } finally { await c.query('rollback').catch(() => {}); c.release() }
+}
+const READER = {}
+for (const [k, id] of [['gold', gold.thread_id], ['soft', soft.thread_id], ['stopped', stoppedThread.thread_id], ['wrong', wrong.thread_id]]) READER[k] = await readerEligibility(id)
+const seed = (k, { thread_id = null, campaign_target_id = null, expect }) => ({ thread_id, campaign_target_id, property_id: PID[k], property_ref: `pid_${[...PID[k]].map((d) => 'ghijklmnop'[Number(d)]).join('')}`, market: MARKET, area_code: P[k].slice(2, 5), address: `${STREET[k]}, Honolulu, HI 96816`, expect, pool: verdict(campaign_target_id || thread_id), reader_contact_eligibility: READER[k] ?? null })
 const world = {
   started_at: new Date().toISOString(), database: dbName, provider: 'SIMULATED', model: 'SCRIPTED (no network)', ports: PORTS, market: MARKET,
   reader: { url: `http://127.0.0.1:${PORTS.reader}/mcp`, token_file: readerToken, mode: 'live (local PostgREST over the disposable database)' },
@@ -345,8 +375,8 @@ const world = {
     soft: seed('soft', { thread_id: soft.thread_id, expect: 'reengage: eligible (quiet 21 days after "not now, maybe in the spring")' }),
     ft_a: seed('ft_a', { campaign_target_id: ftA, expect: 'first_touch: eligible' }),
     ft_b: seed('ft_b', { campaign_target_id: ftB, expect: 'first_touch: eligible' }),
-    stopped: seed('stopped', { campaign_target_id: stopped, expect: 'refused CONTACT_NOT_ELIGIBLE (suppressed; STOP history)' }),
-    wrong: seed('wrong', { thread_id: wrong.thread_id, expect: 'refused CONTACT_NOT_ELIGIBLE (wrong number)' }),
+    stopped: seed('stopped', { campaign_target_id: stopped, thread_id: stoppedThread.thread_id, expect: 'ineligible STOP_REQUESTED (answered STOP: opt-out marks + suppression list); every send is refused STOP_REQUESTED' }),
+    wrong: seed('wrong', { thread_id: wrong.thread_id, expect: 'ineligible CONTACT_NOT_PERMITTED (confirmed wrong number: disposition wrong_number, contactability invalid_number)' }),
     eastern: seed('eastern', { campaign_target_id: eastern, expect: 'eligible, but refused OUTSIDE_RECIPIENT_WINDOW while 08:00–21:00 Eastern is closed (see pool.window_open)' }),
   },
   org: ORG, owner: OWNER, operator: OPERATOR, out_dir: OUT,

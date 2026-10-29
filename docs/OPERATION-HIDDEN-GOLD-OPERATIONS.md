@@ -110,6 +110,16 @@ next_purpose, eligible, ineligible_reason, ineligible_detail, window_open, next_
 verdict is the send path's own guards (same refusal codes), apart from the window and lead ownership, which are reported
 beside it. No numbers, names or message text.
 
+**Send controls** (`leadcommand_send_controls` = `send_controls`, capability `controls.read`, T1, `{}`) →
+`{runtime_emergency_stop: {on, at, reason_code, set_by_role}, send_emergency_stop: {on}, ai_send_enabled,
+agent_message_enabled, agent_message_refusal, worker_runtime_enabled, queue_processor_mode, as_of, seller_sends}`
+(`seller_sends` = `stopped` | `enabled` | `disabled`). No operator identity (role label `operator` only), no free-text
+reason, no policy body. **R2 at request time:** with link #32 applied, the R2 runtime emergency stop
+(`agent.runtime_limits.emergency_stop`) refuses EVERY seller-facing request at request time (`capability_unavailable`,
+`details.reason: EMERGENCY_STOP_ACTIVE`): the agent message, the certified reply and the authorized offer (before, the
+reply and the offer checked only the queue stop and were accepted, then waited for the halted worker). Without #32 the
+contract of #28 is unchanged.
+
 **Ids on the feed.** Every event payload carries `property_id` and `campaign_target_id` when LeadCommand knows them;
 `delivery_changed` also carries `purpose`, and its top-level `thread_id` is set once the first touch has created the thread
 (the `sent` event; `enqueued` precedes the thread). The payload guard (`agent.payload_is_clean`, security review M2) admits a

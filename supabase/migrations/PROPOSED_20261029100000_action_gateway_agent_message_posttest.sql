@@ -3,7 +3,7 @@
 -- One transaction ending in ROLLBACK (the runner proves the schema is unchanged afterwards):
 --   A. the composed self-check is ok; this link's 10 registry rows; the handoff kind; the T2 lead writes are standing,
 --      the agent message never is; born OFF (no switch row ⇒ the activation refuses);
---   B. lc_action_gateway executes exactly the six new gateway functions and none of LeadCommand's (reserve / settle /
+--   B. lc_action_gateway executes exactly the seven new gateway functions and none of LeadCommand's (reserve / settle /
 --      activation / lead / the event writer); anon / authenticated execute nothing; the role reaches no new table;
 --   C. the standing flag is confined (only the two pairs; the per-grant lead cap only on the agent-message capability);
 --   D. the event feed is append-only and masked (a phone in a payload is refused).
@@ -13,7 +13,7 @@ declare v jsonb;
 begin
   v := action_gateway.self_check('lc_action_gateway');
   if not coalesce((v ->> 'ok')::boolean, false) then raise exception 'A: composed self-check not ok: %', v -> 'findings'; end if;
-  if (select count(*) from action_gateway.extensions where link = 'PROPOSED_20261029100000_action_gateway_agent_message') <> 11 then raise exception 'A: this link''s extension rows'; end if;
+  if (select count(*) from action_gateway.extensions where link = 'PROPOSED_20261029100000_action_gateway_agent_message') <> 12 then raise exception 'A: this link''s extension rows'; end if;
   if action_gateway.t34_handoff_kind('queue_agent_message') is distinct from 'action_gateway.execute' then raise exception 'A: the handoff kind'; end if;
   if not (action_gateway.standing_t2_actions() @> array['assign_lead', 'release_lead']) or 'queue_agent_message' = any (action_gateway.standing_t2_actions()) then raise exception 'A: the standing T2 actions'; end if;
   if not exists (select 1 from public.system_control where key = 'ai_agent_message_enabled') and action_gateway.agent_message_refusal() is null then raise exception 'A: not born OFF'; end if;
@@ -23,7 +23,7 @@ do $$
 declare f text;
 begin
   foreach f in array array['public.action_gateway_agent_message_state(uuid,uuid,uuid)', 'public.action_gateway_message_templates()', 'public.action_gateway_dw_lead_assignment(uuid,uuid)',
-      'public.action_gateway_lead_assignment_get(uuid,uuid)', 'public.action_gateway_events_since(bigint,integer)', 'public.action_gateway_agent_lead_pool(text,integer,text)'] loop
+      'public.action_gateway_lead_assignment_get(uuid,uuid)', 'public.action_gateway_events_since(bigint,integer)', 'public.action_gateway_agent_lead_pool(text,integer,text)', 'public.action_gateway_send_controls()'] loop
     if not has_function_privilege('lc_action_gateway', f, 'EXECUTE') then raise exception 'B: the role cannot execute %', f; end if;
     if has_function_privilege('anon', f, 'EXECUTE') or has_function_privilege('authenticated', f, 'EXECUTE') then raise exception 'B: anon / authenticated can execute %', f; end if;
   end loop;
@@ -63,6 +63,13 @@ begin
   if has_function_privilege('lc_action_gateway', 'action_gateway.lead_event_ids(jsonb,uuid,text,text,uuid)', 'EXECUTE') or has_function_privilege('lc_action_gateway', 'action_gateway.campaign_target_of(text,text)', 'EXECUTE') then
     raise exception 'B: the role reaches an internal helper';
   end if;
+  -- E. the R2 runtime emergency stop refuses every seller-facing send at request time (reply and offer included)
+  update agent.runtime_limits set emergency_stop = true, emergency_stop_at = now() where id = 1;
+  if action_gateway.t34_capability_refusal('queue_authorized_reply') is distinct from 'EMERGENCY_STOP_ACTIVE'
+     or action_gateway.t34_capability_refusal('execute_authorized_offer') is distinct from 'EMERGENCY_STOP_ACTIVE'
+     or action_gateway.t34_capability_refusal('queue_agent_message') is distinct from 'EMERGENCY_STOP_ACTIVE' then raise exception 'E: R2 does not refuse a seller-facing send'; end if;
+  if action_gateway.t34_capability_refusal('record_seller_counteroffer') is not null then raise exception 'E: recording a counter is not a send'; end if;
+  update agent.runtime_limits set emergency_stop = false, emergency_stop_at = null where id = 1;
   raise notice 'posttest: registry, roles, confinement and the feed hold';
 end $$;
 rollback;

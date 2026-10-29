@@ -16,6 +16,7 @@ import { simProvider, lawfulNowIso } from '../helpers/followup-lifecycle-pg.mjs'
 import { fakeProvider } from '../helpers/conversation-ai-runtime-fakes.mjs'
 import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
 import { seedT34, agent, worker, receipt, liveDispatch, dispatchQueued, setControls, sel, crypto, OURS } from '../helpers/action-gateway-t34-world.mjs'
+import { seedThread, OPERATOR, SELLER } from '../helpers/action-gateway-pg.mjs'
 
 const skip = pgAvailable() ? false : skipReason
 __setAutomationHoldResolverForTests(null)
@@ -43,7 +44,7 @@ const switches = ({ threads = [LEAD_A], agentPolicy = {} } = {}) => ({
   ai_agent_message_enabled: 'true', ai_agent_message_policy: JSON.stringify({ enabled: true, fallback_templates: { reengage: ['t-csfu-en-1'], followup: ['t-csfu-en-1'] }, ...agentPolicy }),
 })
 
-const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['events.read', 1], ['conversation.read_message_templates', 1], ['leads.read_pool', 1]]
+const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['events.read', 1], ['conversation.read_message_templates', 1], ['leads.read_pool', 1], ['controls.read', 1]]
 /** An owner mints the standing seller-facing grant for agent messages (grants are immutable: a new grant, never an edit). */
 const mintStanding = (owner, { agent_id = 'agt_alpha', capability = 'conversation.queue_agent_message', tier = 3, basis = BASIS, leadCap = null } = {}) => owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis, agent_message_lead_day_cap)
@@ -532,5 +533,43 @@ test('PG agent message: the feed carries the lead\'s ids — property_id (encode
     const a = await env.owner.query(`select public.lc_lead_event_append('inbound_message', 'm-ids-1', $1, null, '{"message_id":"m-ids-1","stop_request":false}'::jsonb, now()) r`, [LEAD_A])
     const [inb] = await sel(env.owner, `select thread_id, payload from action_gateway.lead_events where cursor = $1`, [a.rows[0].r.cursor])
     assert.deepEqual([inb.thread_id, inb.payload.property_id, inb.payload.campaign_target_id], [thread.id, ref(PID(3)), lead.campaign_target_id])
+  } finally { await env.db.drop() }
+})
+
+test('PG agent message: send controls — the R2 stop, the queue stop and the switches as an agent sees them (no identities); under R2 the certified reply is refused at request time like the agent message', { skip }, async () => {
+  const { env, cred, lead, gateway } = await world({ sw: switches({ threads: [LEAD_A, SELLER] }) })
+  try {
+    const t = await seedThread(env.owner, { phone: SELLER, inboundBody: 'Yes I still own it. Is the roof a problem?' })
+    const replier = await agent(env, { agent_id: 'agt_reply', grants: [['conversation.queue_reply', 3], ['controls.read', 1]], tier_ceiling: 3 })
+    const c0 = await call(gateway, cred, 'send_controls', {})
+    assert.equal(c0.ok, true, JSON.stringify(c0))
+    assert.deepEqual([c0.result.runtime_emergency_stop.on, c0.result.send_emergency_stop.on, c0.result.ai_send_enabled, c0.result.agent_message_enabled, c0.result.agent_message_refusal, c0.result.queue_processor_mode, c0.result.seller_sends],
+      [false, false, true, true, null, 'live', 'enabled'])
+    const before = await call(gateway, replier, 'queue_authorized_reply', { client_request_id: 'r2-reply-0001', thread_id: t.thread_id })
+    assert.equal(before.code, 'TIER_REQUIRES_APPROVAL', JSON.stringify(before))
+    // the operator engages the R2 runtime emergency stop (as the ops console does: a named operator)
+    const stop = (await env.owner.query(`select agent.runtime_emergency_stop($1, 'reviewing a misfire') r`, [OPERATOR])).rows[0].r
+    assert.equal(stop.ok, true)
+    const c1 = await call(gateway, cred, 'send_controls', {})
+    assert.deepEqual([c1.result.runtime_emergency_stop.on, c1.result.runtime_emergency_stop.reason_code, c1.result.runtime_emergency_stop.set_by_role, c1.result.agent_message_refusal, c1.result.seller_sends],
+      [true, 'operator_emergency_stop', 'operator', 'EMERGENCY_STOP_ACTIVE', 'stopped'])
+    assert.ok(Date.parse(c1.result.runtime_emergency_stop.at) > 0)
+    assert.ok(!JSON.stringify(c1).includes(OPERATOR) && !JSON.stringify(c1).includes('misfire'), 'no operator identity, no free-text reason')
+    for (const [who, tool, args] of [[replier, 'queue_authorized_reply', { client_request_id: 'r2-reply-0002', thread_id: t.thread_id }],
+      [cred, 'queue_agent_message', { client_request_id: 'r2-am-00001', campaign_target_id: lead.campaign_target_id, purpose: 'first_touch', brief: BRIEF }]]) {
+      const r = await call(gateway, who, tool, args)
+      assert.deepEqual([r.error?.code, r.error?.details?.reason], ['capability_unavailable', 'EMERGENCY_STOP_ACTIVE'], `${tool}: ${JSON.stringify(r)}`)
+    }
+    // the database refuses it too, whatever the gateway process believed (the authorization's own check)
+    assert.equal((await sel(env.owner, `select action_gateway.t34_capability_refusal('queue_authorized_reply') c`))[0].c, 'EMERGENCY_STOP_ACTIVE')
+    // cleared on the owner path: the reply is requestable again
+    await env.owner.query(`update agent.runtime_limits set emergency_stop = false, emergency_stop_at = null, emergency_stop_by = null, emergency_stop_reason = null where id = 1`)
+    assert.equal((await call(gateway, replier, 'queue_authorized_reply', { client_request_id: 'r2-reply-0003', thread_id: t.thread_id })).code, 'TIER_REQUIRES_APPROVAL')
+    // the queue stop is reported too
+    await setControls(env.owner, { queue_emergency_stop_at: new Date().toISOString() })
+    assert.equal((await call(gateway, cred, 'send_controls', {})).result.send_emergency_stop.on, true)
+    // the read needs its grant
+    const bare = await agent(env, { agent_id: 'agt_nocontrols', grants: [['events.read', 1]] })
+    assert.equal((await call(gateway, bare, 'send_controls', {})).ok, false)
   } finally { await env.db.drop() }
 })

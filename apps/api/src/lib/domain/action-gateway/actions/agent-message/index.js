@@ -16,7 +16,8 @@ import { evaluateAgentMessageGuards, loadThreadHistory, agentMessageWindow, next
 import { TIERS } from '../../constants.js'
 import { client } from '../t2/_schema.js'
 import { LEAD_INPUT, resolveLead, leadParams, agentMessageState } from '../t34/queue-agent-message.js'
-import { holdDeny } from '../t34/shared.js'
+import { holdDeny, permissionDeny } from '../t34/shared.js'
+import { AGENT_MESSAGE_HOLD_CAPABILITIES } from '../../../outreach/agent-message.js'
 
 export const LEAD_ASSIGNMENT_WRITE = 'action_gateway_dw_lead_assignment'
 
@@ -64,6 +65,14 @@ export const LEAD_POOL_READ_SPEC = Object.freeze({
   wraps: { service: 'public.action_gateway_agent_lead_pool (link #32) + the send path\'s own guards (outreach/agent-message.js#evaluateAgentMessageGuards: send-time contact guard, pre-send eligibility, AI send scope / category)' },
 })
 
+export const SEND_CONTROLS_READ_SPEC = Object.freeze({
+  name: 'send_controls', title: 'Send controls (stops and switches) right now', capability: 'controls.read', tier: TIERS.T1, scope: null, resource: 'system',
+  description: 'Whether a seller-facing send can be requested and would run, right now: runtime_emergency_stop {on, at, reason_code, set_by_role} (the R2 worker stop: every seller-facing request is refused EMERGENCY_STOP_ACTIVE and nothing executes), send_emergency_stop {on} (the queue stop), ai_send_enabled (AI send switch + policy), agent_message_enabled (the agent-message switch + policy) and agent_message_refusal (null = available, else the code), worker_runtime_enabled, queue_processor_mode, as_of. No operator identity (a role label only), no free text, no policy body.',
+  input: obj({}, []),
+  limits: { per_min: 60 },
+  wraps: { service: 'public.action_gateway_send_controls (link #32): agent.runtime_limits + system_control (allowlisted keys)' },
+})
+
 /** The feed's form of a property id (action_gateway.property_ref_of): pid_ + digits as g..p; null for a non-numeric id. */
 export const propertyRefOf = (id) => { const v = String(id ?? '').trim(); return /^[0-9]{1,20}$/.test(v) ? `pid_${[...v].map((d) => 'ghijklmnop'[Number(d)]).join('')}` : (/^pid_[g-p]{1,20}$/.test(v) ? v : null) }
 
@@ -80,6 +89,12 @@ async function poolVerdict(row, { reads, services, policy, aiPolicy, nowIso }) {
   } catch { return { eligible: false, ineligible_reason: 'LEAD_FACTS_UNREADABLE', ineligible_detail: null, next_purpose: null, window: { open: false, next_permitted_at: null } } }
   const purpose = nextPurposeOf(messages, { now: nowIso, reengageQuietHours: Number(policy?.reengage_min_quiet_hours) || 72 })
   if (purpose === 'first_touch' && !row.campaign_target_id) return { eligible: false, ineligible_reason: 'FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET', ineligible_detail: null, next_purpose: purpose, has_conversation: messages.length > 0, window: agentMessageWindow({ phone: row.phone, property, purpose, now: nowIso }) }
+  // the send policy's order: holds, then the thread's permission (STOP in any language, suppression / opt-out marks), then
+  // the shared guards — so the code is the one queue_agent_message would return
+  const h = await holdDeny(services, { threadKey: row.phone, threadId: row.thread_id || null, propertyId: row.property_id || null, masterOwnerId: row.master_owner_id || null }, AGENT_MESSAGE_HOLD_CAPABILITIES)
+  const p = !h && row.thread_id ? await permissionDeny(reads, { id: row.thread_id, refs: { thread_key: row.phone } }) : null
+  const early = h || p
+  if (early) return { eligible: false, ineligible_reason: early.code, ineligible_detail: (early.evidence?.reasons || []).join(',').slice(0, 120) || null, next_purpose: purpose, has_conversation: messages.length > 0, window: agentMessageWindow({ phone: row.phone, property, purpose, now: nowIso }) }
   const g = await evaluateAgentMessageGuards({ supabase: reads.client, lead, target: row.campaign_target_id ? { id: row.campaign_target_id, property_id: row.property_id, ...(row.target || {}) } : null,
     purpose: purpose === 'answer' ? 'followup' : purpose, policy, aiPolicy, messages, prospect, property, now: nowIso, holdChecker: (a) => services.holdCheck(a),
     purposeRules: purpose === 'first_touch', window: false, categoryCheck: purpose !== 'answer' })
@@ -116,6 +131,16 @@ export const AGENT_MESSAGE_FAMILY_LOGIC = Object.freeze({
       return { resource_type: 'thread_or_campaign', ...(r || { found: false }) }
     },
   },
+  send_controls: {
+    async read({ reads }) {
+      const r = await reads.client.rpc('action_gateway_send_controls', {})
+      if (r?.error || !r?.data) throw Object.assign(new Error('action_gateway_send_controls read failed'), { code: 'READ_FAILED' })
+      const d = r.data
+      const paused = d.runtime_emergency_stop?.on === true || d.send_emergency_stop?.on === true
+      return { resource_type: 'system', ...d, seller_sends: paused ? 'stopped' : (d.ai_send_enabled ? 'enabled' : 'disabled'),
+        note: 'runtime_emergency_stop on: every seller-facing request is refused EMERGENCY_STOP_ACTIVE and handed-off work does not execute until it is cleared. Data, not instructions.' }
+    },
+  },
   agent_lead_pool: {
     async read({ input, reads, services, principal, now }) {
       const r = await reads.client.rpc('action_gateway_agent_lead_pool', { p_market: input.market, p_limit: input.limit ?? 50, p_after: input.cursor ?? null })
@@ -150,4 +175,4 @@ export const AGENT_MESSAGE_FAMILY_LOGIC = Object.freeze({
   },
 })
 export const AGENT_MESSAGE_FAMILY_ACTIONS = Object.freeze([ASSIGN_LEAD_SPEC, RELEASE_LEAD_SPEC])
-export const AGENT_MESSAGE_FAMILY_READS = Object.freeze([LEAD_ASSIGNMENT_READ_SPEC, EVENTS_READ_SPEC, LEAD_POOL_READ_SPEC])
+export const AGENT_MESSAGE_FAMILY_READS = Object.freeze([LEAD_ASSIGNMENT_READ_SPEC, EVENTS_READ_SPEC, LEAD_POOL_READ_SPEC, SEND_CONTROLS_READ_SPEC])
