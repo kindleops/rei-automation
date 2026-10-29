@@ -499,9 +499,18 @@ function oneEditApart(a, b) {
   }
   return true;
 }
+// SMS shorthand read as the words it stands for ("pls dont txt this # agian" is "don't text this number again"):
+// an opt-out written in shorthand is still an opt-out
+const SMS_SHORTHAND = [
+  [/\btxt(s|ing|ed)?\b/gi, "text$1"],
+  [/\btxtin\b/gi, "texting"],
+  [/\b(this|that|my|the|ur|your)\s+#(?!\s*\d)/gi, "$1 number"],
+  [/\bag(?:ian|ain?n|n)\b/gi, "again"],
+]
 export function correctKeyMisspellings(message) {
-  const text = String(message ?? "");
+  let text = String(message ?? "");
   if (!/[a-z]/i.test(text)) return text;
+  for (const [re, to] of SMS_SHORTHAND) text = text.replace(re, to);
   return text.replace(/[A-Za-z]{5,}/g, (word) => {
     const w = word.toLowerCase();
     if (COMMON_WORDS.has(w) || KEY_WORDS.includes(w)) return word;
