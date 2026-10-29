@@ -32,6 +32,9 @@ __setAutomationHoldResolverForTests(null)
 const BASIS = 'owner decision 2026-10-29 (disposable test): agents send the texts they compose'
 const CLOCK = lawfulNowIso() // inside 09:00-19:00 Chicago: the scenarios never depend on the hour the suite runs
 const clockMs = () => Date.parse(CLOCK)
+// grants are minted at the database's now(); the gateway judges them at the frozen CLOCK, so they are valid from before both
+const VALID_FROM = new Date(Math.min(Date.now(), clockMs()) - 3_600_000).toISOString()
+const valid = (grants) => grants.map(([capability, tier, o]) => [capability, tier, { validFrom: VALID_FROM, ...(o || {}) }])
 const NIGHT = (() => { let t = Date.parse(CLOCK); const h = (ms) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hourCycle: 'h23' }).format(new Date(ms))); while (h(t) !== 2) t += 3_600_000; return t })()
 const LEAD_A = '+13125550171' // first-touch lead (no conversation)
 const ATTR = { employee: 'nova', model: 'claude-sonnet-x', provider: 'anthropic', route: 'agntei.acquisitions.representative', session_id: null, turn_id: 'turn-001' }
@@ -46,7 +49,7 @@ const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.rea
 /** An owner mints the standing seller-facing grant for agent texts (grants are immutable: a new grant, never an edit). */
 const mintStanding = (owner, { agent_id = 'agt_alpha', capability = 'conversation.queue_agent_text', tier = 3, basis = BASIS } = {}) => owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis)
-   values ($1, $2, $3, $4, '{}'::jsonb, '{}'::jsonb, 30, 200, 0, 5, 5, $5, now(), now() + interval '30 days', true, $6) returning grant_id`, [ORG, agent_id, capability, tier, OWNER, basis])
+   values ($1, $2, $3, $4, '{}'::jsonb, '{}'::jsonb, 30, 200, 0, 5, 5, $5, $7::timestamptz, now() + interval '30 days', true, $6) returning grant_id`, [ORG, agent_id, capability, tier, OWNER, basis, VALID_FROM])
 
 async function seedLead(env, { phone = LEAD_A, pid = 'p200', prospect = 'pr2', first = 'Maria', status = 'ready', identity = 'verified', market = 'Chicago' } = {}) {
   await env.owner.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address) values ($1, 'SFR', 'Chicago', 'IL', '60601', '18 Elm St') on conflict do nothing`, [pid])
@@ -64,10 +67,10 @@ async function world({ sw = switches(), standing = true, agents = ['agt_alpha'],
   await liveDispatch(env)
   const creds = {}
   for (const a of agents) {
-    creds[a] = await agent(env, { agent_id: a, grants: standing ? GRANTS : [...GRANTS, ['conversation.queue_agent_text', 3]] })
+    creds[a] = await agent(env, { agent_id: a, grants: valid(standing ? GRANTS : [...GRANTS, ['conversation.queue_agent_text', 3]]) })
     if (standing) await mintStanding(env.owner, { agent_id: a })
   }
-  if (supervisor) creds.agt_sterling = await agent(env, { agent_id: 'agt_sterling', grants: [...GRANTS, ['leads.transfer_lead', 2]] })
+  if (supervisor) creds.agt_sterling = await agent(env, { agent_id: 'agt_sterling', grants: valid([...GRANTS, ['leads.transfer_lead', 2]]) })
   const lead = await seedLead(env)
   const { gateway } = makeGateway(env, { now: clockMs, legacyComposer: false })
   const prov = noModel()

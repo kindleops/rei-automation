@@ -284,3 +284,15 @@ test('nothing on the agent path constructs a model client: the agent-text execut
     assert.ok(!/model-client|anthropic|composeAgentOutbound|decideAndCompose|runtime\/canonical/.test(fs.readFileSync(path.join(SRC, f), 'utf8')), f)
   }
 })
+
+test('a first touch may name the property LeadCommand holds: its street number and ZIP are known numbers; any other number is not', async () => {
+  const property = { property_id: '808100004', property_type: 'SFR', property_address: '2230 Wilder Ave', property_address_full: '2230 Wilder Ave, Honolulu, HI 96816', property_address_zip: '96816' }
+  const ok = v('Hi, this is Nova with Reivesti Home Buyers. Are you the owner of 2230 Wilder Ave in Honolulu?', { purpose: 'first_touch', messages: [], property })
+  assert.equal(ok.reasons.includes('content:unsupported_number'), false, ok.reasons.join(','))
+  assert.equal(v('Hi, this is Nova with Reivesti Home Buyers. Do you own a house in the 96816 area?', { purpose: 'first_touch', messages: [], property }).reasons.includes('content:unsupported_number'), false)
+  assert.ok(v('Hi, this is Nova with Reivesti Home Buyers. Are you the owner of 4410 Wilder Ave in Honolulu?', { purpose: 'first_touch', messages: [], property }).reasons.includes('content:unsupported_number'))
+  // the request-time gate reads the address columns (the execution path reads the whole row)
+  const { readFileSync } = await import('node:fs')
+  const ports = readFileSync(new URL('../../src/lib/domain/action-gateway/ports.js', import.meta.url), 'utf8')
+  assert.match(ports, /from\('properties'\)\.select\('[^']*property_address,property_address_full/)
+})

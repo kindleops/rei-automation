@@ -51,7 +51,7 @@ export function createGatewayReads({ db }) {
       return t || null
     },
     async property(id) {
-      const [p] = await rows(db.from('properties').select('property_id,property_type,property_address_city,property_address_state,property_address_zip,market').eq('property_id', String(id)).limit(1), 'property')
+      const [p] = await rows(db.from('properties').select('property_id,property_type,property_address,property_address_full,property_address_city,property_address_state,property_address_zip,market').eq('property_id', String(id)).limit(1), 'property')
       return p || null
     },
     async opportunity(id) {

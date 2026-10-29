@@ -135,7 +135,7 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
 
   // the shared outbound validator over the ledger (its writer-playbook style preferences are filtered out)
   const previousOutbound = [...thread].reverse().find((m) => m.direction === 'outbound')?.body || null
-  const knownNumbers = [...new Set([...thread.map((m) => m.body), clean(property?.property_address)].flatMap((b) => String(b || '').match(/[0-9]{3,}/g) || []))]
+  const knownNumbers = [...new Set([...thread.map((m) => m.body), clean(property?.property_address), clean(property?.property_address_full), clean(property?.property_address_zip)].flatMap((b) => String(b || '').match(/[0-9]{3,}/g) || []))]
   const author = cap(authorEmployee)
   const v = validateOutbound(t, { ledger, category: purpose, establishedPersona: author || establishedPersona || null, companyIdentity, previousOutbound, knownNumbers, firstName, replyLanguage })
   const allowedNames = new Set([author, cap(establishedPersona)].filter(Boolean).map((n) => n.toLowerCase()))
