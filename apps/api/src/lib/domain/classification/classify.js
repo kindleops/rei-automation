@@ -472,6 +472,8 @@ export function deriveReplySentiment(intents = {}) {
 const KEY_WORDS = [
   "interested", "interesting", "property", "properties", "proposal", "selling", "number", "owner", "offer",
   "price", "house", "wrong", "realtor", "investor", "wholesaler", "message", "texting",
+  // the opt-out keyword itself, one letter off ("unsubscibe pls"): blind evaluation v7, Z05
+  "unsubscribe",
 ];
 const COMMON_WORDS = new Set([
   "power", "other", "offers", "offered", "offset", "prices", "priced", "pricey", "prize", "pride", "owned", "owners",

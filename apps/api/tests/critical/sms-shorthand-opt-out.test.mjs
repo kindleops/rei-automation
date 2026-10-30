@@ -26,3 +26,10 @@ test('shorthand that is not an opt-out stays what it was', async () => {
     assert.notEqual(c.primary_intent, 'opt_out', t)
   }
 })
+
+test('a one-letter misspelling of "unsubscribe" is still an opt-out (blind evaluation v7, Z05)', async () => {
+  for (const t of ['unsubscibe pls', 'unsubcribe me', 'unsubscrbe', 'Unsubscibe']) {
+    const c = await classify(t, null, { heuristicOnly: true })
+    assert.ok(c.compliance_flag === 'stop_texting' || c.primary_intent === 'opt_out', `${t} → ${c.primary_intent}/${c.compliance_flag}`)
+  }
+})
