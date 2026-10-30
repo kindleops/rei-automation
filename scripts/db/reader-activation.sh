@@ -13,7 +13,9 @@
 #   EXPECTED_DB_HOST    the production host the owner expects (compared with the URL's host before anything runs)
 #   BACKUP_CONFIRMED    the timestamp of the platform backup / PITR point the owner confirmed (recorded, not checked)
 #   OUT                 where the evidence goes (default ./reader-activation-<UTC timestamp>)
-#   MODE=preflight      read-only checks only (the default); MODE=apply runs the preflight, then links 1–5
+#   MODE=preflight      read-only checks only (the default); MODE=apply runs the preflight, then the OUTSTANDING links
+#   LINK1_COMPLETION_APPROVED  the inventory fingerprint the owner approved for completing a partial/divergent link 1
+#                       (scripts/db/reader-reconcile.mjs prints it with exactly what completing link 1 would change)
 #
 # It stops at the first unexpected result. Each link runs in one transaction (ON_ERROR_STOP), so a failed link leaves
 # nothing of itself; links already applied stay, and their rollbacks (§5, reverse order) are printed.
@@ -43,15 +45,26 @@ log "files: the five reviewed links and their rollbacks are present"
 # ---- 1. read-only preflight (a read-only session: nothing can be written) ---------------------------------------------
 RO -c "select current_database(), current_user, version()" > "$OUT/identity.txt" || die "cannot connect read-only"
 log "identity: $(tr '\n' ' ' < "$OUT/identity.txt" | cut -c1-160)"
-[ "$(RO -c "select count(*) from pg_roles where rolname = 'lc_mcp_reader'")" = "0" ] || die "role lc_mcp_reader already exists: inspect it (its attributes and grants) before going on"
-pre=$(RO -c "select string_agg(f, ', ') from unnest(array['public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)','public.lc_mcp_lead_conversation(text,uuid,integer,timestamp with time zone,text,integer)','public.lc_mcp_corpus_census(text)','public.lc_mcp_lead_screen(text,integer,text,text)','public.lc_mcp_thread_contact_eligibility(uuid)','public.lc_mcp_reader_self_check(text[],text[],name)']) f where to_regprocedure(f) is not null")
-[ -z "$pre" ] || die "functions these links create already exist in production: $pre"
-# the two egress helpers link 1 also defines: if production has them (from the action_gateway link), record who may
-# execute them now, because link 1 replaces them and revokes EXECUTE from public, anon, authenticated and service_role
-RO -c "select p.oid::regprocedure, coalesce(p.proacl::text, '(default)') from pg_proc p where p.oid in (to_regprocedure('public.lc_reachable_egress_indirect(oid)'), to_regprocedure('public.lc_egress_platform_allowlists()'))" > "$OUT/egress-helpers-before.txt"
-if [ -s "$OUT/egress-helpers-before.txt" ] && grep -qE 'service_role=X|authenticated=X|anon=X|=X/' "$OUT/egress-helpers-before.txt" && [ "${ACK_EGRESS_HELPER_REVOKE:-}" != "1" ]; then
-  die "the egress helpers exist with EXECUTE for other roles ($(tr '\n' ' ' < "$OUT/egress-helpers-before.txt")); link 1 would revoke it. Confirm nothing calls them, then re-run with ACK_EGRESS_HELPER_REVOKE=1"
-fi
+# reconcile what production already holds with the reviewed files (read-only catalog metadata; nothing is dropped,
+# revoked or replaced to force an apply): scripts/db/reader-reconcile.sql + .mjs
+RO -f "$here/scripts/db/reader-reconcile.sql" > "$OUT/inventory.json" || die "the reconciliation inventory could not be read"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory.json" > "$OUT/reconciliation.md"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory.json" --json > "$OUT/reconciliation.json"
+v() { python3 -c "import json,sys;print(json.load(open('$OUT/reconciliation.json'))['verdict']['$1'])"; }
+FP=$(python3 -c "import json;print(json.load(open('$OUT/reconciliation.json'))['production']['fingerprint'])")
+log "reconciliation (inventory $FP): link1 $(v 1), link2 $(v 2), link3 $(v 3), link4 $(v 4), link5 $(v 5); report: reconciliation.md"
+TODO=(); seen_absent=0
+for i in 1 2 3 4 5; do st=$(v $i); l=${LINKS[$((i-1))]}
+  case "$st" in
+    identical) [ $seen_absent = 1 ] && die "link $i is already in production but an earlier link is not: out of order, review reconciliation.md"; log "link $i already in production exactly as reviewed: not re-applied";;
+    absent) seen_absent=1; TODO+=("$l");;
+    partial|divergent)
+      if [ $i = 1 ] && [ "${LINK1_COMPLETION_APPROVED:-}" = "$FP" ]; then
+        log "link 1 is $st; the owner approved completing it for exactly this inventory ($FP): the reviewed link 1 is applied (its effects are listed in reconciliation.md)"; seen_absent=1; TODO+=("$l")
+      else die "link $i is $st in production: nothing is applied. The owner reviews reconciliation.md$([ $i = 1 ] && echo "; to complete link 1 exactly as listed there, set LINK1_COMPLETION_APPROVED=$FP")"; fi;;
+    *) die "link $i: unexpected verdict $st";;
+  esac; done
+[ ${#TODO[@]} -gt 0 ] || { log "every reader link is already in production as reviewed: nothing to apply"; }
 # baseline: the roles, the schema, and the row count of every relation the reader may read (plus §4.2's)
 RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-before.txt"
 # pg_dump must match the server's major version (PG_DUMP overrides; /usr/lib/postgresql/<major>/bin is tried first)
@@ -65,10 +78,10 @@ counts() { for t in $rels inbox_thread_state messages message_events send_queue 
   printf '%s\t%s\n' "$t" "$n"; done | sort -u; }
 counts > "$OUT/counts-before.tsv"; log "baseline: $(wc -l < "$OUT/counts-before.tsv") relations counted; roles and schema recorded"
 grep -q $'\terror$' "$OUT/counts-before.tsv" && die "a baseline count failed (see counts-before.tsv)"
-[ "$MODE" = "apply" ] || { log "preflight passed (read-only). Re-run with MODE=apply to apply links 1–5."; exit 0; }
+[ "$MODE" = "apply" ] || { log "preflight passed (read-only). Outstanding: ${TODO[*]:-none}. Re-run with MODE=apply to apply exactly those."; exit 0; }
 [ -n "${BACKUP_CONFIRMED:-}" ] || die "BACKUP_CONFIRMED is not set: confirm the platform backup / PITR point first (§4.1)"
 # ---- 2. apply links 1–5, in order, one transaction each ---------------------------------------------------------------
-for l in "${LINKS[@]}"; do t0=$(date +%s%3N)
+for l in "${TODO[@]}"; do t0=$(date +%s%3N)
   P --single-transaction -f "$M/$l.sql" > "$OUT/$l.log" 2>&1 || { tail -5 "$OUT/$l.log" | tee -a "$OUT/activation.log"; die "$l failed (rolled back as one transaction)"; }
   APPLIED+=("$l"); log "applied $l ($(( $(date +%s%3N) - t0 )) ms)"; done
 # ---- 3. validation (§7), read-only enforcement, unchanged data ---------------------------------------------------------
@@ -96,4 +109,9 @@ diff "$OUT/counts-before.tsv" "$OUT/counts-after.tsv" > "$OUT/counts-diff.txt" |
 log "data unchanged: every counted relation has the same row count before and after"
 RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-after.txt"
 diff "$OUT/roles-before.txt" "$OUT/roles-after.txt" | grep -E '^[<>]' | grep -v 'lc_mcp_reader' && die "roles other than lc_mcp_reader changed"
-log "DONE: links 1–5 applied and validated. Next: mint the reader token (docs/LEADCOMMAND-MCP-1.0.md §4.2) into a 0600 file and start the reader (runbook Phase 2)."
+# after: every link must now be in production exactly as reviewed
+RO -f "$here/scripts/db/reader-reconcile.sql" > "$OUT/inventory-after.json" || die "the post-apply inventory could not be read"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory-after.json" > "$OUT/reconciliation-after.md"; rc=$?
+[ $rc = 0 ] && grep -q "link 5: ALREADY IN PRODUCTION" "$OUT/reconciliation-after.md" || die "after the apply, a reader link is not exactly as reviewed (reconciliation-after.md)"
+log "post-apply reconciliation: links 1–5 are all in production exactly as reviewed"
+log "DONE: applied ${TODO[*]:-nothing (all were already in production)}. Next: mint the reader token (docs/LEADCOMMAND-MCP-1.0.md §4.2) into a 0600 file and start the reader (runbook Phase 2)."
