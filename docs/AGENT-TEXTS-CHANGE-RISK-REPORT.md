@@ -82,7 +82,19 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 | `2f5bd21f` | The production-copy rehearsal tool, runbook, tests and synthetic proof (`scripts/db/prod-copy-rehearsal.mjs`, `docs/PRODUCTION-COPY-REHEARSAL.md`) | tooling; refuses any non-loopback or non-`lc_prodcopy_*` target |
 | `23f7716e` | "What has you thinking about selling?" is a motivation question, not an interest ask, so it is no longer refused as "already answered" once the seller showed interest. Asking again *whether* they would sell is still refused. | loosens one false-positive class; tested both ways |
 
-Suites on `23f7716e` are in `AGNTEI-ACQUISITIONS-CERTIFICATION.md` (agntau), with the scripted run, e2e and blind v9 run on these exact versions.
+| `95853cfc` | This section of the report | docs |
+| `f209fdc6` | Blind v9 run 3 false refusals, fixed by class. The disclosed-AI identity answer ("I'm Nova, an AI assistant with Reivesti Home Buyers…") may carry the one allowed ownership re-ask after "What is this about?". An owner's "not interested in lowball offers" is recorded as a lowball objection with conditional interest, not a decline (any other decline in the same message still counts). | loosens two false-positive classes; tested both ways |
+| `81b0a7e2` | Blind v10 run 1 false refusals (all eight judged compliant by the independent grader), fixed by class: <ul><li>"What's this regarding" and "who's asking" are identity questions;</li><li>an affirmative opening sentence answering our ownership question ("Correct. Inherited it…", "We do still own it") is the seller's ownership claim, never with a sale, a former or other owner, a representative or a question back;</li><li>"maybe selling in the fall" is conditional interest;</li><li>a no-reply follow-up may repeat the question the seller never answered, as LeadCommand's own follow-up templates do: only while the seller has sent nothing since, at most three asks in all, never the asking price;</li><li>"reply STOP and I won't text again" is true and is not refused (an unconditional no-further-contact promise still is).</li></ul> | loosens five false-positive classes; tested both ways; opt-out classification unchanged |
+
+**Safety replay.** Every text that LeadCommand refused in blind rounds v4–v10 was replayed through `81b0a7e2`, with the same inputs. The only texts whose verdict changed are ones those rounds' independent graders judged not safety-critical. No opt-out, non-owner, price, offer, hand-over or human claim passes.
+
+**Over-suppression (safe direction, unchanged).** LeadCommand's inbound classifier marked two objections as opt-outs (blind v10 W20 "…insultingly low cash offers dont bother", W22 "Honestly this sounds like a scam…"). Opt-out classification is deliberately not loosened. This is for the owner's review.
+
+Suites on `81b0a7e2`:
+- critical: 13,059 tests, the same 4 baseline failures;
+- PG files: 327 pass, 0 fail.
+
+The certification runs on these versions are recorded in `AGNTEI-ACQUISITIONS-CERTIFICATION.md` (agntau).
 
 ## Certification on the frozen versions (2026-10-30)
 
