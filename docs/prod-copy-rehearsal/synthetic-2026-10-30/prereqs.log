@@ -1,0 +1,2 @@
+2026-10-30T05:20:04.965Z required {"ledger":true,"link_26":true,"link_27":true,"link_28":true,"link_28_send_authority":true,"gateway_self_check":true,"relations":true}; not yet applied {"link_29":false,"link_31":false,"link_31_check":false}; reader {"reader_1_0":true,"reader_1_1_conversation_intel":false,"reader_1_2_corpus_census":false,"reader_1_3_acquisition_reads":false}; switches ok=true
+2026-10-30T05:20:04.975Z prereqs: pass (349 ms)
