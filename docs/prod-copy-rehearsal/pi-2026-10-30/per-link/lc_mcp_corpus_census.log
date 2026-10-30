@@ -1,0 +1,24 @@
+cluster: started (unix socket only) data=/tmp/lc-mt-pi/cluster-H0xaFA/data
+[lc_mcp_corpus_census] database lc_mt_lc_mcp_corpus_census_ee2e2dc3
+  ok  setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only) (35 ms)
+  ok  setup supabase-shim.sql (41 ms)
+  ok  setup lc_mcp_reader_supabase_emulation.sql (115 ms)
+  ok  setup PROPOSED_20261019150000_lc_mcp_reader.sql (99 ms)
+  ok  setup lc_mcp_conversation_intel_emulation.sql (52 ms)
+  ok  setup PROPOSED_20261026120000_lc_mcp_conversation_intel.sql (95 ms)
+  ok  setup lc_mcp_corpus_census_emulation.sql (45 ms)
+  ok  cycle 1: pretest PROPOSED_20261026150000_lc_mcp_corpus_census_pretest.sql (48 ms)
+  ok  cycle 1: pretest left no trace (fingerprint 448adbf47d5a1fa0)
+  ok  cycle 1: APPLY PROPOSED_20261026150000_lc_mcp_corpus_census.sql (82 ms)
+  ok  cycle 1: posttest PROPOSED_20261026150000_lc_mcp_corpus_census_posttest.sql (104 ms)
+  ok  ROLLBACK FILE PROPOSED_20261026150000_lc_mcp_corpus_census_rollback.sql (38 ms)
+  ok  rollback posttest PROPOSED_20261026150000_lc_mcp_corpus_census_rollback_posttest.sql (78 ms)
+  ok  rollback restored the pre-apply fingerprint 448adbf47d5a1fa0
+  ok  cycle 2 (re-apply): pretest PROPOSED_20261026150000_lc_mcp_corpus_census_pretest.sql (47 ms)
+  ok  cycle 2 (re-apply): pretest left no trace (fingerprint 448adbf47d5a1fa0)
+  ok  cycle 2 (re-apply): APPLY PROPOSED_20261026150000_lc_mcp_corpus_census.sql (89 ms)
+  ok  cycle 2 (re-apply): posttest PROPOSED_20261026150000_lc_mcp_corpus_census_posttest.sql (125 ms)
+[lc_mcp_corpus_census] PASS
+cluster: stopped
+
+run-migration-test: 1/1 PASS

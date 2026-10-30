@@ -1,0 +1,20 @@
+cluster: started (unix socket only) data=/tmp/lc-mt-pi/cluster-tLeo1m/data
+[ai_generated_outbound] database lc_mt_ai_generated_outbound_63eb2790
+  ok  setup supabase-shim.sql (43 ms)
+  ok  setup send_queue_live_baseline.sql (50 ms)
+  ok  setup PROPOSED_20261015130000_message_origin_ai_generated_messages.sql (50 ms)
+  ok  cycle 1: pretest PROPOSED_20261029090000_ai_generated_outbound_pretest.sql (41 ms)
+  ok  cycle 1: pretest left no trace (fingerprint 553fad6fd457acfa)
+  ok  cycle 1: APPLY PROPOSED_20261029090000_ai_generated_outbound.sql (47 ms)
+  ok  cycle 1: posttest PROPOSED_20261029090000_ai_generated_outbound_posttest.sql (52 ms)
+  ok  ROLLBACK FILE PROPOSED_20261029090000_ai_generated_outbound_rollback.sql (44 ms)
+  ok  rollback posttest PROPOSED_20261029090000_ai_generated_outbound_rollback_posttest.sql (46 ms)
+  ok  rollback restored the pre-apply fingerprint 553fad6fd457acfa
+  ok  cycle 2 (re-apply): pretest PROPOSED_20261029090000_ai_generated_outbound_pretest.sql (40 ms)
+  ok  cycle 2 (re-apply): pretest left no trace (fingerprint 553fad6fd457acfa)
+  ok  cycle 2 (re-apply): APPLY PROPOSED_20261029090000_ai_generated_outbound.sql (49 ms)
+  ok  cycle 2 (re-apply): posttest PROPOSED_20261029090000_ai_generated_outbound_posttest.sql (52 ms)
+[ai_generated_outbound] PASS
+cluster: stopped
+
+run-migration-test: 1/1 PASS

@@ -1,0 +1,50 @@
+ok   [chain] supabase-shim.sql (22 ms)
+ok   [base] supabase-shim.sql (24 ms)
+ok   [chain] lc_mcp_reader_supabase_emulation.sql (111 ms)
+ok   [base] lc_mcp_reader_supabase_emulation.sql (110 ms)
+ok   [chain] PROPOSED_20261019150000_lc_mcp_reader_pretest.sql (19 ms)
+ok   [chain] PROPOSED_20261019150000_lc_mcp_reader.sql (82 ms)
+ok   [chain] PROPOSED_20261019150000_lc_mcp_reader_posttest.sql (518 ms)
+ok   [chain] lc_mcp_conversation_intel_emulation.sql (32 ms)
+ok   [base] lc_mcp_conversation_intel_emulation.sql (32 ms)
+ok   [chain] PROPOSED_20261026120000_lc_mcp_conversation_intel_pretest.sql (19 ms)
+ok   [chain] PROPOSED_20261026120000_lc_mcp_conversation_intel.sql (69 ms)
+ok   [chain] PROPOSED_20261026120000_lc_mcp_conversation_intel_posttest.sql (130 ms)
+ok   [chain] lc_mcp_corpus_census_emulation.sql (27 ms)
+ok   [base] lc_mcp_corpus_census_emulation.sql (22 ms)
+ok   [chain] PROPOSED_20261026150000_lc_mcp_corpus_census_pretest.sql (21 ms)
+ok   [chain] PROPOSED_20261026150000_lc_mcp_corpus_census.sql (70 ms)
+ok   [chain] PROPOSED_20261026150000_lc_mcp_corpus_census_posttest.sql (89 ms)
+ok   [chain] lc_mcp_acquisition_reads_emulation.sql (47 ms)
+ok   [base] lc_mcp_acquisition_reads_emulation.sql (42 ms)
+ok   [chain] PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql (20 ms)
+ok   [chain] PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql (72 ms)
+ok   [chain] PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql (122 ms)
+ok   [chain] PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql (20 ms)
+ok   [chain] PROPOSED_20261030120000_lc_mcp_full_history.sql (22 ms)
+ok   [chain] PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql (39 ms)
+--- validation queries (doc section 7)
+ reader_role_safe | worklist | conversation | census | acquisition_reads | no_anon | full_history 
+------------------+----------+--------------+--------+-------------------+---------+--------------
+ t                | t        | t            | t      | t                 | t       | t
+(1 row)
+
+ all_history_total | page_rows 
+-------------------+-----------
+                 5 |         5
+(1 row)
+
+ok   [chain] PROPOSED_20261030120000_lc_mcp_full_history_rollback.sql (18 ms)
+ok   [chain] PROPOSED_20261030120000_lc_mcp_full_history_rollback_posttest.sql (64 ms)
+ok   [chain] PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql (18 ms)
+ok   [chain] PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql (55 ms)
+ok   [chain] PROPOSED_20261026150000_lc_mcp_corpus_census_rollback.sql (16 ms)
+ok   [chain] PROPOSED_20261026150000_lc_mcp_corpus_census_rollback_posttest.sql (55 ms)
+ok   [chain] PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback.sql (17 ms)
+ok   [chain] PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback_posttest.sql (74 ms)
+ok   [chain] PROPOSED_20261019150000_lc_mcp_reader_rollback.sql (35 ms)
+ok   [chain] PROPOSED_20261019150000_lc_mcp_reader_rollback_posttest.sql (25 ms)
+catalog after rollback 5..1: 4dfbe988d80e32ff ; same emulations, no link: 4dfbe988d80e32ff
+FINGERPRINT RESTORED
+failures: 0
+done

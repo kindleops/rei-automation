@@ -17,6 +17,8 @@
 -- the role's statement_timeout. The signatures, projections, SECURITY DEFINER, search_path and grants (create or
 -- replace keeps them: EXECUTE for lc_mcp_reader only) are unchanged. Nothing is written.
 
+set local lock_timeout = '5s';
+
 create or replace function public.lc_mcp_lead_conversation(
   p_property_id text, p_thread_id uuid, p_window_days integer, p_before_at timestamptz, p_before_id text, p_limit integer)
 returns jsonb

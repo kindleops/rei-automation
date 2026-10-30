@@ -1,0 +1,20 @@
+cluster: started (unix socket only) data=/tmp/lc-mt-pi/cluster-Dvxhrx/data
+[lc_mcp_reader] database lc_mt_lc_mcp_reader_c49d7fd8
+  ok  setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only) (36 ms)
+  ok  setup supabase-shim.sql (50 ms)
+  ok  setup lc_mcp_reader_supabase_emulation.sql (102 ms)
+  ok  cycle 1: pretest PROPOSED_20261019150000_lc_mcp_reader_pretest.sql (42 ms)
+  ok  cycle 1: pretest left no trace (fingerprint 1d6cbbc448ed5945)
+  ok  cycle 1: APPLY PROPOSED_20261019150000_lc_mcp_reader.sql (94 ms)
+  ok  cycle 1: posttest PROPOSED_20261019150000_lc_mcp_reader_posttest.sql (431 ms)
+  ok  ROLLBACK FILE PROPOSED_20261019150000_lc_mcp_reader_rollback.sql (44 ms)
+  ok  rollback posttest PROPOSED_20261019150000_lc_mcp_reader_rollback_posttest.sql (38 ms)
+  ok  rollback restored the pre-apply fingerprint 1d6cbbc448ed5945
+  ok  cycle 2 (re-apply): pretest PROPOSED_20261019150000_lc_mcp_reader_pretest.sql (43 ms)
+  ok  cycle 2 (re-apply): pretest left no trace (fingerprint 1d6cbbc448ed5945)
+  ok  cycle 2 (re-apply): APPLY PROPOSED_20261019150000_lc_mcp_reader.sql (109 ms)
+  ok  cycle 2 (re-apply): posttest PROPOSED_20261019150000_lc_mcp_reader_posttest.sql (476 ms)
+[lc_mcp_reader] PASS
+cluster: stopped
+
+run-migration-test: 1/1 PASS

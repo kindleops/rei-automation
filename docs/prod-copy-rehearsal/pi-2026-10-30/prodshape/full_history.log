@@ -1,0 +1,37 @@
+--- section 7 gateway validation on the copy, before link 5
+ gateway_self_check | link_29 | link_31 | no_standing_grants | agent_text_off 
+--------------------+---------+---------+--------------------+----------------
+ t                  | t       | t       | t                  | t
+(1 row)
+
+fingerprint before link 5: 4024e79a28f1ca86
+ok   pretest (15 ms)
+ok   pretest left no trace
+ok   APPLY full_history (19 ms)
+FAIL posttest (written for the runner's seeds)
+psql:/home/user/lc-hg/supabase/migrations/PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql:10: WARNING:  there is already a transaction in progress
+psql:/home/user/lc-hg/supabase/migrations/PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql:68: ERROR:  POSTTEST FAILED: B: P5 all history no_thread | B: P5 at 365 no_thread
+CONTEXT:  PL/pgSQL function inline_code_block line 56 at RAISE
+--- section 7 reader validation on the copy (all nine applied)
+ reader_role_safe | worklist | conversation | census | acquisition_reads | no_anon | full_history 
+------------------+----------+--------------+--------+-------------------+---------+--------------
+ t                | t        | t            | t      | t                 | t       | t
+(1 row)
+
+ all_history_total | page_rows 
+-------------------+-----------
+                 9 |         9
+(1 row)
+
+ gateway_self_check | link_29 | link_31 | no_standing_grants | agent_text_off 
+--------------------+---------+---------+--------------------+----------------
+ t                  | t       | t       | t                  | t
+(1 row)
+
+ok   ROLLBACK full_history (17 ms)
+ok   rollback posttest (17 ms)
+fingerprint after rollback: 4024e79a28f1ca86
+ok   FINGERPRINT RESTORED
+ok   re-apply pretest (16 ms)
+ok   RE-APPLY full_history (17 ms)
+ t                | t        | t            | t      | t                 | t       | t

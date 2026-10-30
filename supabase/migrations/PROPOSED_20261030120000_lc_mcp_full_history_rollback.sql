@@ -2,6 +2,8 @@
 -- lc_mcp_conversation_worklist (1..365 days) return to their definitions in
 -- PROPOSED_20261026120000_lc_mcp_conversation_intel.sql, byte for byte.
 
+set local lock_timeout = '5s';
+
 create or replace function public.lc_mcp_lead_conversation(
   p_property_id text, p_thread_id uuid, p_window_days integer, p_before_at timestamptz, p_before_id text, p_limit integer)
 returns jsonb
