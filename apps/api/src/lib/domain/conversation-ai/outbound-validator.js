@@ -44,7 +44,8 @@ const ATTRIBUTION_TOPICS = [
   ['ownership', /\b(?:own|owner|yours|title)\b/i, (v) => ['confirmed', 'representative'].includes(v)],
   ['asking_price', /\b(?:price|number|asking|\$|[0-9]+k)\b/i, (v) => v != null],
   ['condition', /\b(?:repair|roof|condition|work|fix|hvac|foundation|update)\w*/i, (v) => v != null],
-  ['timeline', /\b(?:close|closing|timeline|move|soon|month|week|november|december|spring|summer|fall|winter)\b/i, (v) => v != null],
+  // \"you mentioned maybe later in the year\" names a timeline (blind evaluation v7, Z47): still checked against the ledger
+  ['timeline', /\b(?:close|closing|timeline|move|soon|later|month|year|week|november|december|spring|summer|fall|winter)\b/i, (v) => v != null],
   ['seller_interest', /\b(?:sell|selling|interested|open\s+to)\b/i, (v) => v != null],
 ]
 export function unsupportedAttribution(text, ledger) {
