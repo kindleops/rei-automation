@@ -6,7 +6,7 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 
 **Branch:** `feat/hidden-gold-operations`. It shares no history with `origin/main`. Its real base is `origin/feat/lc-conversation-intelligence` (pushed).
 
-**The review range** is `origin/feat/lc-conversation-intelligence..HEAD`:
+**The review range** is `origin/feat/lc-conversation-intelligence..HEAD` (46 commits, frozen at `029bcc8c` for re-certification):
 - the Operation Hidden Gold links (#29, #30) and their acceptance world;
 - the agent-text architecture: Agntei composes, LeadCommand validates and transports;
 - the gates found by seven blind evaluation rounds and six real-model end-to-end attempts;
