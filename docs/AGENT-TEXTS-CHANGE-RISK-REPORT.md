@@ -71,6 +71,19 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 - **B's** rollback leaves #26's authority CHECK `NOT VALID` if standing authorizations exist (they stay as history).
 - `agent_text_*` ledger rows survive a rollback.
 
+## After the pushed review range: local commits awaiting push approval (2026-10-30, owner's next phase)
+
+`origin/review/agntei-agent-texts` stops at `edad38e6`. These commits sit on top of it, locally only:
+
+| Commit | Change | Direction |
+|---|---|---|
+| `9e89c40c` | `docs/AGENT-TEXTS-DIFF-AUDIT.md`: the exact diff and migration audit | docs |
+| `1facad3f` | Conversational ownership and timelines in the fact ledger. "Yes still mine" and "Still own it" are read as the seller's **claim**, and only as the opening clause of an answer to our ownership question; the per-property recontact guard reads them the same way. "This winter", "by December" and "in the spring" are recorded as stated: a period is resolved only from the message timestamp (and the time zone at month edges), to a month or season, never a day. Ambiguity is kept, urgency is never set, and past contexts are dropped. "You mentioned checking back after the holidays" is allowed after the holidays have passed. | loosens three false-positive classes; tested both ways; opt-out, suppression and identity are unchanged and tested |
+| `2f5bd21f` | The production-copy rehearsal tool, runbook, tests and synthetic proof (`scripts/db/prod-copy-rehearsal.mjs`, `docs/PRODUCTION-COPY-REHEARSAL.md`) | tooling; refuses any non-loopback or non-`lc_prodcopy_*` target |
+| `23f7716e` | "What has you thinking about selling?" is a motivation question, not an interest ask, so it is no longer refused as "already answered" once the seller showed interest. Asking again *whether* they would sell is still refused. | loosens one false-positive class; tested both ways |
+
+Suites on `23f7716e` are in `AGNTEI-ACQUISITIONS-CERTIFICATION.md` (agntau), with the scripted run, e2e and blind v9 run on these exact versions.
+
 ## Certification on the frozen versions (2026-10-30)
 
 LeadCommand code at `c0f62de4`, with agntei at `9ed43f1`. Every result below used a disposable world and the SIMULATED provider.
