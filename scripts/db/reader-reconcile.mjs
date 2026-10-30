@@ -53,15 +53,40 @@ else {
   const bad = attrs.filter((a) => pr[a] !== er[a]);
   add(1, 'role lc_mcp_reader attributes', bad.length ? 'divergent' : 'identical', bad.length ? bad.map((a) => `${a}=${pr[a]} (reviewed: ${er[a]})`).join(', ') : 'NOLOGIN, NOINHERIT, no superuser/createdb/createrole/replication/BYPASSRLS');
   const memberOf = JSON.stringify(pr.member_of ?? []); add(1, 'role lc_mcp_reader is a member of', memberOf === JSON.stringify(er.member_of ?? []) ? 'identical' : 'divergent', memberOf);
-  const members = new Set(pr.members ?? []); const wantMembers = new Set(er.members ?? []);
-  const missingM = [...wantMembers].filter((m) => !members.has(m)); const extraM = [...members].filter((m) => !wantMembers.has(m));
-  add(1, 'roles that may SET ROLE lc_mcp_reader', missingM.length || extraM.length ? 'divergent' : 'identical', `production: ${[...members].join(', ') || 'none'}${missingM.length ? `; missing: ${missingM.join(', ')}` : ''}${extraM.length ? `; extra: ${extraM.join(', ')}` : ''}`);
+  // Memberships IN lc_mcp_reader, pinned exactly (docs/READER-RECONCILIATION-PLAN.md §7). Link 1 grants the role to
+  // authenticator (PostgREST switches to it per request: SET only). On Supabase, `postgres` runs link 1 as a
+  // non-superuser with CREATEROLE, so PostgreSQL 16+ also records its automatic creator self-grant: postgres ADMIN on
+  // the new role, granted by the bootstrap superuser, without INHERIT or SET (createrole_self_grant empty). It gives
+  // the reader nothing and postgres no read it lacks; it is compatible ONLY in exactly this shape. Anything else,
+  // another member, other options or another grantor, is divergent.
+  const PINNED = [
+    { member: 'authenticator', grantor: 'postgres', admin: false, inherit: false, set: true, why: 'link 1: GRANT lc_mcp_reader TO authenticator (PostgREST role switch)' },
+    { member: 'postgres', grantor: prod.bootstrap_superuser ?? '(bootstrap superuser)', admin: true, inherit: false, set: false, why: 'PostgreSQL 16+ automatic creator self-grant of CREATE ROLE by a CREATEROLE non-superuser (Supabase)' },
+  ];
+  const ms = pr.memberships;
+  if (!Array.isArray(ms)) {
+    add(1, 'memberships in lc_mcp_reader', (pr.members ?? []).join() === 'authenticator' ? 'identical' : 'divergent',
+      `inventory v1 has no grantor or options (members: ${(pr.members ?? []).join(', ') || 'none'}); re-run scripts/db/reader-reconcile.sql (v2) to verify them`);
+  } else {
+    const key = (m) => `${m.member}<-${m.grantor}`;
+    const seen = new Set();
+    for (const m of ms) {
+      const pin = PINNED.find((p) => p.member === m.member);
+      const ok = pin && prod.bootstrap_superuser && m.grantor === pin.grantor && m.admin === pin.admin && m.inherit === pin.inherit && m.set === pin.set
+        && (pin.member !== 'postgres' || (prod.createrole_self_grant ?? '') === '');
+      seen.add(m.member);
+      add(1, `membership ${key(m)} (admin ${m.admin}, inherit ${m.inherit}, set ${m.set})`, ok ? 'identical' : 'divergent',
+        ok ? `pinned: ${pin.why}` : pin ? `differs from the pinned ${pin.member}: grantor ${pin.grantor}, admin ${pin.admin}, inherit ${pin.inherit}, set ${pin.set}` : 'not a pinned membership');
+    }
+    for (const p of PINNED) if (!seen.has(p.member)) {
+      if (p.member === 'authenticator') { add(1, `membership authenticator<-postgres`, 'absent', 'link 1 grants it'); effects.push('GRANT lc_mcp_reader TO authenticator'); }
+      // postgres' self-grant exists only when postgres created the role; its absence (a superuser created it) is fine
+    }
+  }
   const ps = new Set(pr.settings ?? []); const es = er.settings ?? [];
   const missingS = es.filter((s) => !ps.has(s)); const extraS = [...ps].filter((s) => !es.includes(s));
   if (missingS.length) effects.push(`role lc_mcp_reader: ALTER ROLE SET ${missingS.join(', ')}`);
   if (extraS.length) effects.push(`role lc_mcp_reader: settings not in the reviewed file stay as they are (${extraS.join(', ')}); link 1 sets only its own`);
-  if (missingM.length) effects.push(`GRANT lc_mcp_reader TO ${missingM.join(', ')}`);
-  if (extraM.length) effects.push(`roles ${extraM.join(', ')} keep their membership (link 1 revokes none)`);
   add(1, 'role settings', missingS.length ? (ps.size ? 'divergent' : 'partial') : extraS.length ? 'divergent' : 'identical', `production: ${[...ps].join(', ') || 'none'}${missingS.length ? `; missing: ${missingS.join(', ')}` : ''}${extraS.length ? `; extra: ${extraS.join(', ')}` : ''}`);
 }
 

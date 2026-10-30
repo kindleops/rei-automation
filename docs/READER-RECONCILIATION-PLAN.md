@@ -116,3 +116,72 @@ MODE=apply BACKUP_CONFIRMED="<PITR time>" LINK1_COMPLETION_APPROVED=<fingerprint
    - run the activation with the backup confirmed (link 1 identical); or
    - approve the listed effects with the printed fingerprint; or
    - stop if anything is unexplained.
+
+## 7. The production inventory of 2026-10-30, and the one membership difference
+
+**The owner's run of `reader-reconcile.sql` (v1) against production found:**
+- **Link 1:** divergent for one reason only.
+  - All nine function signatures, definition hashes (the self-check is commit `53a09f86`, the reviewed one), configurations and ACLs match.
+  - The two existing reads carry the reader's EXECUTE.
+  - All 18 SELECT grants and the reader policies match.
+  - The role's attributes and settings match.
+- **Links 2–5:** absent.
+- **Migration history:** no reader rows.
+
+**The difference.** `lc_mcp_reader` has two members in production, where the first reference had one:
+
+| Member | Grantor | ADMIN | INHERIT | SET |
+|---|---|---|---|---|
+| `authenticator` | `postgres` | false | false | true |
+| `postgres` | `supabase_admin` | true | false | false |
+
+**Investigation: this is PostgreSQL 16+'s automatic creator self-grant, not a manual grant.**
+- When a role with CREATEROLE that is **not** a superuser runs `CREATE ROLE`, PostgreSQL 16+ grants the new role to its creator. That grant:
+  - has ADMIN OPTION;
+  - is recorded as granted by the **bootstrap superuser** (OID 10);
+  - carries INHERIT and SET only if `createrole_self_grant` asks for them (empty by default).
+- On Supabase, `postgres` is such a role and `supabase_admin` is the bootstrap superuser. Link 1 run as `postgres` therefore produces exactly the membership above.
+- The first reference inventories had been built as a real superuser, which receives no such grant. That is the only reason they differed.
+
+**Reproduced exactly on disposable PostgreSQL 17:**
+- `initdb -U supabase_admin`, then `postgres` created NOSUPERUSER CREATEROLE.
+- `CREATE ROLE` run as `postgres` gives the same two rows: same grantors, same options.
+- The whole of link 1, run as `postgres` on a Supabase-shaped database, gives them too.
+- The reference inventories in `reader-reconcile-expected/` are now built that way: Supabase platform roles by `supabase_admin`, every link by `postgres`. Their functions, ACLs, grants and policies are identical to the earlier references.
+
+**Why it is safe:**
+- The grant runs from `postgres` **to** the reader, not the reverse. `lc_mcp_reader` is a member of nothing and gains no privilege.
+- Without INHERIT, `postgres` does not inherit the reader's privileges. Without SET, it cannot `SET ROLE lc_mcp_reader`.
+- ADMIN lets `postgres` grant or revoke membership in the reader role. `postgres` could already do that as a CREATEROLE role. It is also the owner of the tables and functions concerned, so this adds no data access.
+- Revoking it is unnecessary. It would also break Supabase's own expectation that `postgres` administers the roles it creates. It is kept.
+
+**How the comparator recognizes it: pinned, not waived.** `reader-reconcile.mjs` now checks the memberships against an exact pinned set (inventory v2 records each membership's grantor and options):
+- `authenticator`: granted by `postgres`, ADMIN false, INHERIT false, SET true;
+- `postgres`: granted by the inventory's own bootstrap superuser, ADMIN true, INHERIT false, SET false, and only while `createrole_self_grant` is empty.
+
+Any other member, option or grantor is `divergent`. A v1 inventory, which cannot show options, is `divergent` whenever a member other than `authenticator` appears. Tested:
+- **Identical:** the production shape.
+- **Divergent:** SET on the self-grant; INHERIT on it; another grantor; ADMIN on `authenticator`; an extra member; a non-empty `createrole_self_grant`; a v1 inventory listing `postgres`.
+
+**A defect this found, now fixed.** The activation's post-apply checks used `SET ROLE lc_mcp_reader`. In production `postgres` holds the role without SET, so that would have failed, and the write probe would have mistaken the failure for a refused write.
+
+They now use privilege introspection only:
+- no INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES or TRIGGER on any `public` relation, directly or through PUBLIC;
+- no CREATE on `public`;
+- the reader's own `lc_mcp_reader_self_check` with link 4's full inventory.
+
+Nothing is granted to make them work. The reader's real reads are proven in Phase 2, through PostgREST with its own token.
+
+**Two further changes for production:**
+- A full `pg_dump` is optional, because `postgres` may lack SELECT on some `public` tables. The schema record is a catalog snapshot (every function with its definition hash and ACL, every relation with its ACL and RLS flag, every policy). After the apply, it must differ **only** by the applied links' own functions.
+- **Replica rehearsal, run as `postgres`, of the production state** (link 1 present with both memberships, links 2–5 absent):
+  - reconciliation: link 1 identical, links 2–5 absent;
+  - links 2–5 applied, link 1 not touched;
+  - validation all true, and the self-check passes (20 relations, 20 functions) with no write privilege anywhere;
+  - row counts unchanged; the catalog shows only the applied functions;
+  - post-apply reconciliation identical for all five;
+  - a second run applies nothing.
+
+**Next: revalidating production.** The owner's run used inventory v1, which records no membership grantor or options.
+1. Run `reader-reconcile.sql` (v2) once more, read-only, and share the JSON; the comparator confirms the pinned membership.
+2. Then the activation, which re-reads the v2 inventory itself in its read-only preflight, applies links 2–5 only with the backup confirmed.

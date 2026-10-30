@@ -33,6 +33,10 @@ role as (
   select r.rolname, r.rolcanlogin, r.rolinherit, r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, r.rolbypassrls,
          (select coalesce(jsonb_agg(m.rolname order by m.rolname), '[]') from pg_auth_members a join pg_roles m on m.oid = a.roleid where a.member = r.oid) as member_of,
          (select coalesce(jsonb_agg(m.rolname order by m.rolname), '[]') from pg_auth_members a join pg_roles m on m.oid = a.member where a.roleid = r.oid) as members,
+         -- inventory v2: each membership with its grantor and options (PostgreSQL 16+ columns)
+         (select coalesce(jsonb_agg(jsonb_build_object('member', m.rolname, 'grantor', g.rolname, 'admin', a.admin_option,
+                   'inherit', a.inherit_option, 'set', a.set_option) order by m.rolname, g.rolname), '[]')
+            from pg_auth_members a join pg_roles m on m.oid = a.member join pg_roles g on g.oid = a.grantor where a.roleid = r.oid) as memberships,
          (select coalesce(jsonb_agg(c order by c), '[]') from pg_db_role_setting s, unnest(s.setconfig) c where s.setrole = r.oid) as settings,
          shobj_description(r.oid, 'pg_authid') as comment
   from pg_roles r where r.rolname = 'lc_mcp_reader'),
@@ -58,7 +62,9 @@ mig as (
   from supabase_migrations.schema_migrations m
   where m.name ilike '%lc_mcp%' or m.name ilike '%reader%' or m.version in ('20261019150000','20261026120000','20261026150000','20261027130000','20261030120000'))
 select jsonb_build_object(
-  'inventory_version', 1,
+  'inventory_version', 2,
+  'bootstrap_superuser', (select rolname from pg_roles where oid = 10),
+  'createrole_self_grant', current_setting('createrole_self_grant', true),
   'taken_at', now(),
   'server_version', current_setting('server_version'),
   'database', current_database(),

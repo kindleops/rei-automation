@@ -67,11 +67,18 @@ for i in 1 2 3 4 5; do st=$(v $i); l=${LINKS[$((i-1))]}
 [ ${#TODO[@]} -gt 0 ] || { log "every reader link is already in production as reviewed: nothing to apply"; }
 # baseline: the roles, the schema, and the row count of every relation the reader may read (plus §4.2's)
 RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-before.txt"
-# pg_dump must match the server's major version (PG_DUMP overrides; /usr/lib/postgresql/<major>/bin is tried first)
+# the catalog snapshot (any role can read it): every public function with its definition hash, every relation with
+# its kind and RLS flag, every policy. After the apply only the applied links' functions may differ (§3 below).
+snap() { RO -c "select 'fn ' || p.oid::regprocedure::text || ' ' || md5(regexp_replace(pg_get_functiondef(p.oid), '\s+', ' ', 'g')) || ' ' || coalesce(p.proacl::text, '-') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind in ('f','p')
+  union all select 'rel ' || c.relname || ' ' || c.relkind::text || ' ' || c.relrowsecurity::text || ' ' || coalesce(c.relacl::text, '-') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p','v','m','f')
+  union all select 'pol ' || c.relname || ' ' || pol.polname || ' ' || pol.polcmd::text || ' ' || coalesce(pg_get_expr(pol.polqual, pol.polrelid), '-') from pg_policy pol join pg_class c on c.oid = pol.polrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'
+  order by 1" > "$OUT/.snap" || return 1; sort "$OUT/.snap"; rm -f "$OUT/.snap"; }
+snap > "$OUT/catalog-before.txt" && [ -s "$OUT/catalog-before.txt" ] || die "the catalog snapshot could not be read"
+# a full schema dump is extra evidence when this login may read every table (pg_dump of the server's major version)
 major=$(RO -c "select current_setting('server_version_num')::int / 10000")
 PG_DUMP=${PG_DUMP:-$( [ -x /usr/lib/postgresql/$major/bin/pg_dump ] && echo /usr/lib/postgresql/$major/bin/pg_dump || command -v pg_dump )}
-"$PG_DUMP" --schema-only --no-owner --schema=public "$PROD_ADMIN_URL" 2>"$OUT/pg_dump.err" | grep -vE '^(--|\\(un)?restrict )' > "$OUT/schema-before.sql"
-[ -s "$OUT/schema-before.sql" ] || die "schema dump refused ($(head -2 "$OUT/pg_dump.err" | tr '\n' ' ')): use a pg_dump of server major version $major (set PG_DUMP)"
+if "$PG_DUMP" --schema-only --no-owner --schema=public "$PROD_ADMIN_URL" 2>"$OUT/pg_dump.err" | grep -vE '^(--|\\(un)?restrict )' > "$OUT/schema-before.sql" && [ -s "$OUT/schema-before.sql" ]; then log "schema dump recorded"
+else log "schema dump not available to this login ($(head -1 "$OUT/pg_dump.err" | cut -c1-120)); the catalog snapshot is the schema record"; rm -f "$OUT/schema-before.sql"; fi
 rels=$(grep -oE "rels text\[\] := array\[[^]]*\]" "$M/${LINKS[0]}.sql" | grep -oE "'[a-z_0-9]+'" | tr -d "'" | sort -u)
 counts() { for t in $rels inbox_thread_state messages message_events send_queue system_control idempotency_ledger ai_generated_messages; do
   if [ "$(RO -c "select to_regclass('public.$t') is not null")" = "t" ]; then n=$(RO -c "select count(*) from public.$t" 2>/dev/null || echo error); else n=absent; fi
@@ -97,16 +104,33 @@ log "validation (role safe, worklist, conversation, census, acquisition reads, n
 [ "$v" = "t t t t t t t" ] || die "a validation check is false"
 w=$(RO -c "select count(*) from information_schema.role_table_grants where grantee = 'lc_mcp_reader' and privilege_type <> 'SELECT'")
 [ "$w" = "0" ] || die "lc_mcp_reader holds $w non-SELECT table privileges"
-# the reader's own write attempt must be refused (inside a transaction that is rolled back either way)
-probe=$(printf '%s\n' "$rels" | head -1)
-if P -c "begin; set local role lc_mcp_reader; delete from public.$probe where false; rollback;" > "$OUT/write-probe.txt" 2>&1; then die "the reader could run DELETE on public.$probe"; fi
-grep -q 'permission denied' "$OUT/write-probe.txt" || die "the write probe failed for another reason: $(head -2 "$OUT/write-probe.txt")"
-log "read-only enforcement: no non-SELECT grant; a DELETE as lc_mcp_reader is refused (permission denied)"
-page=$(RO -c "begin; set local role lc_mcp_reader; select (w->>'total') || ' total, ' || jsonb_array_length(w->'rows') || ' rows' from public.lc_mcp_conversation_worklist('recent_inbound', 0, null, null, null, 25) w; rollback;" | grep -v '^$' | head -1)
-log "all-history page as lc_mcp_reader: $page"
+# read-only enforcement by privilege introspection, never by switching role: on Supabase `postgres` holds the reader
+# role without SET (its PostgreSQL 16+ creator self-grant), and nothing here grants it. The reader's own reads are
+# proven in Phase 2, through PostgREST, with the reader's token.
+wr=$(RO -c "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p','v','m','f') and has_table_privilege('lc_mcp_reader', c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')")
+[ "$wr" = "0" ] || die "lc_mcp_reader may write to $wr relation(s) in public (directly or through PUBLIC)"
+[ "$(RO -c "select has_schema_privilege('lc_mcp_reader', 'public', 'CREATE')")" = "f" ] || die "lc_mcp_reader may CREATE in schema public"
+L4=$M/${LINKS[3]}.sql
+# the array literal of one inventory variable of link 4 (one line: "  <name> text[] := array[...];")
+arr() { python3 -c "import re,sys; m=re.search(r'^\s*$1 text\[\] := (array\[.*\]);\s*\$', open('$L4').read(), re.M); print(m.group(1) if m else 'NULL')"; }
+sc=$(RO -c "with o as (select array(select f from unnest($(arr optional_fns)) f where to_regprocedure(f) is not null) as opt)
+  select (r->>'ok') || ' ' || jsonb_array_length(r->'relations') || ' relations, ' || jsonb_array_length(r->'functions') || ' functions' || coalesce(', findings ' || nullif(r->>'findings', '[]'), '')
+  from o, lateral (select public.lc_mcp_reader_self_check($(arr rels), $(arr fns) || o.opt, 'lc_mcp_reader') as r) x")
+log "reader self-check (privilege introspection of lc_mcp_reader): $sc"
+case "$sc" in true*) ;; *) die "the reader self-check is not ok: $sc";; esac
+log "read-only enforcement: no write privilege on any public relation (direct or via PUBLIC), no CREATE on public, self-check ok"
+page=$(RO -c "select (w->>'total') || ' threads with a seller message on record (first page ' || jsonb_array_length(w->'rows') || ' rows)' from public.lc_mcp_conversation_worklist('recent_inbound', 0, null, null, null, 25) w" | head -1)
+log "all-history worklist (definer read, called by the owner): $page"
 counts > "$OUT/counts-after.tsv"
 diff "$OUT/counts-before.tsv" "$OUT/counts-after.tsv" > "$OUT/counts-diff.txt" || die "row counts changed (counts-diff.txt): investigate before anything else"
 log "data unchanged: every counted relation has the same row count before and after"
+snap > "$OUT/catalog-after.txt" && [ -s "$OUT/catalog-after.txt" ] || die "the post-apply catalog snapshot could not be read"
+removed=$(comm -23 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt"); added=$(comm -13 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt")
+allowed=$(for l in "${TODO[@]}"; do grep -oiE "create (or replace )?function public\.[a-z0-9_]+" "$M/$l.sql" | awk '{print $NF}' | sed 's/^public\.//'; done | sort -u)
+bad_removed=$(printf '%s\n' "$removed" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; echo "$k $n"; done)
+bad_added=$(printf '%s\n' "$added" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; [ "$k" = pol ] && printf '%s\n' "${TODO[@]}" | grep -q lc_mcp_reader$ && [ "$(echo "$rest" | cut -d' ' -f1)" = lc_mcp_reader_select ] && continue; [ "$k" = rel ] && printf '%s\n' "${TODO[@]}" | grep -q lc_mcp_reader$ && continue; echo "$k $n"; done)
+[ -z "$bad_removed$bad_added" ] || { printf 'removed or changed:\n%s\nadded or changed:\n%s\n' "$bad_removed" "$bad_added" > "$OUT/catalog-unexpected.txt"; die "the catalog changed beyond the applied links' own functions (catalog-unexpected.txt)"; }
+log "catalog: only the applied links' functions changed ($(printf '%s\n' "$added" | grep -c '^fn ') function entries added or replaced); no relation or policy changed"
 RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-after.txt"
 diff "$OUT/roles-before.txt" "$OUT/roles-after.txt" | grep -E '^[<>]' | grep -v 'lc_mcp_reader' && die "roles other than lc_mcp_reader changed"
 # after: every link must now be in production exactly as reviewed
