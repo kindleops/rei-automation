@@ -4,8 +4,9 @@
 //   * getEntityGraphDossier (via createQuickScanServices().dossier) — the same
 //     load GET /api/cockpit/entity-graph/property/:id performs;
 //   * the Quick Scan projections projectPropertyCore / projectOwnership /
-//     projectRecordedDocuments / projectSalesHistory (no names, no mailing,
-//     private lenders withheld, buyer KIND only);
+//     projectRecordedDocuments / projectSalesHistory (private lenders withheld,
+//     buyer KIND only); the recorded OWNER's names, holder kind and mailing
+//     address come separately as owner_identity (owner decision A8);
 //   * the research tool eg.distress_signals (graph flags, parcel, probate,
 //     preforeclosure, EG facts + the deterministic cross-source inconsistency
 //     rules findInconsistencies);
@@ -17,6 +18,7 @@ import { err } from '../errors.mjs'
 import { prov, missing } from '../provenance.mjs'
 import { num, clean, untrusted, dayOrNull, isoOrNull } from './common.mjs'
 import { keysetPage, PROPERTY_ANCHORS } from './facts-search.mjs'
+import { readOwnerIdentity } from './owner-identity.mjs'
 
 const spec = (name) => RESEARCH_TOOL_SPECS.find((s) => s.name === name)
 export const FACTS_WINDOW_DAYS = 7
@@ -77,7 +79,10 @@ export async function getProperty(input, svc, { now }) {
   const own = projectOwnership(dossier)
   const recorded = projectRecordedDocuments(dossier)
   const sales = projectSalesHistory(dossier)
-  const distress = await spec('eg.distress_signals').execute({ property_id: input.property_id }, { services: svc })
+  const [distress, ownerIdentity] = await Promise.all([
+    spec('eg.distress_signals').execute({ property_id: input.property_id }, { services: svc }),
+    readOwnerIdentity(svc.db, input.property_id, now),
+  ])
   const vendorAsOf = core.provenance.vendor_as_of
   return {
     property_id: core.property_id,
@@ -89,8 +94,9 @@ export async function getProperty(input, svc, { now }) {
     ownership: {
       owner_kind: own.owner_kind, owner_linked: own.owner_linked, is_corporate_owner: own.is_corporate_owner, out_of_state_owner: own.out_of_state_owner,
       ownership_years: own.ownership_years, owner_portfolio_count: own.owner_portfolio_count, linked_people_count: own.linked_people_count,
-      provenance: prov({ kind: 'derived', source: 'properties + master_owners (classifyHolder: owner KIND only, never names)', rule: 'entity-network-service#classifyHolder', as_of: vendorAsOf, now }),
+      provenance: prov({ kind: 'derived', source: 'properties + master_owners (classifyHolder: owner KIND)', rule: 'entity-network-service#classifyHolder', as_of: vendorAsOf, now }),
     },
+    owner_identity: ownerIdentity,
     recorded_documents: recorded.available
       ? {
           mortgages: cap(recorded.mortgages, 10).map((m) => ({ ...m, lender: untrusted(m.lender, 80) })),

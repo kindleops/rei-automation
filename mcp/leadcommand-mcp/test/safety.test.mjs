@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { connect, call, HAPPY } from './helpers.mjs'
-import { FIXTURE, FIXTURE_PHONES, FIXTURE_SECRET_NAMES, INJECTION } from '../fixtures/dataset.mjs'
+import { FIXTURE, FIXTURE_PHONES, FIXTURE_SECRET_NAMES, FIXTURE_OWNER_2, FIXTURE_OWNER_MAILING, INJECTION } from '../fixtures/dataset.mjs'
 import { redactString, redactDeep, containsSecret } from '../src/safety/redact.mjs'
 import { loadConfig, scrubEnv } from '../src/config.mjs'
 import { PROVENANCE_KINDS } from '../src/provenance.mjs'
@@ -46,19 +46,50 @@ test('provenance: every value group carries a known kind; missing is never 0', a
   } finally { await c.close() }
 })
 
-test('PII minimization: no fixture phone (any format), name, email or mailing value appears in any output', async () => {
+test('PII minimization: no fixture phone (any format) or email appears in any output; a name or mailing value only in the recorded owner_identity block', async () => {
   const c = await connect()
   try {
     for (const [name, r] of await allOutputs(c)) {
-      const text = JSON.stringify(r)
+      const full = JSON.stringify(r)
+      // owner decision A8: the recorded owner's names and mailing address are returned, in owner_identity only
+      const res = r.structuredContent?.result
+      const text = res && typeof res === 'object' && 'owner_identity' in res ? JSON.stringify({ ...r, structuredContent: { ...r.structuredContent, result: { ...res, owner_identity: null } }, content: null }) : full
       for (const p of FIXTURE_PHONES) {
-        assert.equal(text.includes(p), false, `${name} leaks ${p.slice(0, 4)}…`)
-        assert.equal(digits(text).includes(digits(p).slice(1)), false, `${name} leaks phone digits`)
+        assert.equal(full.includes(p), false, `${name} leaks ${p.slice(0, 4)}…`)
+        assert.equal(digits(full).includes(digits(p).slice(1)), false, `${name} leaks phone digits`)
       }
-      for (const n of FIXTURE_SECRET_NAMES) assert.equal(text.toLowerCase().includes(n.toLowerCase()), false, `${name} leaks a name / email`)
+      assert.equal(full.toLowerCase().includes(FIXTURE_SECRET_NAMES[2].toLowerCase()), false, `${name} leaks an email`)
+      for (const n of [...FIXTURE_SECRET_NAMES, FIXTURE_OWNER_2, FIXTURE_OWNER_MAILING]) assert.equal(text.toLowerCase().includes(n.toLowerCase()), false, `${name} leaks a name / email / mailing value outside owner_identity`)
       assert.equal(/@example\.test/.test(text), false)
       assert.equal(/pk-secret|pk-a|pk-b|pk-c/.test(text), false, `${name} leaks person keys`)
     }
+  } finally { await c.close() }
+})
+
+test('owner identity (owner decision A8): lead and property reads return the recorded owner — names, holder kind, mailing address — with provenance, listed untrusted; phones and emails stay withheld', async () => {
+  const c = await connect()
+  try {
+    for (const tool of ['leadcommand_get_lead', 'leadcommand_get_property']) {
+      const r = await call(c.client, tool, { property_id: 'FX1001' })
+      assert.notEqual(r.isError, true, JSON.stringify(r.structuredContent?.error))
+      const o = r.structuredContent.result.owner_identity
+      assert.deepEqual(o.names, [FIXTURE_SECRET_NAMES[0], FIXTURE_OWNER_2], `${tool}: owner_name and owner_2_name as recorded, one entry per distinct name`)
+      assert.deepEqual(o.entity_type, { recorded: 'individual', corporate: false }, `${tool}: the recorded owner_type, never guessed`)
+      assert.equal(o.mailing_address, FIXTURE_OWNER_MAILING)
+      assert.equal(o.provenance.kind, 'fact')
+      assert.match(o.provenance.source, /eg_property_facts/)
+      assert.match(o.contacts, /never returned/)
+      for (const f of ['result.owner_identity.names[]', 'result.owner_identity.mailing_address', 'result.owner_identity.entity_type.recorded']) assert.ok(r.structuredContent.untrusted_fields.includes(f), `${tool} lists ${f} as untrusted`)
+      const text = JSON.stringify(r)
+      for (const p of FIXTURE_PHONES) assert.equal(digits(text).includes(digits(p).slice(1)), false, `${tool} leaks phone digits`)
+      assert.equal(text.includes(FIXTURE_SECRET_NAMES[2]), false, `${tool} leaks an email`)
+      assert.equal(text.includes(FIXTURE_SECRET_NAMES[1]), false, `${tool} returns no prospect (skip-trace person) name`)
+    }
+    // a property with no owner fields recorded says so, never a guess
+    const none = (await call(c.client, 'leadcommand_get_property', { property_id: 'FX1003' })).structuredContent.result.owner_identity
+    assert.deepEqual(none.names, [FIXTURE_SECRET_NAMES[0]], 'owner_name alone is still the recorded owner')
+    assert.equal(none.mailing_address, null)
+    assert.equal(none.entity_type.recorded, null)
   } finally { await c.close() }
 })
 

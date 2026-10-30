@@ -352,6 +352,50 @@ test('ranking: explicit cited factors; opted-out excluded; blocked kept with a h
   } finally { await c.close() }
 })
 
+test('ranking traversal: every thread with a seller message, page by page (cursor or plain resume_after), each page fully scored', async () => {
+  const c = await connect()
+  try {
+    const one = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 30 }))
+    const want = new Set(one.ranked.map((x) => x.thread_id))
+    // a page of 2 threads at a time over the same filters: the cursor continues it, nothing is skipped or repeated
+    const args = { window_days: 1095, max_threads: 2, traverse: true }
+    const seen = []; let scanned = 0; let cursor = null; let pages = 0
+    do {
+      const r = await call(c.client, 'leadcommand_get_opportunity_ranking', cursor ? { ...args, cursor } : args)
+      assert.notEqual(r.isError, true, JSON.stringify(r.structuredContent?.error))
+      const res = result(r); const page = r.structuredContent.page
+      assert.equal(res.traverse, true)
+      assert.ok(res.scanned <= 2)
+      scanned += res.scanned; seen.push(...res.ranked.map((x) => x.thread_id))
+      assert.equal(page.has_more, Boolean(page.next_cursor))
+      assert.equal(Boolean(res.resume_after), page.has_more, 'the plain resume position goes with the cursor')
+      cursor = page.next_cursor; pages++
+    } while (cursor && pages < 10)
+    assert.equal(scanned, 4, 'every thread with a seller message was read once')
+    assert.equal(new Set(seen).size, seen.length, 'no thread twice')
+    assert.deepEqual(new Set(seen), want, 'the traversal scores exactly what the single batch ranks (opt-outs still excluded)')
+    // the same position given plainly resumes across processes (a cursor dies with the server)
+    const p1 = result(await call(c.client, 'leadcommand_get_opportunity_ranking', args))
+    const p2 = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 1095, max_threads: 2, resume_after: p1.resume_after }))
+    assert.equal(p2.traverse, true)
+    assert.equal(p1.scanned + p2.scanned, 4)
+    // both at once is refused; the window is bounded at 1095 days
+    const both = await call(c.client, 'leadcommand_get_opportunity_ranking', { ...args, resume_after: p1.resume_after, cursor: 'lc1.' + 'x'.repeat(20) + '.y' })
+    assert.equal(both.isError, true)
+    const wide = await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 1096 })
+    assert.equal(wide.isError, true)
+  } finally { await c.close() }
+  // (a fresh connection: the ranking is rate-limited per minute)
+  const d = await connect()
+  try {
+    // without traverse it stays ONE bounded batch: top N, no continuation
+    const top1 = await call(d.client, 'leadcommand_get_opportunity_ranking', { window_days: 30, top: 1 })
+    assert.equal(result(top1).ranked.length, 1)
+    assert.equal(top1.structuredContent.page.next_cursor, null)
+    assert.equal(result(top1).resume_after, null)
+  } finally { await d.close() }
+})
+
 test('commitments: our promise with no later outbound is due by its own words; overdue and undelivered are reported', async () => {
   const { commitmentReading } = await import('../src/adapters/conversation-evidence.mjs')
   const now = new Date('2026-10-14T12:00:00Z')

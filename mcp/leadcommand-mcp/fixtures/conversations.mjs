@@ -151,7 +151,7 @@ export const conversationRpc = {
   lc_mcp_conversation_worklist({ p_category, p_window_days = 30, p_market = null, p_after_at = null, p_after_id = null, p_limit = 10 }) {
     if (!['unanswered_inbound', 'recent_inbound', 'opted_out', 'identity_conflict', 'suppression_conflict'].includes(p_category)) refuse()
     if (p_market != null && String(p_market).length > 60) refuse()
-    if (p_limit < 1 || p_limit > 25 || p_window_days < 1 || p_window_days > 365 || (p_after_at == null) !== (p_after_id == null)) refuse()
+    if (p_limit < 1 || p_limit > 25 || p_window_days < 1 || p_window_days > 1095 || (p_after_at == null) !== (p_after_id == null)) refuse()
     const since = sinceOf(p_window_days)
     const props = (t) => new Set(messages.filter((m) => m.thread_key === t.thread_key && m.created_at >= since && m.property_id).map((m) => m.property_id)).size
     const match = (t) => t.last_inbound_at && t.last_inbound_at >= since && (!p_market || facts[t.property_id]?.market === p_market) && ({

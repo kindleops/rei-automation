@@ -108,10 +108,11 @@ export function createGateway({ tools, authorizer, source, auditor, limits, now 
       const payload = await (sessionGate ? sessionGate.run(run) : run())
       let result = payload
       let page
+      const rowsKey = tool.pageKey || 'rows'
       if (tool.paged) {
-        const { rows: r, has_more, last, ...rest } = payload
-        result = { rows: r, ...rest }
-        page = { limit: input.limit, returned: r.length, has_more: Boolean(has_more), next_cursor: has_more && last ? cursorCodec.encode({ tool: tool.name, filters, principal: who.user_id, after: last }) : null }
+        const { [rowsKey]: r, has_more, last, ...rest } = payload
+        result = { [rowsKey]: r, ...rest }
+        page = { limit: input.limit ?? input.max_threads, returned: r.length, has_more: Boolean(has_more), next_cursor: has_more && last ? cursorCodec.encode({ tool: tool.name, filters, principal: who.user_id, after: last }) : null }
         rows = r.length
       } else {
         rows = Array.isArray(payload?.rows) ? payload.rows.length : 1
@@ -136,10 +137,12 @@ export function createGateway({ tools, authorizer, source, auditor, limits, now 
       const size = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8')
       let final = env
       if (size(final) > max) {
-        if (!Array.isArray(env.result?.rows)) throw err('internal', `the result exceeded the ${max} byte response cap`, { code: 'RESPONSE_TOO_LARGE' })
-        const r = [...env.result.rows]
-        while (r.length && size({ ...env, result: { ...env.result, rows: r } }) > max) r.pop()
-        final = { ...env, result: { ...env.result, rows: r }, ...(page ? { page: { ...page, returned: r.length, truncated_for_size: true, next_cursor: null } } : {}) }
+        if (!Array.isArray(env.result?.[rowsKey])) throw err('internal', `the result exceeded the ${max} byte response cap`, { code: 'RESPONSE_TOO_LARGE' })
+        const r = [...env.result[rowsKey]]
+        // a plain resume position past the dropped rows would skip them: it goes with the cursor
+        const cut = (rr) => ({ ...env.result, [rowsKey]: rr, ...('resume_after' in env.result ? { resume_after: null } : {}) })
+        while (r.length && size({ ...env, result: cut(r) }) > max) r.pop()
+        final = { ...env, result: cut(r), ...(page ? { page: { ...page, returned: r.length, truncated_for_size: true, next_cursor: null } } : {}) }
         truncated = true
         rows = r.length
         if (size(final) > max) throw err('internal', `the result exceeded the ${max} byte response cap`, { code: 'RESPONSE_TOO_LARGE' })

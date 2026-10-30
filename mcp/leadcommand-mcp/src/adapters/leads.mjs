@@ -1,5 +1,6 @@
 // Leads. LeadCommand anchors a seller lead on its PROPERTY: the lead key is the
-// property_id (owner / prospect identities are never exposed). Lead state comes
+// property_id. The recorded owner (names, holder kind, mailing address) is returned as owner_identity (owner
+// decision A8); phones, emails and prospect / person keys are never exposed. Lead state comes
 // from two existing read paths:
 //   * eg_property_facts — the Entity Graph read model's lead columns
 //     (conversation / pipeline stage + status, last contact, SMS status,
@@ -15,6 +16,7 @@ import { prov, missing } from '../provenance.mjs'
 import { num, clean, untrusted, isoOrNull, read } from './common.mjs'
 import { keysetPage, LEAD_ANCHORS } from './facts-search.mjs'
 import { FACTS_WINDOW_DAYS } from './properties.mjs'
+import { readOwnerIdentity } from './owner-identity.mjs'
 
 export const LEAD_COLUMNS = 'property_id,market,property_address_city,property_address_state,zip_code,property_type,asset_type,conversation_stage,conversation_status,pipeline_stage,pipeline_status,deal_id,last_contact_at,last_contact_direction,last_message_at,campaign_count,latest_campaign_name,sms_status,scores_aos_score,scores_decision_tier,scores_computed_at,distress_signal_count,signal_labels,equity_class,refreshed_at'
 
@@ -63,9 +65,10 @@ export function projectReadiness(r) {
 
 export async function getLead(input, svc, { now }) {
   const id = input.property_id
-  const [facts, outreachRes] = await Promise.allSettled([
+  const [facts, outreachRes, ownerRes] = await Promise.allSettled([
     read(svc.db.from('eg_property_facts').select(LEAD_COLUMNS).eq('property_id', id).limit(1), 'eg_property_facts'),
     Promise.all([svc.outreach(id), svc.entityContact(id).catch(() => null)]),
+    readOwnerIdentity(svc.db, id, now),
   ])
   const row = facts.status === 'fulfilled' ? facts.value.rows[0] || null : null
   const outreach = outreachRes.status === 'fulfilled' ? projectOutreach(outreachRes.value[0], id, outreachRes.value[1]) : null
@@ -76,6 +79,7 @@ export async function getLead(input, svc, { now }) {
   const base = row ? projectLeadRow(row, now) : { lead_id: id, property_id: id, provenance: missing('eg_property_facts', facts.status === 'rejected' ? 'read_failed' : 'no_facts_row') }
   return {
     ...base,
+    owner_identity: ownerRes.value,
     outreach: outreach && outreach.available !== false
       ? {
           stage: outreach.stage, status: outreach.status, last_contact: outreach.last_contact, deal_linked: outreach.deal_linked,

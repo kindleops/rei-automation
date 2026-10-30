@@ -8,6 +8,7 @@ import { z } from 'zod/v4'
 import { PropertyId, Uuid, Zip, State, Label, Day, Limit, Cursor, Prov, Page, N, S, B, loose } from './schemas.mjs'
 import { searchLeads, getLead } from '../adapters/leads.mjs'
 import { searchProperties, getProperty } from '../adapters/properties.mjs'
+import { OWNER_IDENTITY_UNTRUSTED } from '../adapters/owner-identity.mjs'
 import { getAcquisitionScore } from '../adapters/scores.mjs'
 import { getMarketIntelligence } from '../adapters/market.mjs'
 import { searchComps } from '../adapters/comps.mjs'
@@ -20,6 +21,11 @@ import { getThreadFollowups, getThreadExecutionLog, getThreadOffers, getThreadCo
 
 const READ_ANNOTATIONS = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false })
 
+// the recorded owner (owner decision A8): names, holder kind and mailing address as recorded; never a phone or email
+const OwnerIdentity = z.object({
+  names: z.array(z.string()), entity_type: z.object({ recorded: S, corporate: B }).strict(), mailing_address: S, mailing_location: S, out_of_state: B,
+  contacts: z.string(), provenance: Prov,
+}).strict()
 const LeadRow = z.object({
   lead_id: z.string(), property_id: z.string(), market: S, city: S, state: S, zip: S, property_type: S, asset_type: S,
   conversation: z.object({ stage: S, status: S, last_message_at: S }).strict(),
@@ -170,11 +176,14 @@ const WorklistRow = z.object({
   contact: Contact,
 }).strict()
 const RankingInput = z.object({
-  window_days: z.number().int().min(1).max(90).default(30).describe('threads with a seller message in the last N days'),
+  window_days: z.number().int().min(1).max(1095).default(30).describe('threads with a seller message in the last N days (1–1095)'),
   market: Label(60).optional(),
-  max_threads: z.number().int().min(1).max(100).default(100).describe('threads scanned (≤ 4 worklist pages); truncated=true when more exist'),
-  top: z.number().int().min(1).max(25).default(10),
+  max_threads: z.number().int().min(1).max(100).default(100).describe('threads scanned per call (≤ 4 worklist pages); truncated=true when more exist'),
+  top: z.number().int().min(1).max(25).default(10).describe('rows returned in a single bounded batch (ignored when traversing: a page returns every scored thread)'),
   include_blocked: z.boolean().default(true).describe('keep contact-blocked threads in the ranking (they still need a human)'),
+  traverse: z.boolean().default(false).describe('page through EVERY thread with a seller message in the window: each page returns all of its scored threads, and page.next_cursor continues (send the same filters with it)'),
+  resume_after: z.string().regex(/^[0-9]{20}\.[A-Za-z0-9_.:-]{1,43}$/).optional().describe('the result.resume_after of a page you already hold: the same position given plainly, so a batch job resumes across processes (implies traverse; not with cursor)'),
+  cursor: Cursor.optional(),
 }).strict()
 const PipelineSummaryInput = z.object({
   dimension: z.enum(PIPELINE_DIMENSIONS).default('market').describe('group lead counts by this field'),
@@ -184,8 +193,8 @@ const PipelineSummaryInput = z.object({
 }).strict()
 
 /**
- * Tool spec: { name, title, description, scope, min_role, input, output, limits, paged, untrusted, handler }
- * handler(input, services, { after, now, principal }) → payload (+ for paged tools: { rows, has_more, last })
+ * Tool spec: { name, title, description, scope, min_role, input, output, limits, paged, pageKey?, untrusted, handler }
+ * handler(input, services, { after, now, principal }) → payload (+ for paged tools: { rows (or its pageKey), has_more, last })
  */
 // 1.3 Operation Hidden Gold acquisition reads (adapters/acquisitions.mjs)
 const FollowupIntentRow = z.object({
@@ -228,9 +237,9 @@ export const TOOLS = Object.freeze([
     description: 'One lead by property_id: lead state from the Entity Graph read model plus the live outreach state (stage/status WITH source pipeline vs conversation, last contact, campaign membership, contact readiness). Message text is not returned here: read it with leadcommand_get_lead_conversation (opt-in scope).',
     scope: 'leadcommand.leads.read', min_role: 'operator',
     input: PropertyIdInput,
-    output: z.object({ lead_id: z.string(), property_id: z.string(), outreach: loose, message_text: z.object({ included: z.literal(false), reason: z.string() }).strict(), provenance: Prov }).passthrough(),
+    output: z.object({ lead_id: z.string(), property_id: z.string(), owner_identity: OwnerIdentity, outreach: loose, message_text: z.object({ included: z.literal(false), reason: z.string() }).strict(), provenance: Prov }).passthrough(),
     limits: { per_min: 60, timeout_ms: 8000, max_rows: 1, max_response_bytes: 65536 },
-    untrusted: ['result.property_type', 'result.campaigns.latest_name', 'result.signal_labels[]', 'result.outreach.campaigns.latest.block_reason', 'result.outreach.contact_readiness.*'],
+    untrusted: ['result.property_type', 'result.campaigns.latest_name', 'result.signal_labels[]', 'result.outreach.campaigns.latest.block_reason', 'result.outreach.contact_readiness.*', ...OWNER_IDENTITY_UNTRUSTED],
     handler: getLead,
   },
   {
@@ -250,9 +259,9 @@ export const TOOLS = Object.freeze([
     description: 'One property by property_id: core facts, ownership SHAPE (owner kind, corporate / out-of-state, years owned — never names), recorded mortgages / liens / foreclosures (private lenders withheld), sales history (buyer kind only), distress evidence side by side (campaign graph, parcel, probate, preforeclosure) and deterministic cross-source inconsistencies.',
     scope: 'leadcommand.properties.read', min_role: 'operator',
     input: PropertyIdInput,
-    output: z.object({ property_id: z.string(), address: S, market: S, facts: loose, has_coordinates: z.boolean(), facts_provenance: Prov, ownership: loose, recorded_documents: loose, sales_history: loose, distress: loose }).strict(),
+    output: z.object({ property_id: z.string(), address: S, market: S, facts: loose, has_coordinates: z.boolean(), facts_provenance: Prov, ownership: loose, owner_identity: OwnerIdentity, recorded_documents: loose, sales_history: loose, distress: loose }).strict(),
     limits: { per_min: 30, timeout_ms: 10000, max_rows: 1, max_response_bytes: 98304 },
-    untrusted: ['result.address', 'result.facts.*', 'result.recorded_documents.*', 'result.sales_history.sales[].doc_type', 'result.sales_history.sales[].price_note', 'result.distress.*'],
+    untrusted: ['result.address', 'result.facts.*', 'result.recorded_documents.*', 'result.sales_history.sales[].doc_type', 'result.sales_history.sales[].price_note', 'result.distress.*', ...OWNER_IDENTITY_UNTRUSTED],
     handler: getProperty,
   },
   {
@@ -422,15 +431,17 @@ export const TOOLS = Object.freeze([
   {
     name: 'leadcommand_get_opportunity_ranking',
     title: 'Rank seller conversations by evidence',
-    description: 'A bounded batch (≤ 100 threads with a seller message in the window, read through the worklist) ranked by EXPLICIT additive factors, each citing its evidence: interest from the seller\'s words (a label alone scores 5), offer requests, price-ask candidates, timelines, verified unanswered messages and how long the seller has waited, our overdue commitments, Decision Engine tier / staleness, contact blockers and identity conflicts. Opted-out, possible opt-out, not-owner and declined threads are excluded and counted. Each row names a next step for a human (never an automatic action). Plus an attention list: overdue responses, overdue commitments, interest without a Decision Engine score, identity conflicts. Read-only.',
+    description: 'A bounded batch (≤ 100 threads with a seller message in the window, read through the worklist), or with traverse=true one page of a traversal of EVERY such thread (page.next_cursor / result.resume_after continue it), ranked by EXPLICIT additive factors, each citing its evidence: interest from the seller\'s words (a label alone scores 5), offer requests, price-ask candidates, timelines, verified unanswered messages and how long the seller has waited, our overdue commitments, Decision Engine tier / staleness, contact blockers and identity conflicts. Opted-out, possible opt-out, not-owner and declined threads are excluded and counted. Each row names a next step for a human (never an automatic action). Plus an attention list: overdue responses, overdue commitments, interest without a Decision Engine score, identity conflicts. Read-only.',
     scope: 'leadcommand.conversations.read', min_role: 'operator',
     input: RankingInput,
     output: z.object({
       window_days: z.number(), market: S, scanned: z.number(), total_with_inbound: N, pages_read: z.number(), truncated: z.boolean(),
       ranked: z.array(z.object({ rank: z.number(), thread_id: z.string(), property_id: S, score: z.number(), next_step: z.string(), factors: z.array(z.object({ factor: z.string(), points: z.number(), evidence: z.string() }).strict()), flags: z.array(z.string()), interest: z.enum(INTEREST_STATES), verified: z.string(), last_inbound_at: S, latest_seller_text: S, decision_engine: loose, contact: Contact }).strict()),
       excluded: z.record(z.string(), z.number()), attention: z.record(z.string(), z.array(z.string())), factors: z.record(z.string(), z.number()), rule: z.string(), content_policy: z.string(), provenance: Prov,
+      traverse: z.boolean(), resume_after: S,
     }).strict(),
-    limits: { per_min: 6, timeout_ms: 30000, max_rows: 25, max_response_bytes: 131072 },
+    paged: true, pageKey: 'ranked',
+    limits: { per_min: 6, timeout_ms: 30000, max_rows: 100, max_response_bytes: 131072 },
     untrusted: ['result.ranked[].latest_seller_text', 'result.ranked[].factors[].evidence'],
     handler: getOpportunityRanking,
   },

@@ -423,10 +423,14 @@ export function rankRow(row, now) {
   return { score, factors, flags, next_step: next }
 }
 
-export async function getOpportunityRanking(input, svc, { now }) {
+export async function getOpportunityRanking(input, svc, { after: afterKey = null, now }) {
+  if (input.cursor && input.resume_after) throw err('invalid_input', 'give cursor or resume_after, not both', { code: 'CURSOR_AND_KEY' })
+  // traversal: every thread with a seller message in the window, one bounded page per call, resumable by cursor or by
+  // the same position given plainly (resume_after); a page returns ALL of its scored threads
+  const traverse = input.traverse === true || Boolean(afterKey) || Boolean(input.resume_after)
   const scanned = []
   let total = null
-  let after = null
+  let after = afterKey ?? input.resume_after ?? null
   let more = true
   let pages = 0
   while (more && scanned.length < input.max_threads) {
@@ -459,10 +463,12 @@ export async function getOpportunityRanking(input, svc, { now }) {
   }
   ranked.sort((a, b) => b.score - a.score || (a.last_inbound_at < b.last_inbound_at ? 1 : -1))
   ranked.forEach((r, i) => { r.rank = i + 1 })
+  const next = traverse && more && after ? after : null
   return {
     window_days: input.window_days, market: input.market ?? null,
-    scanned: scanned.length, total_with_inbound: total, pages_read: pages, truncated: total != null && scanned.length < total,
-    ranked: ranked.slice(0, input.top),
+    scanned: scanned.length, total_with_inbound: total, pages_read: pages, truncated: !traverse && total != null && scanned.length < total,
+    ranked: traverse ? ranked : ranked.slice(0, input.top),
+    has_more: Boolean(next), last: next, traverse, resume_after: next,
     excluded, attention,
     factors: RANK_FACTORS, rule: RANK_RULE,
     content_policy: CONTENT_POLICY,
