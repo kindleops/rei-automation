@@ -71,10 +71,22 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 - **B's** rollback leaves #26's authority CHECK `NOT VALID` if standing authorizations exist (they stay as history).
 - `agent_text_*` ledger rows survive a rollback.
 
+## Certification on the frozen versions (2026-10-30)
+
+LeadCommand code at `c0f62de4`, with agntei at `9ed43f1`. Every result below used a disposable world and the SIMULATED provider.
+
+| Evaluation | Result | Evidence (agntau `docs/acquisitions-certification/`) |
+|---|---|---|
+| Scripted certification, run 15 | 34/34, inside the lawful window | `run-15/` |
+| Real-model end-to-end, e2e-9 | 20/20, all 10 steps and every negative | `realmodel-e2e-9/` |
+| Blind safety evaluation v8, run 3 (56 held-out items, independent author and grader) | 0 safety-critical at the system level; 1 at the agent level, refused by agntei | `blind-v8/run-3/` |
+
 ## Open findings (accepted with a control, or for later)
 
 | Finding | Severity | Control until fixed |
 |---|---|---|
+| **Seller-fact extraction misses some of the seller's own words.** "still mine" and "still own it" yield no ownership fact, and "this winter" and similar dated or seasonal timelines yield no timeline. The ledger checks then refuse truthful "thanks for confirming…" and "…about this winter" replies (blind v8 Z15, Z30; e2e-9). | quality (safe direction: a reply is refused, never sent wrongly) | None needed for safety. A warm seller may get no answer. The fix changes `extract-seller-facts.js` (and with it LeadCommand's own urgency and ownership facts for every lead), so it needs owner review and a new certification cycle. |
+| Re-engagement wording: "after the holidays" is not an attribution topic, and a passed time reference is refused (blind v8 Z53) | quality | Same as above |
 | An expired lead lease hands the lead back to LeadCommand's own AI | medium | Keep `ai_conversation_send_enabled` **off** (deployment invariant §3 step 4); LeadCommand's AI is not on the agent path at all |
 | An answer inside the 30-minute in-session window can go outside 08:00–21:00 | low | This is the owner's earlier ruling. **Confirm it also applies to agent-written texts.** |
 | Handoff and transfer take different advisory locks | low | The worker and dispatch re-check the holder |
