@@ -204,7 +204,7 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   if (askedInOpenBurst(ledger, ['automation_question']) && !AUTOMATION_DISCLOSURE_RE.test(t)) add('identity:automation_question_unanswered')
 
   // writer safety (non-owner contact, invented acknowledgement, stale seller time, unsupported identity claims)
-  const ws = validateWriterSafety(t, { thread: thread.map((m) => ({ direction: m.direction, body: m.body, at: m.at })), companyIdentity, now, ownershipConfirmedByPerson })
+  const ws = validateWriterSafety(t, { thread: thread.map((m) => ({ direction: m.direction, body: m.body, at: m.at, ...(m.non_answer === true ? { non_answer: true } : {}) })), companyIdentity, now, ownershipConfirmedByPerson })
   for (const r of ws.reasons) add(r)
 
   // property condition: a material condition statement about THIS property must be backed by the seller's own words or

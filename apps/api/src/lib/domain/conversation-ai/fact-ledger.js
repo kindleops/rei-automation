@@ -50,7 +50,11 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|(?:it'?s|its|it\s+is|(?:the\s+)?(?:house|home|title|deed)\s+is)\s+(?:in|under)\s+my\s+name|we\s+(?:still\s+)?own\s+(?:it|the|that)|(?:i|we)\s+do\s+(?:still\s+)?own\s+(?:it|the|that|this)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
+// blind v15 Q39: a free-standing first-person possession with its subject ("it's ours lol why", "it's still mine", "the house
+// is ours") is the seller's ownership claim even when our last text was not the ownership question. The bare "still mine" /
+// "still ours" stays an answer to OUR ownership question only (OWN_ANSWER_STILL_RE; owner 2026-10-30, blind v8). Denials ("not ours", "isn't ours")
+// and former ownership ("sold it", "not ours anymore") are read first; a question back ("it's ours?") is not a claim.
+export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|(?:it'?s|its|it\s+is|(?:the\s+)?(?:house|home|title|deed)\s+is)\s+(?:in|under)\s+my\s+name|we\s+(?:still\s+)?own\s+(?:it|the|that)|(?:i|we)\s+do\s+(?:still\s+)?own\s+(?:it|the|that|this)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:it'?s|its|it\s+is|that'?s|thats)\s+(?:still\s+)?ours(?!\s*\?)|(?:it'?s|its|it\s+is|that'?s|thats)\s+still\s+mine(?!\s*\?)|(?:the\s+)?(?:house|home|property|place)\s+is\s+(?:still\s+)?(?:mine|ours)(?!\s*\?)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
 // rc-8.5.21 v4 (coverage): ANSWER forms to OUR ownership question that confirm ownership without the
 // words "I own" — co-ownership ("me and my brother", "my wife and I"), an entity ("it's in my LLC but
 // yeah", "under my trust"), "we do", Spanish "sí, todavía la tengo" — and the bare former-owner answer

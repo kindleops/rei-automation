@@ -51,19 +51,29 @@ export const DEFAULT_AGENT_TEXT_POLICY = Object.freeze({ max_per_day_global: 200
  * The purpose rules on the thread's history (chronological, canonical shape {id, direction, body, at}).
  * @returns {{ ok: true, answers: object|null } | { ok: false, code: string, evidence: object }}
  */
+/** The seller message still waiting for an answer: the latest inbound, followed by nothing or only non-answer touches. */
+export function pendingSellerMessage(messages = []) {
+  let i = messages.length - 1
+  while (i >= 0 && messages[i].direction === 'outbound' && messages[i].non_answer === true) i--
+  return i >= 0 && messages[i].direction === 'inbound' ? messages[i] : null
+}
+
 export function agentTextPurposeVerdict({ purpose, inReplyTo = null, messages = [], target = null, policy = DEFAULT_AGENT_TEXT_POLICY, now }) {
   if (!AGENT_TEXT_PURPOSES.includes(purpose)) return deny('PURPOSE_INVALID', { purposes: AGENT_TEXT_PURPOSES })
   const latest = messages[messages.length - 1] || null
+  // the seller message still waiting: the latest inbound, or one followed only by our own initiated touches (a follow-up
+  // that crossed with the reply is not an answer to it)
+  const pending = pendingSellerMessage(messages)
   const answer = AGENT_TEXT_ANSWER_PURPOSES.includes(purpose)
   if (answer) {
     if (!clean(inReplyTo)) return deny('IN_REPLY_TO_REQUIRED', { purpose, rule: 'an answer names the inbound it answers (the latest unanswered seller message)' })
-    if (!latest || clean(latest.id) !== clean(inReplyTo) || latest.direction !== 'inbound') {
-      return deny('IN_REPLY_TO_NOT_LATEST_INBOUND', { latest_direction: latest?.direction || null, rule: 'only the thread\'s latest message, an unanswered inbound, can be answered' })
+    if (!pending || clean(pending.id) !== clean(inReplyTo)) {
+      return deny('IN_REPLY_TO_NOT_LATEST_INBOUND', { latest_direction: latest?.direction || null, rule: 'only the thread\'s latest unanswered seller message can be answered' })
     }
-    return { ok: true, answers: latest }
+    return { ok: true, answers: pending }
   }
   if (clean(inReplyTo)) return deny('IN_REPLY_TO_NOT_ALLOWED', { purpose, rule: 'an initiated text answers no inbound; use purpose reply' })
-  if (latest?.direction === 'inbound') return deny('UNANSWERED_SELLER_MESSAGE', { use: 'purpose reply with in_reply_to_message_id', in_reply_to_message_id: clean(latest.id) || null })
+  if (pending) return deny('UNANSWERED_SELLER_MESSAGE', { use: 'purpose reply with in_reply_to_message_id', in_reply_to_message_id: clean(pending.id) || null })
   if (purpose === 'first_touch') {
     if (!target) return deny('FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET')
     if (lower(target.target_status) !== 'ready' || lower(target.routing_status) !== 'ready' || lower(target.identity_status) !== 'verified' || lower(target.suppression_status) !== 'clear') {

@@ -36,10 +36,38 @@ const deny = (code, evidence = {}) => ({ ok: false, code, evidence })
 /** A thread's messages, chronological, in the canonical ledger's shape. */
 export async function loadThreadHistory(supabase, threadKey, { limit = 40 } = {}) {
   if (!clean(threadKey)) return []
-  const r = await supabase.from('message_events').select('id,direction,message_body,created_at,detected_intent').eq('thread_key', threadKey).order('created_at', { ascending: false }).limit(limit)
+  const r = await supabase.from('message_events').select('id,direction,message_body,created_at,detected_intent,queue_id').eq('thread_key', threadKey).order('created_at', { ascending: false }).limit(limit)
   if (r?.error) throw Object.assign(new Error('THREAD_HISTORY_UNREADABLE'), { code: 'THREAD_HISTORY_UNREADABLE' })
-  return (r?.data || []).reverse().map((m) => ({ id: String(m.id), direction: lower(m.direction).startsWith('out') ? 'outbound' : 'inbound', body: m.message_body || '', at: m.created_at, intent: m.detected_intent || null }))
+  const rows = (r?.data || []).reverse()
+  const kinds = await outboundKindsOf(supabase, rows.filter((m) => !lower(m.direction).startsWith('in')).map((m) => clean(m.queue_id)).filter(Boolean))
+  return rows.map((m) => {
+    const out = !lower(m.direction).startsWith('in')
+    return { id: String(m.id), direction: out ? 'outbound' : 'inbound', body: m.message_body || '', at: m.created_at, intent: m.detected_intent || null,
+      ...(out && kinds.get(clean(m.queue_id)) === 'non_answer' ? { non_answer: true } : {}) }
+  })
 }
+
+// An outbound that is NOT an answer to the seller: an initiated touch (an agent's first touch / follow-up / nurture /
+// re-engagement, a template follow-up). Blind v15 Q11: a follow-up that crossed with the seller's reply left the reply
+// unanswerable ("not the latest inbound"). Everything else (an agent's answer, a person's manual send, any outbound whose
+// queue row cannot be read or is unknown) still counts as an answer: the fail-safe reading.
+const NON_ANSWER_SEND_KINDS = new Set(['agent_first_touch', 'agent_followup', 'agent_nurture', 'agent_reengage'])
+async function outboundKindsOf(supabase, queueIds) {
+  const kinds = new Map()
+  if (!queueIds.length) return kinds
+  try {
+    const q = await supabase.from('send_queue').select('id,message_origin,message_type,metadata').in('id', [...new Set(queueIds)])
+    if (q?.error) return kinds
+    for (const row of q?.data || []) {
+      const origin = lower(row.message_origin); const sendKind = lower(row.metadata?.send_kind); const type = lower(row.message_type)
+      const nonAnswer = NON_ANSWER_SEND_KINDS.has(sendKind) || (origin === 'template' && ['followup', 'campaign_opener'].includes(type))
+      kinds.set(clean(row.id), nonAnswer ? 'non_answer' : 'answer')
+    }
+  } catch { /* unreadable: every outbound stays an answer */ }
+  return kinds
+}
+
+
 
 /** The send_queue-shaped row the send-time guard judges (the message as it would be queued). */
 export function guardRowOf({ lead, target = null, purpose }) {

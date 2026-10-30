@@ -150,11 +150,15 @@ const REPLY_ACK_PATTERNS = [
 ]
 const ATTRIBUTION_ACK_RE = /\b(?:as\s+you\s+(?:mentioned|said|noted|told\s+(?:me|us)|indicated|explained|shared|put\s+it)|like\s+you\s+(?:said|mentioned)|you(?:'d|\s+had|\s+have|'ve)?\s+(?:mentioned|said|told\s+(?:me|us)|noted|indicated|shared|explained)|since\s+you\s+(?:said|mentioned)|following\s+up\s+on\s+(?:what\s+you|your)\b)/i
 
-/** Is there a seller message newer than our last message? (the only thing a text may acknowledge as a reply) */
+/**
+ * Is there a seller message newer than our last ANSWER? (the only thing a text may acknowledge as a reply). An outbound
+ * marked non_answer (our own initiated touch, e.g. a follow-up that crossed with the reply: blind v15 Q11) does not
+ * answer the seller; every other outbound does.
+ */
 export function sellerWroteSinceOurLast(thread = []) {
   const rows = orderedThread(thread)
   let lastOut = -1
-  rows.forEach((m, i) => { if (isOut(m)) lastOut = i })
+  rows.forEach((m, i) => { if (isOut(m) && m.non_answer !== true) lastOut = i })
   return rows.some((m, i) => i > lastOut && isIn(m))
 }
 
