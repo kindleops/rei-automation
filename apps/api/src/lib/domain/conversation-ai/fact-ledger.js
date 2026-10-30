@@ -32,6 +32,7 @@ import { buildFactLedger, mergeModelFacts } from './facts.js'
 import { isDeflectionToOffer, isPriceNonAnswer, questionKindOf } from './questions.js'
 import { isStopRequest } from './stop-request.js'
 import { bareNoAnswer } from './answers.js'
+import { sellerTimelineMentions, resolveTimeReference } from './time-references.js'
 
 export const FACT_LEDGER_VERSION = 'conv-ai.fact-ledger.v1'
 
@@ -63,6 +64,11 @@ export const OWN_ANSWER_CONFIRM_RE = new RegExp([
   `^\\s*${ANS_YES}(?:todav[ií]a\\s+|a[uú]n\\s+)?(?:la|lo)\\s+tengo(?:\\s+todav[ií]a)?(?![\\p{L}])`,
   `^\\s*${ANS_YES}(?:es\\s+(?:de|a\\s+nombre\\s+de)\\s+(?:mi|nuestra|nuestro)\\s+(?:familia|compa[nñ][ií]a|empresa|llc|fideicomiso)|mi\\s+\\p{L}+\\s+y\\s+yo|yo\\s+y\\s+mi\\s+\\p{L}+)(?![\\p{L}])`,
 ].join('|'), 'iu')
+// Owner 2026-10-30 (blind v8 Z15, Z30): the casual "still" answers to OUR ownership question ("Yes still mine",
+// "Still own it. Got renters in there", "yep still ours", "still have it") as the message's OPENING clause. Read ONLY
+// against our ownership question, and recorded as the seller's CLAIM (origin seller_claim_*), never as verified
+// ownership: verification stays with the owner-of-record match. A question back ("still mine?") is not an answer.
+export const OWN_ANSWER_STILL_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|sure|correct|uh\s+huh)[\s,.!]*)?(?:(?:it'?s|its|it\s+is|that'?s|thats|i|we|i'?ve|we'?ve)\s+)?still\s+(?:mine|ours|my\s+(?:house|home|place|property)|our\s+(?:house|home|place|property)|own\s+(?:it|that|this|the\s+(?:house|home|place|property))|have\s+it|got\s+it|owns?\s+it)\b(?!\s*\?)(?=\s*(?:$|[.,!;:)\-]|\s(?:but|and|though|tho|why|lol|haha|yes|yeah)\b))|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:that'?s|thats)\s+(?:us|me)\b(?!\s*\?)|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:it'?s|its|it\s+is)\s+ours\b(?!\s*\?)/i
 export const OWN_ANSWER_FORMER_RE = /^\s*(?:i\s+|we\s+)?used\s+to(?:\s+(?:own\s+it|but\s+not\s+any\s*more|lol))?\s*[.!]*\s*$|^\s*(?:not\s+any\s*more|no\s+longer|not\s+no\s+more|ya\s+no)\s*[.!]*\s*$/i
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
@@ -163,8 +169,9 @@ function pushUnique(arr, item) { if (!arr.includes(item)) arr.push(item) }
  * @param {Array<{ fact: string, value: any, source_message_id: string, confidence: number }>} [a.modelFacts] validated only
  * @param {Record<string, any>} [a.recordFacts]
  * @param {string} [a.now]
+ * @param {string|null} [a.timeZone] the recipient's IANA time zone, when known (resolves a stated month at month edges)
  */
-export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [], modelFacts = [], recordFacts = {}, now = new Date().toISOString() } = {}) {
+export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [], modelFacts = [], recordFacts = {}, now = new Date().toISOString(), timeZone = null } = {}) {
   const t = (m) => Date.parse(m?.at || 0) || 0
   const ordered = [...messages].filter((m) => m && m.id).sort((a, b) => t(a) - t(b))
   const inbound = ordered.filter((m) => m.direction === 'inbound')
@@ -246,6 +253,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (OWN_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m, 'seller_stated', 0.6)
     else if (lastAsked === 'ownership' && OWN_ANSWER_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && (BARE_YES_RE.test(body) || OWN_ANSWER_CONFIRM_RE.test(body)))) addFact(facts, 'ownership', 'confirmed', m)
+    else if (lastAsked === 'ownership' && OWN_ANSWER_STILL_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_answer_to_ownership_question')
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
     // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is
@@ -282,6 +290,13 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     // timeline (beyond the extractor): "close before November", "move in 30 days", "asap"
     const tl = TIMELINE_RE.exec(body)
     if (tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) addFact(facts, 'timeline', { stated: tl[0].trim().toLowerCase() }, m, 'seller_stated', 0.75)
+    // Owner 2026-10-30 (e2e-9 "I might sell this winter"): a dated or seasonal timeline with no verb before it ("this
+    // winter", "by December", "in the spring", "after school's out"). The seller's words are kept; a period is resolved
+    // only from this message's timestamp (to a month or season, never a day); ambiguity is kept; urgency is never set.
+    else if (!tl && !(facts.timeline?.source_message_ids || []).includes(m.id)) {
+      const refs = sellerTimelineMentions(body).map((r) => ({ ...r, ...resolveTimeReference(r, { saidAt: m.at || null, timeZone }) })).filter((r) => !r.past)
+      if (refs.length) addFact(facts, 'timeline', { stated: refs.map((r) => r.stated).join('; '), urgency: null, references: refs }, m, 'seller_stated', 0.7)
+    }
     // condition (beyond the extractor)
     if (CONDITION_RE.test(body) && !(facts.condition?.source_message_ids || []).includes(m.id)) addFact(facts, 'condition', { disclosed: true }, m)
     // offer request: interest shown, NO asking price inferred, no amount

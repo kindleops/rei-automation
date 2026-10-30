@@ -22,6 +22,7 @@
 // Thread rows: { direction: 'inbound'|'outbound', body: string, at?: ISO string } (any order; sorted by `at` when every
 // row has one, else taken in the given order).
 import { NO_COMPANY_IDENTITY } from './company-identity.js'
+import { timeReferencesIn, timeReferenceEnd } from './time-references.js'
 
 export const WRITER_SAFETY_VERSION = 'conv-ai.writer-safety.v1'
 
@@ -174,57 +175,7 @@ export function inventedAcknowledgementReasons(text, { thread = [] } = {}) {
   return r
 }
 
-// relative times a seller gives, resolved against the date they said it
-const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
-const SEASONS = { spring: [2, 4], summer: [5, 7], fall: [8, 10], autumn: [8, 10], winter: [11, 13] }
-const NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12 }
-const TIME_PATTERNS = [
-  // "fall" only with a time word before it ("the roof could fall in" is not a season); the others bare (lowercase:
-  // "Summer" as a first name is not a season) or after a time word
-  [/\b(?:(next|this|in\s+the|in|by|until|till|after|before|around|come|early|late|mid|over\s+the|the|it'?s|is|for)\s+)(?:early\s+|late\s+|mid-?\s*)?(spring|summer|fall|autumn|winter)\b|\b(spring|summer|fall|autumn|winter)\s*(?:time|season)\b/gi, (m) => ({ key: `season:${(m[2] || m[3]).toLowerCase().replace('autumn', 'fall')}`, next: /^next$/i.test(m[1] || '') })],
-  [/\b(spring|summer|autumn|winter)\b|(?:^|[.!?]\s+)(Spring|Summer|Autumn|Winter)\b/g, (m) => ({ key: `season:${(m[1] || m[2]).toLowerCase().replace('autumn', 'fall')}` })],
-  // a capitalised month name is a month (bare "May" is too often the verb)
-  [/\b(January|February|March|April|June|July|August|September|October|November|December)\b/g, (m) => ({ key: `month:${m[1].toLowerCase()}` })],
-  [new RegExp(String.raw`\b(?:(next|in|by|until|till|after|before|around|early|late|mid|end\s+of|beginning\s+of|start\s+of|this|come)\s+)(?:mid-?\s*)?(${MONTHS.join('|')})\b`, 'gi'), (m) => ({ key: `month:${m[2].toLowerCase()}`, next: /^next$/i.test(m[1] || '') })],
-  [/\b(next|this)\s+(week|month|year)\b/gi, (m) => ({ key: `rel:${m[1].toLowerCase()}_${m[2].toLowerCase()}` })],
-  [/\bin\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|twelve|[0-9]{1,2})\s+(day|week|month|year)s?\b/gi, (m) => ({ key: `in:${NUM[m[1].toLowerCase()] ?? Number(m[1])}_${m[2].toLowerCase()}` })],
-  [/\b(?:in\s+)?a\s+(few|couple(?:\s+of)?)\s+(day|week|month)s\b/gi, (m) => ({ key: `few:${/^few/i.test(m[1]) ? 'few' : 'couple'}_${m[2].toLowerCase()}` })],
-  [/\b(?:after|past|over|through)\s+the\s+holidays\b|\bafter\s+(?:the\s+)?new\s+year\b|\b(?:first|beginning|start)\s+of\s+(?:the|next)\s+year\b|\bearly\s+next\s+year\b/gi, () => ({ key: 'holidays' })],
-  [/\b(?:end\s+of\s+(?:the|this)\s+year|year[\s-]end|later\s+this\s+year)\b/gi, () => ({ key: 'year_end' })],
-]
-/** Every relative time reference in a text: [{ key, next? }]. */
-export function timeReferencesIn(text) {
-  const t = norm(text)
-  const out = []
-  for (const [re, f] of TIME_PATTERNS) for (const m of t.matchAll(new RegExp(re.source, re.flags))) out.push(f(m))
-  return out
-}
-const endOfMonth = (y, mo) => Date.UTC(y, mo + 1, 1) - 1
-/** The last moment the reference can still be in the future, for a statement made at `saidAt` (ms), or null. */
-export function timeReferenceEnd(ref, saidAt) {
-  if (!Number.isFinite(saidAt)) return null
-  const d = new Date(saidAt)
-  const y = d.getUTCFullYear()
-  const [kind, val] = String(ref.key).split(':')
-  if (kind === 'season' || kind === 'month') {
-    const [a, b] = kind === 'season' ? SEASONS[val] : [MONTHS.indexOf(val), MONTHS.indexOf(val)]
-    const occ = [y - 1, y, y + 1, y + 2].map((yy) => ({ start: Date.UTC(yy, a, 1), end: endOfMonth(yy, b) })).filter((o) => o.end >= saidAt)
-    const first = occ[0]
-    if (!first) return null
-    return ref.next && first.start <= saidAt ? occ[1]?.end ?? null : first.end
-  }
-  const DAY = 864e5
-  if (kind === 'rel') return { this_week: saidAt + 7 * DAY, next_week: saidAt + 14 * DAY, this_month: endOfMonth(y, d.getUTCMonth()), next_month: endOfMonth(y, d.getUTCMonth() + 1), this_year: endOfMonth(y, 11), next_year: endOfMonth(y + 1, 11) }[val] ?? null
-  if (kind === 'in' || kind === 'few') {
-    const [n, unit] = val.split('_')
-    const count = kind === 'few' ? ({ few: { day: 7, week: 6, month: 4 }, couple: { day: 3, week: 3, month: 3 } }[n]?.[unit]) : Number(n)
-    const per = { day: DAY, week: 7 * DAY, month: 31 * DAY, year: 366 * DAY }[unit]
-    return count && per ? saidAt + count * per : null
-  }
-  if (kind === 'holidays') return d.getUTCMonth() === 0 ? endOfMonth(y, 2) : endOfMonth(y + 1, 2)
-  if (kind === 'year_end') return endOfMonth(y, 11)
-  return null
-}
+// relative times a seller gives: time-references.js (shared with the fact ledger)
 
 /**
  * Class 2 (timing). A time the SELLER gave ("in the spring", "next month", "after the holidays") is never referred to
@@ -233,10 +184,15 @@ export function timeReferenceEnd(ref, saidAt) {
  * @param {{ thread?: Array, now?: string|number|Date|null }} [o]
  * @returns {string[]}
  */
+// "You mentioned checking back after the holidays": OUR re-engagement recalling WHEN the seller asked to be contacted
+// is the request honoured, not a claim that the time is still ahead (blind v8 Z53). Only that recollection is exempt;
+// any other use of a passed time ("still planning on the spring?") is checked as before.
+const CONTACT_REQUEST_RECALL_RE = /\byou\s+(?:said|mentioned|asked(?:\s+me)?|told\s+me)\s+(?:to\s+)?(?:check(?:ing)?\s+back|reach(?:ing)?\s+(?:back\s+)?out|follow(?:ing)?\s+up|circl(?:e|ing)\s+back|touch(?:ing)?\s+base|get(?:ting)?\s+back\s+(?:to\s+you|in\s+touch)|hit(?:ting)?\s+you\s+up|text(?:ing)?\s+(?:you\s+)?(?:back|again))\b[^.?!]{0,40}/gi
+
 export function staleSellerTimeReasons(text, { thread = [], now = null } = {}) {
   const nowMs = now == null ? Date.now() : new Date(now).getTime()
   if (!Number.isFinite(nowMs)) return []
-  const ours = new Set(timeReferencesIn(text).map((x) => x.key))
+  const ours = new Set(timeReferencesIn(String(text || '').replace(CONTACT_REQUEST_RECALL_RE, ' ')).map((x) => x.key))
   if (!ours.size) return []
   const latestEnd = new Map()
   for (const m of orderedThread(thread).filter(isIn)) {
@@ -313,3 +269,5 @@ export function validateWriterSafety(text, { thread = [], inboundText = null, co
   ])]
   return { ok: reasons.length === 0, reasons, non_owner: threadNonOwnerReading({ thread, inboundText }), version: WRITER_SAFETY_VERSION }
 }
+
+export { timeReferencesIn, timeReferenceEnd }
