@@ -86,12 +86,15 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 | `f209fdc6` | Blind v9 run 3 false refusals, fixed by class. The disclosed-AI identity answer ("I'm Nova, an AI assistant with Reivesti Home Buyers…") may carry the one allowed ownership re-ask after "What is this about?". An owner's "not interested in lowball offers" is recorded as a lowball objection with conditional interest, not a decline (any other decline in the same message still counts). | loosens two false-positive classes; tested both ways |
 | `81b0a7e2` | Blind v10 run 1 false refusals (all eight judged compliant by the independent grader), fixed by class: <ul><li>"What's this regarding" and "who's asking" are identity questions;</li><li>an affirmative opening sentence answering our ownership question ("Correct. Inherited it…", "We do still own it") is the seller's ownership claim, never with a sale, a former or other owner, a representative or a question back;</li><li>"maybe selling in the fall" is conditional interest;</li><li>a no-reply follow-up may repeat the question the seller never answered, as LeadCommand's own follow-up templates do: only while the seller has sent nothing since, at most three asks in all, never the asking price;</li><li>"reply STOP and I won't text again" is true and is not refused (an unconditional no-further-contact promise still is).</li></ul> | loosens five false-positive classes; tested both ways; opt-out classification unchanged |
 
-**Safety replay.** Every text that LeadCommand refused in blind rounds v4–v10 was replayed through `81b0a7e2`, with the same inputs. The only texts whose verdict changed are ones those rounds' independent graders judged not safety-critical. No opt-out, non-owner, price, offer, hand-over or human claim passes.
+| `bd155315` | This report's v9 and v10 sections | docs |
+| `16bbb8be` | Blind v11 run 1 false refusals, fixed by class: <ul><li>an affirmative answer followed by the seller's own question ("I do. And you want to know that because...?") is still the answer;</li><li>"Who is reivesti exactly, like an actual company…" is an identity question;</li><li>"What makes yall any different" asks about the company;</li><li>"gutted the kitchen" and "a new deck" are condition the seller disclosed.</li></ul> | loosens four false-positive classes; tested both ways |
+
+**Safety replay.** Every text that LeadCommand refused in blind rounds v4–v11 was replayed through `16bbb8be`, with the same inputs. The only texts whose verdict changed are ones those rounds' independent graders judged not safety-critical. No opt-out, non-owner, price, offer, hand-over or human claim passes.
 
 **Over-suppression (safe direction, unchanged).** LeadCommand's inbound classifier marked two objections as opt-outs (blind v10 W20 "…insultingly low cash offers dont bother", W22 "Honestly this sounds like a scam…"). Opt-out classification is deliberately not loosened. This is for the owner's review.
 
-Suites on `81b0a7e2`:
-- critical: 13,059 tests, the same 4 baseline failures;
+Suites on `16bbb8be`:
+- critical: 13,064 tests, the same 4 baseline failures;
 - PG files: 327 pass, 0 fail.
 
 The certification runs on these versions are recorded in `AGNTEI-ACQUISITIONS-CERTIFICATION.md` (agntau).
@@ -112,6 +115,7 @@ LeadCommand code at `c0f62de4`, with agntei at `9ed43f1`. Every result below use
 |---|---|---|
 | **Seller-fact extraction misses some of the seller's own words.** "still mine" and "still own it" yield no ownership fact, and "this winter" and similar dated or seasonal timelines yield no timeline. The ledger checks then refuse truthful "thanks for confirming…" and "…about this winter" replies (blind v8 Z15, Z30; e2e-9). | quality (safe direction: a reply is refused, never sent wrongly) | None needed for safety. A warm seller may get no answer. The fix changes `extract-seller-facts.js` (and with it LeadCommand's own urgency and ownership facts for every lead), so it needs owner review and a new certification cycle. |
 | Re-engagement wording: "after the holidays" is not an attribution topic, and a passed time reference is refused (blind v8 Z53) | quality | Same as above |
+| **An invented, unattributed condition remark passes the gate.** "Sounds like the roof needs repairs", with no condition in the record, is not refused. The condition check catches attributed claims ("…sound like great updates", "you mentioned…"), not an unattributed assertion. Found while writing the v11 negative tests. | quality / honesty (rule 5) | Nova's rules forbid stating anything not backed by the record. No blind round has seen Nova do it. A deterministic check needs care so it does not refuse ordinary empathy ("sorry to hear about the flooding"). For the owner's next review cycle. |
 | An expired lead lease hands the lead back to LeadCommand's own AI | medium | Keep `ai_conversation_send_enabled` **off** (deployment invariant §3 step 4); LeadCommand's AI is not on the agent path at all |
 | An answer inside the 30-minute in-session window can go outside 08:00–21:00 | low | This is the owner's earlier ruling. **Confirm it also applies to agent-written texts.** |
 | Handoff and transfer take different advisory locks | low | The worker and dispatch re-check the holder |
