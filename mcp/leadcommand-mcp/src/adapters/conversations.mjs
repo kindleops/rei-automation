@@ -454,7 +454,7 @@ export async function getOpportunityRanking(input, svc, { after: afterKey = null
     if (row.contact.state === 'blocked' && row.interest.state === 'interest') attention.blocked_with_interest.push(row.thread_id)
     if (row.contact.state === 'blocked' && !input.include_blocked) { excluded.contact_blocked = (excluded.contact_blocked || 0) + 1; continue }
     ranked.push({
-      rank: 0, thread_id: row.thread_id, property_id: row.property_id, score: r.score, next_step: r.next_step, factors: r.factors, flags: r.flags,
+      rank: 0, thread_id: row.thread_id, property_id: row.property_id, market: row.lead?.market ?? null, score: r.score, next_step: r.next_step, factors: r.factors, flags: r.flags,
       interest: row.interest.state, verified: row.verified.state, last_inbound_at: row.last_inbound_at,
       latest_seller_text: row.inbound.length ? row.inbound[row.inbound.length - 1].text : null,
       decision_engine: { present: row.decision_engine.present, decision_tier: row.decision_engine.decision_tier, stale: row.decision_engine.stale },

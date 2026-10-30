@@ -372,6 +372,7 @@ test('ranking traversal: every thread with a seller message, page by page (curso
       cursor = page.next_cursor; pages++
     } while (cursor && pages < 10)
     assert.equal(scanned, 4, 'every thread with a seller message was read once')
+    assert.ok(one.ranked.every((x) => 'market' in x), 'each ranked thread names its LeadCommand market (company-wide summaries)')
     assert.equal(new Set(seen).size, seen.length, 'no thread twice')
     assert.deepEqual(new Set(seen), want, 'the traversal scores exactly what the single batch ranks (opt-outs still excluded)')
     // the same position given plainly resumes across processes (a cursor dies with the server)

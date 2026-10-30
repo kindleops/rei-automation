@@ -436,7 +436,7 @@ export const TOOLS = Object.freeze([
     input: RankingInput,
     output: z.object({
       window_days: z.number(), market: S, scanned: z.number(), total_with_inbound: N, pages_read: z.number(), truncated: z.boolean(),
-      ranked: z.array(z.object({ rank: z.number(), thread_id: z.string(), property_id: S, score: z.number(), next_step: z.string(), factors: z.array(z.object({ factor: z.string(), points: z.number(), evidence: z.string() }).strict()), flags: z.array(z.string()), interest: z.enum(INTEREST_STATES), verified: z.string(), last_inbound_at: S, latest_seller_text: S, decision_engine: loose, contact: Contact }).strict()),
+      ranked: z.array(z.object({ rank: z.number(), thread_id: z.string(), property_id: S, market: S, score: z.number(), next_step: z.string(), factors: z.array(z.object({ factor: z.string(), points: z.number(), evidence: z.string() }).strict()), flags: z.array(z.string()), interest: z.enum(INTEREST_STATES), verified: z.string(), last_inbound_at: S, latest_seller_text: S, decision_engine: loose, contact: Contact }).strict()),
       excluded: z.record(z.string(), z.number()), attention: z.record(z.string(), z.array(z.string())), factors: z.record(z.string(), z.number()), rule: z.string(), content_policy: z.string(), provenance: Prov,
       traverse: z.boolean(), resume_after: S,
     }).strict(),
