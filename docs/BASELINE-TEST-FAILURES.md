@@ -18,3 +18,18 @@ Method:
 - **Before production:**
   - failures 1–3 are test maintenance;
   - failure 4 is one owner decision about one word's suppression level.
+
+## Update 2026-10-30: failure 4 resolved by the owner's decision
+
+**The decision:** treat a standalone "Chega" as an opt-out in seller outreach, and keep contextual Portuguese that contains "chega" from being misclassified.
+
+**What changed:**
+- **The exact-keyword list.** `multilingual-opt-out.js` now has "chega", plus "já chega" / "ja chega", as confirmed whole-message STOPs.
+- **The test.** `v4fix-optout-protection-8521.test.mjs` no longer lists bare "Chega" as uncertain.
+- **A new test pins the decision both ways:**
+  - the standalone forms are confirmed opt-outs: "Chega", "Chega!", "CHEGA", "Já chega!", "Chega de mensagens";
+  - ordinary sentences are not: "Ele chega amanhã", "chega na sexta", "quando chega o documento?", "não chega a 200 mil" (a price objection) and "Meu filho chega hoje";
+  - "chega de chuva aqui" is about the weather, so it is not an opt-out either;
+  - "Chega disso" (the object is unstated) stays a **precautionary hold**: never contactable, and a person reviews it.
+
+Failures 1–3 are unchanged: test maintenance, outside the send path.

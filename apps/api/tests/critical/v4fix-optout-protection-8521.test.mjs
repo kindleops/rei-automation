@@ -80,7 +80,7 @@ const OTHER_OPT = [
 ];
 // S3: uncertain stop-like whole-message words, every language we do not converse in (and Spanish slang)
 const UNCERTAIN = ["thôi", "khỏi", "됐어요", "됐습니다", "خلاص", "كفاية", "Ase atò", "ase", "kite sa", "ayoko na", "Ya chole", "Ya estuvo",
-  "Chega", "Já deu", "Ça suffit", "Laissez tomber", "Dość", "Wystarczy", "Довольно", "够了", "算了", "Bájenme"];
+  "Já deu", "Ça suffit", "Laissez tomber", "Dość", "Wystarczy", "Довольно", "够了", "算了", "Bájenme"];
 const UNCERTAIN_NEG = ["不用了，谢谢", "Gracias", "Ok", "Sí", "Không", "아니요", "لا", "wi", "oo"];
 const OBJECT_NEG = [
   "J'arrête pas de recevoir des offres", "Je n'arrête pas de penser à vendre", "cant stop thinking about selling honestly. whats next",
@@ -118,6 +118,20 @@ test("S3: an uncertain stop-like whole message is a POSSIBLE opt-out (precaution
     assert.ok(matchUncertainStopWord(t) || analyzeContactRevocation(t).possible_opt_out, t);
   }
   for (const t of UNCERTAIN_NEG) assert.equal(label(await classify(t, null, { heuristicOnly: true })), "NEG", t);
+});
+
+test("owner decision (2026-10-30): a standalone \"Chega\" / \"Já chega\" is a confirmed opt-out; \"chega\" inside ordinary Portuguese is not", async () => {
+  for (const t of ["Chega", "Chega!", "chega.", "CHEGA", "Chega!!!", "já chega", "Já chega!", "Chega de mensagens"]) {
+    const c = await classify(t, null, { heuristicOnly: true });
+    assert.equal(label(c), "OPT", `${t} → ${c.primary_intent}`);
+  }
+  // arrival, timing, an amount that falls short (a price objection), the weather: not about our messages
+  for (const t of ["Ele chega amanhã", "chega na sexta", "quando chega o documento?", "não chega a 200 mil", "Não chega a 200 mil, quero mais", "Meu filho chega hoje, falo com ele", "chega de chuva aqui"]) {
+    const c = await classify(t, null, { heuristicOnly: true });
+    assert.equal(label(c), "NEG", `${t} → ${c.primary_intent}/${c.compliance_flag}`);
+  }
+  // "Chega disso" (enough of this, object unstated) stays a precautionary hold: never contactable, a person reviews
+  assert.equal(label(await classify("Chega disso", null, { heuristicOnly: true })), "HOLD");
 });
 
 test("over-suppression: object / target analysis — a stop of a third party, a preposition, an adjective or a negated continuation is not a revocation", async () => {
