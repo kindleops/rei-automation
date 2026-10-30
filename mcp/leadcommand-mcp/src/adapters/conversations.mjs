@@ -240,7 +240,7 @@ export async function getLeadConversation(input, svc, { after: afterKey, now }) 
   if (!input.property_id === !input.thread_id) throw err('invalid_input', 'give exactly one of property_id or thread_id', { code: 'INPUT_INVALID' })
   if (input.property_id && !PROPERTY_ID_RE.test(input.property_id)) throw err('invalid_input', 'property_id out of bounds', { code: 'INPUT_INVALID' })
   const r = await readRpc(svc.db.rpc('lc_mcp_lead_conversation', {
-    p_property_id: input.property_id ?? null, p_thread_id: input.thread_id ?? null, p_window_days: input.window_days,
+    p_property_id: input.property_id ?? null, p_thread_id: input.thread_id ?? null, p_window_days: input.window_days === 'all' ? 0 : input.window_days,
     p_before_at: after?.at ?? null, p_before_id: after?.id ?? null, p_limit: input.limit,
   }), 'lead conversation')
   const subject = input.property_id ? { property_id: input.property_id } : { thread_id: input.thread_id }
@@ -427,17 +427,25 @@ export async function getOpportunityRanking(input, svc, { after: afterKey = null
   if (input.cursor && input.resume_after) throw err('invalid_input', 'give cursor or resume_after, not both', { code: 'CURSOR_AND_KEY' })
   // traversal: every thread with a seller message in the window, one bounded page per call, resumable by cursor or by
   // the same position given plainly (resume_after); a page returns ALL of its scored threads
-  const traverse = input.traverse === true || Boolean(afterKey) || Boolean(input.resume_after)
+  const traverse = input.traverse === true || Boolean(afterKey) || Boolean(input.resume_after) || Boolean(input.since)
+  // the window: "all" (the default when traversing: no time cutoff, keyset-paged) = 0 for the worklist; an incremental
+  // pass (since) reads the days back to that instant and keeps only threads whose latest seller message is at or after it
+  const sinceMs = input.since ? Date.parse(input.since) : null
+  if (sinceMs != null && !(sinceMs <= now.getTime())) throw err('invalid_input', 'since must be a past instant', { code: 'SINCE_IN_FUTURE' })
+  const windowOut = sinceMs != null ? Math.max(1, Math.ceil((now.getTime() - sinceMs) / 86_400_000) + 1) : input.window_days ?? (traverse ? 'all' : 30)
+  const windowDays = windowOut === 'all' ? 0 : windowOut
   const scanned = []
   let total = null
   let after = afterKey ?? input.resume_after ?? null
   let more = true
   let pages = 0
-  while (more && scanned.length < input.max_threads) {
-    const page = await searchConversationWorklist({ category: 'recent_inbound', window_days: input.window_days, market: input.market, limit: Math.min(RANK_PAGE, input.max_threads - scanned.length) }, svc, { after, now })
+  let read = 0 // rows read this call (an incremental pass keeps fewer than it reads): the per-call bound
+  while (more && read < input.max_threads) {
+    const page = await searchConversationWorklist({ category: 'recent_inbound', window_days: windowDays, market: input.market, limit: Math.min(RANK_PAGE, input.max_threads - read) }, svc, { after, now })
     pages += 1
+    read += page.rows.length
     total = page.total
-    scanned.push(...page.rows)
+    scanned.push(...(sinceMs == null ? page.rows : page.rows.filter((r) => r.last_inbound_at && Date.parse(r.last_inbound_at) >= sinceMs)))
     more = page.has_more && Boolean(page.last)
     after = page.last
   }
@@ -465,7 +473,7 @@ export async function getOpportunityRanking(input, svc, { after: afterKey = null
   ranked.forEach((r, i) => { r.rank = i + 1 })
   const next = traverse && more && after ? after : null
   return {
-    window_days: input.window_days, market: input.market ?? null,
+    window_days: windowOut, since: input.since ?? null, market: input.market ?? null,
     scanned: scanned.length, total_with_inbound: total, pages_read: pages, truncated: !traverse && total != null && scanned.length < total,
     ranked: traverse ? ranked : ranked.slice(0, input.top),
     has_more: Boolean(next), last: next, traverse, resume_after: next,

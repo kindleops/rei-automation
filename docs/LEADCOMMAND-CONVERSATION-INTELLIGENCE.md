@@ -90,7 +90,7 @@ names a next step **for a human**.
 ## 4. Phase 2: aggregation
 
 Exact server-side counts (`count(*)`, no sampling), keyset pagination everywhere, bounded batches (worklist ≤ 25 rows /
-page, ranking ≤ 100 threads), windows ≤ 365 days (conversation ≤ 1095). `get_pipeline_summary` groups leads by market,
+page, ranking ≤ 100 threads), windows ≤ 365 days (conversation ≤ 1095); with `PROPOSED_20261030120000_lc_mcp_full_history` applied, the worklist and the conversation also accept window 0 = all history (the ranking's `traverse` uses it by default, and `since` makes an incremental pass), still keyset-paged per call. `get_pipeline_summary` groups leads by market,
 state, conversation / pipeline stage and status or SMS status (top N + remainder + not-set) and reports: threads with
 inbound, unanswered, opted out, suppressed, not contactable, without property; opt-outs without an active suppression
 row and active suppressions marked contactable; inbound / opt-out / unknown-sender / outbound messages; phones on several

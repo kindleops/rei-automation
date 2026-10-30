@@ -63,7 +63,8 @@ const optedOut = (t) => t.opt_out || t.contactability_status === 'opted_out' || 
 const refuse = () => { throw Object.assign(new Error('invalid parameter'), { code: '22023' }) }
 const isIn = (m) => /^in/i.test(m.direction)
 const byNewest = (a, b) => (a.created_at === b.created_at ? (a.id < b.id ? 1 : -1) : a.created_at < b.created_at ? 1 : -1)
-const sinceOf = (days) => new Date(FIXTURE_CONV_NOW - days * 86_400_000).toISOString()
+// window 0 = every row on record (PROPOSED_20261030120000_lc_mcp_full_history)
+const sinceOf = (days) => (days === 0 ? new Date(0).toISOString() : new Date(FIXTURE_CONV_NOW - days * 86_400_000).toISOString())
 
 function threadJson(key, i, propertyId) {
   const t = threads.find((x) => x.thread_key === key) || null
@@ -99,7 +100,7 @@ export const conversationRpc = {
   lc_mcp_lead_conversation({ p_property_id = null, p_thread_id = null, p_window_days = 365, p_before_at = null, p_before_id = null, p_limit = 30 }) {
     if (!p_property_id === !p_thread_id) refuse()
     if (p_property_id && !/^[A-Za-z0-9_.:-]{1,64}$/.test(p_property_id)) refuse()
-    if (p_limit < 1 || p_limit > 50 || p_window_days < 1 || p_window_days > 1095 || (p_before_at == null) !== (p_before_id == null)) refuse()
+    if (p_limit < 1 || p_limit > 50 || p_window_days < 0 || p_window_days > 36500 || (p_before_at == null) !== (p_before_id == null)) refuse()
     const since = sinceOf(p_window_days)
     let keys = []
     let all = []
@@ -151,7 +152,7 @@ export const conversationRpc = {
   lc_mcp_conversation_worklist({ p_category, p_window_days = 30, p_market = null, p_after_at = null, p_after_id = null, p_limit = 10 }) {
     if (!['unanswered_inbound', 'recent_inbound', 'opted_out', 'identity_conflict', 'suppression_conflict'].includes(p_category)) refuse()
     if (p_market != null && String(p_market).length > 60) refuse()
-    if (p_limit < 1 || p_limit > 25 || p_window_days < 1 || p_window_days > 1095 || (p_after_at == null) !== (p_after_id == null)) refuse()
+    if (p_limit < 1 || p_limit > 25 || p_window_days < 0 || p_window_days > 36500 || (p_after_at == null) !== (p_after_id == null)) refuse()
     const since = sinceOf(p_window_days)
     const props = (t) => new Set(messages.filter((m) => m.thread_key === t.thread_key && m.created_at >= since && m.property_id).map((m) => m.property_id)).size
     const match = (t) => t.last_inbound_at && t.last_inbound_at >= since && (!p_market || facts[t.property_id]?.market === p_market) && ({

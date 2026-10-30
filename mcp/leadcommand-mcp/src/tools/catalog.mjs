@@ -151,7 +151,7 @@ const ThreadRow = z.object({
 const LeadConversationInput = z.object({
   property_id: PropertyId.optional().describe('the lead (property) whose seller threads to read'),
   thread_id: Uuid.optional().describe('OR one inbox thread (e.g. a conversation_id from the Action Center / worklist)'),
-  window_days: z.number().int().min(1).max(1095).default(365).describe('only messages from the last N days (1–1095, default 365)'),
+  window_days: z.union([z.number().int().min(1).max(36500), z.literal('all')]).default(365).describe('only messages from the last N days (default 365), or "all": the whole conversation on record, paged by cursor'),
   limit: Limit(40, 30),
   cursor: Cursor.optional(),
 }).strict().refine((v) => Boolean(v.property_id) !== Boolean(v.thread_id), { message: 'give exactly one of property_id or thread_id' })
@@ -176,7 +176,8 @@ const WorklistRow = z.object({
   contact: Contact,
 }).strict()
 const RankingInput = z.object({
-  window_days: z.number().int().min(1).max(1095).default(30).describe('threads with a seller message in the last N days (1–1095)'),
+  window_days: z.union([z.number().int().min(1).max(36500), z.literal('all')]).optional().describe('threads with a seller message in the last N days, or "all": every thread on record (the default when traversing; 30 otherwise)'),
+  since: z.string().datetime({ offset: true }).optional().describe('incremental traversal: only threads whose latest seller message is at or after this time (implies traverse; agntei re-indexes what changed since its last pass)'),
   market: Label(60).optional(),
   max_threads: z.number().int().min(1).max(100).default(100).describe('threads scanned per call (≤ 4 worklist pages); truncated=true when more exist'),
   top: z.number().int().min(1).max(25).default(10).describe('rows returned in a single bounded batch (ignored when traversing: a page returns every scored thread)'),
@@ -435,7 +436,7 @@ export const TOOLS = Object.freeze([
     scope: 'leadcommand.conversations.read', min_role: 'operator',
     input: RankingInput,
     output: z.object({
-      window_days: z.number(), market: S, scanned: z.number(), total_with_inbound: N, pages_read: z.number(), truncated: z.boolean(),
+      window_days: z.union([z.number(), z.literal('all')]), since: S, market: S, scanned: z.number(), total_with_inbound: N, pages_read: z.number(), truncated: z.boolean(),
       ranked: z.array(z.object({ rank: z.number(), thread_id: z.string(), property_id: S, market: S, score: z.number(), next_step: z.string(), factors: z.array(z.object({ factor: z.string(), points: z.number(), evidence: z.string() }).strict()), flags: z.array(z.string()), interest: z.enum(INTEREST_STATES), verified: z.string(), last_inbound_at: S, latest_seller_text: S, decision_engine: loose, contact: Contact }).strict()),
       excluded: z.record(z.string(), z.number()), attention: z.record(z.string(), z.array(z.string())), factors: z.record(z.string(), z.number()), rule: z.string(), content_policy: z.string(), provenance: Prov,
       traverse: z.boolean(), resume_after: S,

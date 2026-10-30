@@ -664,6 +664,19 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261026150000_lc_mcp_corpus_census_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261026150000_lc_mcp_corpus_census_rollback_posttest.sql')],
   },
+  // ── LeadCommand MCP full history (owner A8 decision): the worklist and the conversation read with no time cutoff
+  // (window 0 = all history, still keyset-paged and page-limited). OPTIONAL, separately approved, applied AFTER
+  // lc_mcp_conversation_intel. Setup = the 1.1 setup + the 1.1 apply.
+  {
+    id: 'lc_mcp_full_history',
+    setup: [LC_MCP_ROLE_RESET, SHIM, 'mcp/leadcommand-mcp/migrations/test/lc_mcp_reader_supabase_emulation.sql', LC_MCP_READER,
+      'mcp/leadcommand-mcp/migrations/test/lc_mcp_conversation_intel_emulation.sql', M('PROPOSED_20261026120000_lc_mcp_conversation_intel.sql')],
+    pretest: M('PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql'),
+    apply: [M('PROPOSED_20261030120000_lc_mcp_full_history.sql')],
+    posttest: [M('PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql')],
+    rollback: [M('PROPOSED_20261030120000_lc_mcp_full_history_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261030120000_lc_mcp_full_history_rollback_posttest.sql')],
+  },
   // ── LeadCommand MCP 1.3 Operation Hidden Gold read coverage: five per-thread acquisition reads for lc_mcp_reader ──
   // OPTIONAL, separately approved, applied AFTER lc_mcp_reader (independent of the 1.1 / 1.2 optional links: whichever is
   // applied is judged by its self-check). Setup = the 1.1 setup (base emulation + the 1.0 reader + the production message /

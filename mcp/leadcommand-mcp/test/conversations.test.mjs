@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { connect, call, fixtureEnv } from './helpers.mjs'
 import { FIXTURE_PHONES } from '../fixtures/dataset.mjs'
-import { FIXTURE_CONV, CONV_INJECTION } from '../fixtures/conversations.mjs'
+import { FIXTURE_CONV, CONV_INJECTION, FIXTURE_CONV_NOW } from '../fixtures/conversations.mjs'
 import { DEFAULT_SCOPES, OPT_IN_SCOPES, SCOPE_NAMES } from '../src/authz/scopes.mjs'
 import { evaluateSelfCheck } from '../src/data/credential.mjs'
 import { RELATION_NAMES, ALL_RPC_SIGNATURES, OPTIONAL_RPC_SIGNATURES, RPC_SIGNATURES } from '../src/data/inventory.mjs'
@@ -125,7 +125,7 @@ test('lead conversation: history states separate present / missing / no_thread; 
     assert.ok(t.rows.some((m) => m.id === 'me-a7' && m.property_id === 'FX1002' && m.attribution === 'set'))
     const missing = result(await call(c.client, 'leadcommand_get_lead_conversation', { thread_id: '00000000-0000-4000-8000-0000000009ff' }))
     assert.equal(missing.subject.found, false)
-    for (const args of [{}, { property_id: 'FX1001', thread_id: FIXTURE_CONV.a }, { property_id: 'FX1001', limit: 41 }, { property_id: 'FX1001', window_days: 2000 }, { property_id: 'FX 1001; drop' }, { property_id: 'FX1001', phone: '+15550100101' }]) {
+    for (const args of [{}, { property_id: 'FX1001', thread_id: FIXTURE_CONV.a }, { property_id: 'FX1001', limit: 41 }, { property_id: 'FX1001', window_days: 36501 }, { property_id: 'FX1001', window_days: 0 }, { property_id: 'FX 1001; drop' }, { property_id: 'FX1001', phone: '+15550100101' }]) {
       const r = await call(c.client, 'leadcommand_get_lead_conversation', args)
       assert.equal(r.isError, true, JSON.stringify(args))
       assert.match(r.structuredContent.error.class, /invalid_input|unsupported_filter/)
@@ -380,11 +380,11 @@ test('ranking traversal: every thread with a seller message, page by page (curso
     const p2 = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 1095, max_threads: 2, resume_after: p1.resume_after }))
     assert.equal(p2.traverse, true)
     assert.equal(p1.scanned + p2.scanned, 4)
-    // both at once is refused; the window is bounded at 1095 days
+    // both at once is refused; a window is a positive number of days or "all"
     const both = await call(c.client, 'leadcommand_get_opportunity_ranking', { ...args, resume_after: p1.resume_after, cursor: 'lc1.' + 'x'.repeat(20) + '.y' })
     assert.equal(both.isError, true)
-    const wide = await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 1096 })
-    assert.equal(wide.isError, true)
+    const bad = await call(c.client, 'leadcommand_get_opportunity_ranking', { window_days: 0 })
+    assert.equal(bad.isError, true)
   } finally { await c.close() }
   // (a fresh connection: the ranking is rate-limited per minute)
   const d = await connect()
@@ -394,6 +394,34 @@ test('ranking traversal: every thread with a seller message, page by page (curso
     assert.equal(result(top1).ranked.length, 1)
     assert.equal(top1.structuredContent.page.next_cursor, null)
     assert.equal(result(top1).resume_after, null)
+  } finally { await d.close() }
+})
+
+test('full history (owner A8 decision): traversal reads every thread on record with no time cutoff; an incremental pass reads only what changed since', async () => {
+  const c = await connect()
+  try {
+    // traverse with no window = "all": every thread with a seller message, however old
+    const all = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { traverse: true, max_threads: 100 }))
+    assert.equal(all.window_days, 'all')
+    assert.equal(all.scanned, 4)
+    const explicit = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { traverse: true, window_days: 'all', max_threads: 100 }))
+    assert.deepEqual(explicit.ranked.map((x) => x.thread_id), all.ranked.map((x) => x.thread_id))
+    // since = 48 h before the fixture's now: only the threads whose latest seller message is newer (a at 2 h, b at 30 h)
+    const since = new Date(FIXTURE_CONV_NOW - 48 * 3_600_000).toISOString()
+    const inc = result(await call(c.client, 'leadcommand_get_opportunity_ranking', { since, max_threads: 100 }))
+    assert.equal(inc.traverse, true, 'since implies traverse')
+    assert.equal(inc.since, since)
+    assert.deepEqual(new Set(inc.ranked.map((x) => x.thread_id)), new Set([FIXTURE_CONV.a, FIXTURE_CONV.b]))
+    assert.ok(inc.ranked.every((x) => Date.parse(x.last_inbound_at) >= Date.parse(since)))
+  } finally { await c.close() }
+  const d = await connect()
+  try {
+    const future = await call(d.client, 'leadcommand_get_opportunity_ranking', { since: '2099-01-01T00:00:00Z' })
+    assert.equal(future.isError, true, 'a since in the future is refused')
+    // one thread's whole conversation on record
+    const conv = result(await call(d.client, 'leadcommand_get_lead_conversation', { thread_id: FIXTURE_CONV.d, window_days: 'all' }))
+    assert.equal(conv.history.window_days, 0, '0 = the whole conversation on record')
+    assert.ok(['present', 'empty', 'missing'].includes(conv.history.state))
   } finally { await d.close() }
 })
 
