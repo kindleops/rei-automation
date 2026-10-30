@@ -20,7 +20,7 @@
 // ("I don't own the Oak Hollow one, never did. Pine Crest is mine though"; "Mill Race is my rental,
 // I'd sell that one. Orchard View is where I live, not selling"): each clause that names exactly one
 // property carries that property's ownership / interest answer (clauseFacts).
-import { OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, NOT_INTERESTED_RE } from './fact-ledger.js'
+import { OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, NOT_INTERESTED_RE, withoutLowballObjection } from './fact-ledger.js'
 
 const clean = (v) => String(v ?? '').trim()
 const t = (m) => Date.parse(m?.at || m?.event_timestamp || m?.created_at || 0) || 0
@@ -111,7 +111,8 @@ export function clauseFacts(text, index) {
     const property = named.length === 1 ? named[0] : named.length === 0 && refersBack && lastProperty ? lastProperty : null
     if (!property) continue
     const ownership = CLAUSE_DENY_RE.test(clause) || OWN_DENY_RE.test(clause) || OWN_FORMER_RE.test(clause) ? 'denied' : CLAUSE_CONFIRM_RE.test(clause) || OWN_CONFIRM_RE.test(clause) ? 'confirmed' : null
-    const interest = CLAUSE_DISINTEREST_RE.test(clause) || NOT_INTERESTED_RE.test(clause) ? 'not_interested' : CLAUSE_INTEREST_RE.test(clause) ? 'interested' : null
+    const declined = withoutLowballObjection(clause) // "not interested in lowball offers" is a price objection
+    const interest = CLAUSE_DISINTEREST_RE.test(declined) || NOT_INTERESTED_RE.test(declined) ? 'not_interested' : CLAUSE_INTEREST_RE.test(clause) ? 'interested' : null
     const prev = out.find((x) => x.property === property)
     if (prev) { prev.ownership = prev.ownership || ownership; prev.interest = prev.interest || interest; prev.clause += ` ${clause}` } else out.push({ property, ownership, interest, clause })
     lastProperty = property

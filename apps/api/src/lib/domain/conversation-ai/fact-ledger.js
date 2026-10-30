@@ -74,6 +74,11 @@ export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:th
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
 const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
 export const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
+// blind v9 Y20: "not interested in lowball offers" from an owner is a price objection, not a decline to sell. The phrase is
+// set aside before NOT_INTERESTED_RE is read, so any other decline in the same message still counts.
+export const LOWBALL_OBJECTION_RE = /\bnot\s+(?:interested\s+in|looking\s+for|entertaining|taking|accepting)\s+(?:any\s+)?(?:low[\s-]?ball(?:ing)?|low|cheap|insulting|ridiculous|junk|garbage)\s+(?:offers?|bids?|prices?|numbers?)\b/i
+export const withoutLowballObjection = (body) => String(body ?? '').replace(new RegExp(LOWBALL_OBJECTION_RE.source, 'gi'), ' ')
+export const declinesSelling = (body) => NOT_INTERESTED_RE.test(withoutLowballObjection(body))
 export const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 const CONDITION_RE = /\b(?:roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i
@@ -265,14 +270,20 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
       if (!facts.ownership || facts.ownership.value !== 'denied') addFact(facts, 'ownership', 'representative', m)
     }
     // interest
-    if (INTEREST_INTENTS[intent]) addFact(facts, 'seller_interest', INTEREST_INTENTS[intent], m)
-    else if (NOT_INTERESTED_RE.test(body)) addFact(facts, 'seller_interest', 'not_interested', m)
+    // a classifier's not_interested on a message whose only decline is a lowball objection is read as the objection
+    const lowballOnly = LOWBALL_OBJECTION_RE.test(body) && !declinesSelling(body)
+    if (INTEREST_INTENTS[intent] && !(lowballOnly && INTEREST_INTENTS[intent] === 'not_interested')) addFact(facts, 'seller_interest', INTEREST_INTENTS[intent], m)
+    else if (declinesSelling(body)) addFact(facts, 'seller_interest', 'not_interested', m)
+    else if (LOWBALL_OBJECTION_RE.test(body)) {
+      objections.push({ kind: 'lowball_objection', source_message_id: m.id })
+      addFact(facts, 'seller_interest', 'conditional', m, 'lowball_objection_conditional')
+    }
     else if (lastAsked === 'interest' && BARE_YES_RE.test(body)) addFact(facts, 'seller_interest', 'interested', m)
     else if (lastAsked === 'interest' && bareNoAnswer(body).matched) addFact(facts, 'seller_interest', 'not_interested', m)
     else if (lastAsked === 'interest' && BARE_MAYBE_RE.test(body)) addFact(facts, 'seller_interest', 'conditional', m)
     // rc-8.5.21 v4 (coverage): a stated wish to sell ("just want it gone before winter", "I'd sell", "la quiero
     // vender") is interest — never when the same message negates it
-    else if (!facts.seller_interest?.source_message_ids?.includes(m.id) && WANTS_TO_SELL_RE.test(body) && !NOT_INTERESTED_RE.test(body) && !/\b(?:don'?t|dont|do\s+not|never|not|no)\s+(?:\w+\s+){0,2}(?:want|need|ready|sell|selling)\b|(?<![\p{L}])no\s+(?:la|lo)?\s*(?:quiero|voy\s+a)\s+vender/iu.test(body)) addFact(facts, 'seller_interest', 'interested', m, 'stated_wish_to_sell')
+    else if (!facts.seller_interest?.source_message_ids?.includes(m.id) && WANTS_TO_SELL_RE.test(body) && !declinesSelling(body) && !/\b(?:don'?t|dont|do\s+not|never|not|no)\s+(?:\w+\s+){0,2}(?:want|need|ready|sell|selling)\b|(?<![\p{L}])no\s+(?:la|lo)?\s*(?:quiero|voy\s+a)\s+vender/iu.test(body)) addFact(facts, 'seller_interest', 'interested', m, 'stated_wish_to_sell')
     // rc-8.5.21: a financing-terms objection is conditional interest (latest statement wins)
     if (FINANCING_OBJECTION_RE.test(body)) {
       objections.push({ kind: 'financing_terms_objection', source_message_id: m.id })
@@ -493,8 +504,9 @@ export function validateProposedMessage(ledger, { kind = null, text = null, inbo
     const deflectedByIdentity = (q.identity_deflected_by || []).includes(ledger?.last_message?.id)
     // the re-ask is allowed only INSIDE an identity answer ("I'm a local buyer … do you still own it?")
     // rc-8.5.21 v4 (coverage): the identity answer in Spanish, and a plain name answer ("It's Helen") to "what's your name?"
-    const answersIdentity = /\b(?:buyer|investor|local|we\s+buy|real\s+estate|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || '')) ||
-      /(?<![\p{L}])(?:compr(?:o|amos|ador|adora|adores)|inversionista|inversionistas|registros\s+p[uú]blicos|soy\s+\p{Lu}\p{Ll}+|me\s+llamo|mi\s+nombre\s+es|(?:it'?s|this\s+is|my\s+name\s+is|name'?s)\s+\p{Lu}\p{Ll}+)(?![\p{L}])/u.test(String(text || ''))
+    // blind v9 Y15: the disclosed-AI identity answer ("I'm Nova, an AI assistant with Reivesti Home Buyers") is one too
+    const answersIdentity = /\b(?:buyers?|investors?|local|we\s+buy|real\s+estate|ai\s+assistant|i'?m\s+(?:a|with|from)|we'?re\s+(?:a|local)|public\s+(?:property\s+)?records)\b/i.test(String(text || '')) ||
+      /(?<![\p{L}])(?:compr(?:o|amos|ador|adora|adores)|inversionista|inversionistas|registros\s+p[uú]blicos|soy\s+\p{Lu}\p{Ll}+|me\s+llamo|mi\s+nombre\s+es|(?:it'?s|this\s+is|i'?m|my\s+name\s+is|name'?s)\s+\p{Lu}\p{Ll}+)(?![\p{L}])/u.test(String(text || ''))
     const identityRepeat = (inboundIntent === 'who_is_this' || (deflectedByIdentity && answersIdentity)) && k !== 'asking_price' && q.asked_count < 2
     if (!identityRepeat) reasons.push(`already_asked:${k}`)
   }
