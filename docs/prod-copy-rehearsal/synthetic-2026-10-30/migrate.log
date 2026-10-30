@@ -1,0 +1,20 @@
+2026-10-30T05:20:05.232Z SHA-256 of all five links match docs/AGENT-TEXTS-DIFF-AUDIT.md; fixtures lint clean
+2026-10-30T05:20:06.476Z cycle 1: #29 pretest 46 ms · apply 83 ms · posttest pass 118 ms · CHECK re-validation action_gateway.seller_action_receipts 0 rows 14 ms
+2026-10-30T05:20:07.442Z cycle 1: #30 pretest 17 ms · apply 159 ms · posttest advisory_fail 28 ms
+2026-10-30T05:20:08.371Z cycle 1: #31 pretest 22 ms · apply 55 ms · posttest pass 121 ms · CHECK re-validation action_gateway.capability_grants 0 rows 11 ms; action_gateway.action_authorizations 0 rows 16 ms; action_gateway.action_authorizations 0 rows 22 ms
+2026-10-30T05:20:08.587Z cycle 1: §1 verbatim all true after #31 (the plan's precondition for A and B)
+2026-10-30T05:20:09.443Z cycle 1: A pretest 24 ms · apply 56 ms · posttest pass 27 ms · CHECK re-validation ai_generated_messages 0 rows 17 ms; ai_generated_messages 0 rows 16 ms; ai_generated_messages 0 rows 16 ms; ai_generated_messages 0 rows 16 ms; ai_generated_messages 0 rows 13 ms; ai_generated_messages 0 rows 15 ms
+2026-10-30T05:20:10.562Z cycle 1: B pretest 27 ms · apply 176 ms · posttest pass 107 ms · CHECK re-validation action_gateway.seller_action_receipts 0 rows 15 ms; action_gateway.capability_grants 0 rows 20 ms; action_gateway.capability_grants 0 rows 18 ms; action_gateway.action_authorizations 0 rows 12 ms
+2026-10-30T05:20:11.127Z rollback B: 191 ms · rollback posttest pass 77 ms
+2026-10-30T05:20:11.199Z rollback A: 51 ms · rollback posttest pass 19 ms
+2026-10-30T05:20:11.349Z rollback #31: 49 ms · rollback posttest pass 85 ms
+2026-10-30T05:20:11.510Z rollback #30: 66 ms · rollback posttest pass 89 ms
+2026-10-30T05:20:11.700Z rollback #29: 110 ms · rollback posttest pass 71 ms
+2026-10-30T05:20:11.912Z rollback restored the pre-apply fingerprint 31ff3e92c89a0d9c and the row counts
+2026-10-30T05:20:12.878Z cycle 2 (re-apply): #29 pretest 38 ms · apply 75 ms · posttest pass 118 ms · CHECK re-validation action_gateway.seller_action_receipts 0 rows 18 ms
+2026-10-30T05:20:13.818Z cycle 2 (re-apply): #30 pretest 17 ms · apply 163 ms · posttest advisory_fail 42 ms
+2026-10-30T05:20:14.660Z cycle 2 (re-apply): #31 pretest 19 ms · apply 77 ms · posttest pass 77 ms · CHECK re-validation action_gateway.action_authorizations 0 rows 16 ms; action_gateway.action_authorizations 0 rows 15 ms; action_gateway.capability_grants 0 rows 10 ms
+2026-10-30T05:20:14.817Z cycle 2 (re-apply): §1 verbatim all true after #31 (the plan's precondition for A and B)
+2026-10-30T05:20:15.688Z cycle 2 (re-apply): A pretest 19 ms · apply 51 ms · posttest pass 38 ms · CHECK re-validation ai_generated_messages 0 rows 12 ms; ai_generated_messages 0 rows 11 ms; ai_generated_messages 0 rows 12 ms; ai_generated_messages 0 rows 14 ms; ai_generated_messages 0 rows 20 ms; ai_generated_messages 0 rows 16 ms
+2026-10-30T05:20:16.863Z cycle 2 (re-apply): B pretest 30 ms · apply 217 ms · posttest pass 132 ms · CHECK re-validation action_gateway.seller_action_receipts 0 rows 15 ms; action_gateway.capability_grants 0 rows 13 ms; action_gateway.capability_grants 0 rows 15 ms; action_gateway.action_authorizations 0 rows 16 ms
+2026-10-30T05:20:17.204Z migrate: pass (12149 ms)

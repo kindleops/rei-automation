@@ -1,0 +1,36 @@
+{
+  "step": "destroy",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_20261030",
+  "admin_url": "postgres://postgres@127.0.0.1:54341/postgres",
+  "started_at": "2026-10-30T05:20:20.769Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": true,
+    "target": {
+      "database": "lc_prodcopy_synth_20261030",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    }
+  },
+  "status": "pass",
+  "results": {
+    "existed": true,
+    "dropped": true,
+    "database_gone": true,
+    "note": "evidence files are kept; delete any owner-only file separately"
+  },
+  "finished_at": "2026-10-30T05:20:21.381Z",
+  "ms": 613
+}

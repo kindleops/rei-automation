@@ -140,7 +140,7 @@ function assertServerIsDisposable(adminUrl) {
 
 // ── fingerprint ────────────────────────────────────────────────────────────
 
-const FINGERPRINT_SQL = `
+export const FINGERPRINT_SQL = `
 with ns as (select oid, nspname from pg_namespace where nspname not in ('pg_catalog','information_schema','pg_toast','${SCRATCH_SCHEMA}') and nspname not like 'pg_temp%' and nspname not like 'pg_toast_temp%')
 select 'ns'::text k, n.nspname::text o, coalesce(array_to_string(n.nspacl, ','), '') d from pg_namespace n join ns on ns.oid = n.oid
 union all select 'rel', format('%s.%s', ns.nspname, c.relname), format('%s:%s%s:%s', c.relkind, c.relrowsecurity, c.relforcerowsecurity, coalesce(array_to_string(c.relacl, ','), ''))
@@ -157,19 +157,19 @@ union all select 'view', format('%s.%s', schemaname, viewname), md5(definition) 
 union all select 'role', rolname::text, format('%s:%s:%s', rolsuper, rolbypassrls, rolcanlogin) from pg_roles where rolname !~ '^pg_'
 order by 1, 2`
 
-function fingerprint(url) {
+export function fingerprint(url) {
   const out = sql(url, FINGERPRINT_SQL)
   return { hash: crypto.createHash('sha256').update(out).digest('hex').slice(0, 16), lines: out.split('\n') }
 }
 
-function rowCounts(url) {
+export function rowCounts(url) {
   const out = sql(url, `select coalesce(string_agg(format('%s=%s', c.oid::regclass, (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from %s', c.oid::regclass), false, true, '')))[1]::text), ',' order by c.oid::regclass::text), '')
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
    where c.relkind = 'r' and n.nspname not in ('pg_catalog','information_schema','${SCRATCH_SCHEMA}') and n.nspname not like 'pg_%'`)
   return out
 }
 
-function diffLines(a, b) {
+export function diffLines(a, b) {
   const A = new Set(a)
   const B = new Set(b)
   return { removed: a.filter((x) => !B.has(x)).slice(0, 20), added: b.filter((x) => !A.has(x)).slice(0, 20) }
@@ -204,7 +204,7 @@ function hasOwnTransaction(file) {
   return /^\s*(begin|start\s+transaction)\s*;/im.test(src.replace(/--[^\n]*/g, ''))
 }
 
-function applyFile(url, file, env) {
+export function applyFile(url, file, env) {
   // recorded production history (applied-in-production.mjs) is never re-applied, by path or by header marker
   assertNotAppliedInProduction(file)
   const args = hasOwnTransaction(file) ? ['-f', rel(file)] : ['--single-transaction', '-f', rel(file)]

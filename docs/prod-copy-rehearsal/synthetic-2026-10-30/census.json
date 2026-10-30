@@ -1,0 +1,376 @@
+{
+  "step": "census",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_20261030",
+  "admin_url": "postgres://postgres@127.0.0.1:54341/postgres",
+  "started_at": "2026-10-30T05:20:17.300Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": true,
+    "target": {
+      "database": "lc_prodcopy_synth_20261030",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    }
+  },
+  "status": "pass",
+  "results": {
+    "reader_stack": {
+      "applied": [
+        {
+          "action": "rollback #30 (documented reader order: 1.1 / 1.2 before #30)",
+          "ok": true
+        },
+        {
+          "action": "apply reader 1.1 conversation intelligence",
+          "file": "PROPOSED_20261026120000_lc_mcp_conversation_intel.sql",
+          "sha256": "037bedb92904fe5607250c13eb30a394f682f55593bc373eb9dcd958de54482d",
+          "pretest": "pass",
+          "apply_ms": 129,
+          "posttest": "not run (its posttest asserts the runner's synthetic seeds)"
+        },
+        {
+          "action": "apply reader 1.2 corpus census",
+          "file": "PROPOSED_20261026150000_lc_mcp_corpus_census.sql",
+          "sha256": "91e43d634d7c3d5263279d0269b5fcfd1744f23509fbfba940e739038db7d5fa",
+          "pretest": "pass",
+          "apply_ms": 153,
+          "posttest": "not run (its posttest asserts the runner's synthetic seeds)"
+        },
+        {
+          "action": "re-apply #30 after the reader chain",
+          "pretest": "pass",
+          "ok": true
+        }
+      ],
+      "note": "PROPOSED reader links applied inside the isolated copy only, in the documented order; production is untouched"
+    },
+    "read_only": {
+      "default_transaction_read_only": "on",
+      "write_probe_refused_sqlstate": "25006",
+      "how": "PGOPTIONS=-c default_transaction_read_only=on and SET default_transaction_read_only = on in every census / hidden-gold session"
+    },
+    "lc_mcp_corpus_census": {
+      "as_of": "2026-10-30T05:20:18.331331+00:00",
+      "market": null,
+      "contact": {
+        "threads_opted_out": 1,
+        "threads_suppressed": 1,
+        "threads_wrong_number": 1,
+        "threads_not_contactable": 0,
+        "threads_unanswered_inbound": 6,
+        "threads_unanswered_over_7d": 2
+      },
+      "sources": {
+        "phones": 10,
+        "campaigns": 0,
+        "prospects": 3,
+        "properties": 12,
+        "master_owners": 11,
+        "message_events": {
+          "rows": 22,
+          "inbound": 10,
+          "outbound": 12,
+          "latest_at": "2026-10-29T05:20:01.488427+00:00",
+          "earliest_at": "2025-06-16T05:20:01.488427+00:00",
+          "inbound_unknown_sender": 0
+        },
+        "campaign_targets": {
+          "rows": 0,
+          "properties": 0
+        },
+        "eg_property_facts": 12,
+        "inbox_thread_state": {
+          "threads": 9,
+          "with_inbound": 9,
+          "with_outbound": 9,
+          "with_property": 9
+        },
+        "sms_suppression_list": {
+          "rows": 2,
+          "active": 2
+        },
+        "campaign_target_graph": {
+          "rows": 11,
+          "phones": 10,
+          "properties": 11,
+          "sms_eligible_rows": 8
+        },
+        "acquisition_opportunities": {
+          "open": 3,
+          "rows": 3,
+          "stale_open_60d": 0
+        },
+        "property_acquisition_scores": {
+          "rows": 2,
+          "fresh_30d": 1
+        }
+      },
+      "coverage": {
+        "leads": 12,
+        "deal_linked": 0,
+        "with_thread": 9,
+        "equity_known": 9,
+        "with_inbound": 9,
+        "contacted_90d": 8,
+        "last_contact_set": 10,
+        "with_property_row": 12,
+        "pipeline_stage_set": 7,
+        "estimated_value_set": 12,
+        "in_campaign_targets": 0,
+        "with_phone_on_graph": 11,
+        "with_decision_engine": 2,
+        "conversation_stage_set": 8,
+        "with_sms_eligible_phone": 8,
+        "with_fresh_decision_engine": 1
+      },
+      "evidence": {
+        "probate": 0,
+        "active_lien": 0,
+        "preforeclosure": 0,
+        "tax_delinquent": 2,
+        "distress_signals": 4,
+        "equity_30pct_plus": 8,
+        "out_of_state_owner": 0,
+        "distress_signals_2plus": 2,
+        "signals_never_contacted": 1,
+        "owner_several_properties": 2
+      },
+      "lead_key": "eg_property_facts.property_id",
+      "duplicates": {
+        "facts_without_property_row": 0,
+        "properties_sharing_address": {
+          "groups": 1,
+          "properties": 2
+        },
+        "phones_on_several_properties": 1,
+        "properties_without_facts_row": 0,
+        "owners_with_several_properties": {
+          "owners": 1,
+          "properties": 2
+        },
+        "properties_with_several_threads": 0
+      },
+      "columns_absent": [
+        "active_lien",
+        "asset_type",
+        "campaign_count",
+        "contact_candidate_phones",
+        "deal_id",
+        "equity_class",
+        "is_hot_preforeclosure",
+        "out_of_state_owner",
+        "owner_type_guess",
+        "property_type",
+        "rec_has_probate"
+      ],
+      "columns_present": [
+        "conversation_stage",
+        "conversation_status",
+        "distress_signal_count",
+        "equity_known_pct",
+        "estimated_value",
+        "last_contact_at",
+        "last_contact_direction",
+        "owner_property_count",
+        "pipeline_stage",
+        "pipeline_status",
+        "property_address_state",
+        "sms_status",
+        "tax_delinquent"
+      ],
+      "decision_engine": {
+        "leads_in_conversation": 9,
+        "without_decision_engine": 7,
+        "decision_engine_older_than_30d": 1
+      },
+      "pipeline_health": {
+        "deal_linked_no_contact_60d": 0,
+        "needs_review_unresolved_14d": 0,
+        "interest_label_no_contact_30d": 3,
+        "contactable_phone_never_contacted": 2,
+        "pipeline_without_conversation_stage": 0,
+        "sms_opted_out_label_without_thread_opt_out": 0
+      }
+    },
+    "aggregates": {
+      "leads": 12,
+      "properties": 12,
+      "unique_contacts": {
+        "phones_on_graph": 10,
+        "thread_numbers": 9,
+        "distinct_numbers_total": 10
+      },
+      "sms_conversations": {
+        "threads": 9,
+        "with_inbound": 9,
+        "two_way": 9,
+        "last_inbound_older_than_365d": 1,
+        "messages": 22,
+        "inbound_messages": 10,
+        "outbound_messages": 12
+      },
+      "unanswered_seller_messages": {
+        "threads_seller_spoke_last": 7,
+        "waiting_over_24h": 7,
+        "waiting_over_7d": 2,
+        "waiting_over_30d": 1,
+        "excluding_opted_out_suppressed_wrong_number": 5
+      },
+      "interest": {
+        "inbound_by_detected_intent": {
+          "offer_request": 3,
+          "callback_request": 1,
+          "counter_offer": 1,
+          "interested": 1,
+          "not_interested": 1,
+          "opt_out": 1,
+          "price_given": 1,
+          "wrong_number": 1
+        },
+        "interest_stage_labels": 7
+      },
+      "asking_prices_and_counteroffers": {
+        "seller_offers": {
+          "rows": 2,
+          "by_direction": {
+            "inbound": 1,
+            "outbound": 1
+          },
+          "by_offer_type": {
+            "cash": 1,
+            "counter": 1
+          },
+          "by_status": {
+            "active": 1,
+            "superseded": 1
+          }
+        },
+        "opportunities_with_asking_price": 2,
+        "opportunities_with_current_offer": 1,
+        "inbound_with_price_intent": 2,
+        "inbound_with_dollar_amount": 2
+      },
+      "callbacks": {
+        "followup_intents_by_state": {
+          "planned": 1
+        },
+        "followup_intents_by_kind": {
+          "callback": 1
+        },
+        "inbound_callback_requests": 1
+      },
+      "stalled_negotiations": {
+        "open_negotiations": 2,
+        "no_activity_14d": 1,
+        "no_activity_30d": 1
+      },
+      "warm_hot": {
+        "threads_by_temperature": {
+          "(not set)": 4,
+          "cold": 1,
+          "hot": 1,
+          "warm": 3
+        },
+        "threads_warm_or_hot": 4,
+        "opportunities_by_temperature": {
+          "hot": 1,
+          "warm": 2
+        }
+      },
+      "missing_next_actions": {
+        "threads": 5,
+        "of_which_seller_spoke_last": 5
+      },
+      "duplicates_conflicts": {
+        "identity_conflict_threads": 0,
+        "suppression_conflict_threads": 1
+      },
+      "suppression": {
+        "suppression_list_active_rows": 2,
+        "suppression_list_by_type": {
+          "manual_dnc": 1,
+          "opt_out": 1
+        },
+        "threads_flagged_suppressed": 1,
+        "threads_by_contactability": {
+          "contactable": 7,
+          "opted_out": 1,
+          "wrong_number": 1
+        },
+        "opt_out_messages": 1,
+        "automation_suppressions_active": 0
+      },
+      "concentration": {
+        "leads_by_market": {
+          "Synthetic Metro A, TX": 8,
+          "Synthetic Metro B, OK": 4
+        },
+        "threads_with_inbound_by_market": {
+          "Synthetic Metro A, TX": 6,
+          "Synthetic Metro B, OK": 3
+        },
+        "unanswered_by_market": {
+          "Synthetic Metro A, TX": 6,
+          "Synthetic Metro B, OK": 1
+        },
+        "leads_by_zip_top25": {
+          "(5 group(s) under 5, folded)": 12
+        },
+        "threads_with_inbound_by_zip_top25": {
+          "(5 group(s) under 5, folded)": 9
+        },
+        "zip_min_cell": 5,
+        "zip_groups_total": 5
+      },
+      "eligibility": {
+        "source": "public.lc_mcp_thread_contact_eligibility (reader 1.3) for every inbox thread, judged by the rehearsal's fail-closed rule",
+        "threads": 9,
+        "eligible": 2,
+        "blocked": 4,
+        "unknown": 3,
+        "contactable": 2,
+        "unknown_counted_as_contactable": 0,
+        "by_blocking_reason": {
+          "thread_suppressed": 1,
+          "contactability_opted_out": 1,
+          "suppression_list_active": 2,
+          "phone_status_blocked": 2,
+          "contactability_wrong_number": 1,
+          "contact_role_not_owner": 1,
+          "phone_wrong_number": 1,
+          "hold_blocks_ai_action": 1
+        },
+        "by_unknown_reason": {
+          "ownership_unconfirmed": 2,
+          "line_type_unknown": 1
+        },
+        "rule": "contactable = eligible only; unknown and blocked are never contactable; eligible is a read of the send-time guard inputs, never a send authorization"
+      }
+    },
+    "definitions": {
+      "unique_contacts": "distinct E.164 numbers (counted, never listed) on the campaign graph, on inbox threads, and across both",
+      "unanswered_seller_messages": "threads whose latest message_events row (by created_at) is inbound",
+      "interest": "detected intents as recorded on inbound messages, and pipeline interest labels (labels, not seller words; the hidden-gold step reads the words)",
+      "asking_prices_and_counteroffers": "seller_offers rows by direction / type / status; opportunities carrying an asking price or a current offer; inbound messages whose recorded intent names a price / counter, or whose text holds a dollar amount (counted, never read out)",
+      "stalled_negotiations": "open opportunities with an asking price, a current offer or a negotiation / offer / counter stage, and no thread or opportunity activity for 14 / 30 days",
+      "missing_next_actions": "threads with seller inbound, not suppressed / opted out / wrong number by their flags, with no next_action on the thread, no pending follow-up intent and no open opportunity carrying a next action",
+      "duplicates_conflicts": "with the census duplicates: threads whose messages name more than one property; threads where the active suppression list and the thread's own opt-out / suppressed flags disagree (either direction)",
+      "concentration": "markets in full; ZIP groups under 5 leads are folded (small-area counts are not published)"
+    },
+    "output_policy": "aggregate counts only: no names, phone numbers, addresses, thread keys or message bodies"
+  },
+  "finished_at": "2026-10-30T05:20:19.222Z",
+  "ms": 1922
+}

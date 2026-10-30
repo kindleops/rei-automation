@@ -1,0 +1,107 @@
+{
+  "step": "prereqs",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_20261030",
+  "admin_url": "postgres://postgres@127.0.0.1:54341/postgres",
+  "started_at": "2026-10-30T05:20:04.622Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": true,
+    "target": {
+      "database": "lc_prodcopy_synth_20261030",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    }
+  },
+  "status": "pass",
+  "results": {
+    "section1": {
+      "sql_sha256": "c3d2e47b3aec7e0c0179d7579b73014dd33f94438ce4a0f9d47e820c9e7d766d",
+      "source": "docs/AGENT-MESSAGES-MIGRATION-PLAN.md §1 (verbatim)",
+      "verbatim": {
+        "ledger": true,
+        "link_26": true,
+        "link_27": true,
+        "link_28": true,
+        "link_28_send_authority": true,
+        "link_29": false,
+        "link_31": false,
+        "link_31_check": null,
+        "gateway_self_check": true,
+        "relations": true
+      },
+      "guarded": {
+        "ledger": true,
+        "link_26": true,
+        "link_27": true,
+        "link_28": true,
+        "link_28_send_authority": true,
+        "link_29": false,
+        "link_31": false,
+        "link_31_check": false,
+        "relations": true,
+        "gateway_self_check": true
+      },
+      "verbatim_matches_guarded": true
+    },
+    "interpretation": "docs/AGENT-MESSAGES-MIGRATION-PLAN.md §1 was written for links A and B only, so it also asks for #29 and #31. The rehearsal applies #29, #30, #31, A, B in order (docs/AGENT-TEXTS-CHANGE-RISK-REPORT.md, deployment step 3): before it, ledger, link_26, link_27, link_28, link_28_send_authority, gateway_self_check, relations must be true and link_29, link_31, link_31_check must still be false; migrate re-runs the verbatim query after #31 and requires every value true before A.",
+    "required_true": {
+      "ledger": true,
+      "link_26": true,
+      "link_27": true,
+      "link_28": true,
+      "link_28_send_authority": true,
+      "gateway_self_check": true,
+      "relations": true
+    },
+    "must_not_be_applied_yet": {
+      "link_29": false,
+      "link_31": false,
+      "link_31_check": false
+    },
+    "reader": {
+      "reader_1_0": true,
+      "reader_1_1_conversation_intel": false,
+      "reader_1_2_corpus_census": false,
+      "reader_1_3_acquisition_reads": false
+    },
+    "switches": {
+      "ok": true,
+      "switches": [
+        {
+          "key": "ai_agent_text_enabled",
+          "value": "absent",
+          "off": true
+        },
+        {
+          "key": "ai_agent_message_enabled",
+          "value": "absent",
+          "off": true
+        },
+        {
+          "key": "ai_conversation_send_enabled",
+          "value": "false",
+          "off": true
+        }
+      ],
+      "rule": "absent or false (each is enabled only by the value true)"
+    },
+    "warnings": [
+      "ORDERING: reader 1.1 / 1.2 are not applied. Once #30 is applied, 1.1 and 1.2 can no longer be applied (their apply self-check refuses #30's functions as unexpected reachable definers) until #30 is rolled back — the documented reader order is 1.0 → 1.1 → 1.2 → #30. The census step applies them inside this copy by rolling #30 back first and re-applying it after."
+    ],
+    "problems": []
+  },
+  "finished_at": "2026-10-30T05:20:04.971Z",
+  "ms": 349
+}

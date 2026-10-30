@@ -1,0 +1,13 @@
+{
+  "params": {
+    "window_days": 365,
+    "market": null,
+    "category": "recent_inbound",
+    "rule": "lc_opportunity_rank_v1"
+  },
+  "now": "2026-10-30T05:20:19.689Z",
+  "after": "20260926052001488427.5e000000-0000-4000-8000-000000000105",
+  "pages": 1,
+  "done": true,
+  "total_with_inbound": 8
+}
