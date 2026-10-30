@@ -32,7 +32,7 @@ import { buildCanonicalLedger } from './fact-ledger.js'
 import { moneyMentions } from './validator.js'
 import { claimedNames } from './playbook/v3/style-validator.js'
 import { isStopRequest } from './stop-request.js'
-import { conditionGroundingReasons } from './condition-grounding.js'
+import { conditionGroundingReasons, conditionEvidenceOf, conditionFamiliesIn } from './condition-grounding.js'
 import { replyLanguageOf } from './send-policy.js'
 import { NO_COMPANY_IDENTITY } from './company-identity.js'
 import { transportContentReasons } from '@/lib/domain/messaging/transport-content-rules.js'
@@ -94,6 +94,37 @@ const cap = (s) => clean(s).split(/[\s._-]+/)[0].replace(/^./, (c) => c.toUpperC
  * @param {string} o.now
  * @returns {{ ok: boolean, code: string|null, reasons: string[], money: { amounts: number[], amount: number|null }, non_owner: object, seller_language: string|null, version: string }}
  */
+// blind v13 S10, S21, S38: an attribution to the seller ("You mentioned the basement takes water…") whose topic is none of
+// the ledger's five is accepted only when it is grounded in the seller's OWN words: one seller clause holds at least 60% of
+// its content words (at least two), with the same polarity (a negation on one side and not the other is never grounded)
+const ATTRIBUTED_CLAUSE_RE = /\byou(?:'d|\s+had|\s+have|'ve)?\s+(?:mentioned|said|told\s+(?:me|us)|noted|shared|explained|indicated)\b(?:\s+that)?([^.?!;]{3,160})/i
+const STOP_WORDS = new Set('the a an and or but of to in on at for with it its it\'s this that these those is are was were be been being you your you\'d you\'ll i i\'d i\'ll me my we our us they them their he she his her if so as by from up out about just really very some any all would could should might may will can do does did have has had get got there here when what which who how than then too also not no never'.split(' '))
+const NEGATION_RE = /\b(?:not|never|no|n't|dont|wont|cant|isnt|arent|wasnt|didnt|doesnt)\b|n't\b/i
+const stem = (w) => w.replace(/'(?:d|ll|s|re|ve|m)$/, '').replace(/(?:ing|ed|es|s)$/, '')
+const contentWords = (text) => [...new Set(String(text || '').toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w)).map(stem).filter((w) => w.length > 2))]
+export function attributionGroundedInSellerWords(text, thread = []) {
+  const m = ATTRIBUTED_CLAUSE_RE.exec(String(text || ''))
+  if (!m) return false
+  const clause = m[1]
+  const words = contentWords(clause)
+  if (words.length < 2) return false
+  const sellerClauses = thread.filter((x) => x?.direction === 'inbound').flatMap((x) => String(x.body || '').split(/[.!?;]+|\bbut\b/i)).filter((c) => c.trim())
+  let best = null; let bestHit = 0
+  for (const c of sellerClauses) { const cw = new Set(contentWords(c)); const hit = words.filter((w) => cw.has(w)).length; if (hit > bestHit) { bestHit = hit; best = c } }
+  if (!best || bestHit / words.length < 0.6) return false
+  return NEGATION_RE.test(clause) === NEGATION_RE.test(best)
+}
+
+// blind v13 S14: after the seller described ONE part of the property ("Furnace is on its last legs"), a question about
+// OTHER parts ("how are the roof, plumbing and foundation?") is a new question, not a re-ask of an answered one
+function asksAboutUnreportedCondition(text, thread) {
+  if (!/\?/.test(String(text || ''))) return false
+  const named = conditionFamiliesIn(String(text || '').split(/(?<=[.!])\s+/).filter((s) => /\?/.test(s)).join(' '))
+  if (!named.length) return false
+  const by = conditionEvidenceOf({ thread })
+  return named.some((f) => !by[f]?.has('seller_reported'))
+}
+
 function unansweredFollowUpRepeat(kind, { purpose, ledger, thread }) {
   if (purpose !== 'followup' || kind === 'asking_price') return false
   const q = ledger?.questions?.[kind]
@@ -158,6 +189,8 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
     // blind v10 W39, W40: a no-reply follow-up may repeat the question the seller never answered (LeadCommand's own
     // follow-up templates do: "Following up on …. Are you still the owner?"); only while the seller has sent NOTHING
     // since it was first asked, at most twice more, and never the asking price
+    if (r === 'ledger:unsupported_attribution' && attributionGroundedInSellerWords(t, thread)) continue
+    if (r === 'ledger:already_answered:condition' && asksAboutUnreportedCondition(t, thread)) continue
     if (/^ledger:already_asked:/.test(r) && unansweredFollowUpRepeat(r.slice('ledger:already_asked:'.length), { purpose, ledger, thread })) continue
     if ((r === 'content:contains_link' || r === 'identity:unverified_website') && policy?.allow_links === true) continue
     if (r === 'persona:name_not_established' && namesOk) continue

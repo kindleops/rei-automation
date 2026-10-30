@@ -38,6 +38,9 @@ const NOT_AN_ASSERTION_RE = /\?\s*$|^\s*(?:does|do|did|is|are|was|were|has|have|
 // the seller's general condition words (ground a general statement about the property)
 const SELLER_GENERAL_RE = /\b(?:needs?\s+(?:a\s+lot\s+of\s+|some\s+)?(?:work|repairs?|tlc|updating)|repairs?|fixer|shape|condition|updated|remodel\w*|renovat\w*|gutted|redid|redone|as[\s-]is|move[\s-]?in\s+ready|turn[\s-]?key|rough|old|new\s+\w+|falling\s+apart|damage\w*)\b/i
 
+/** The condition families a text names (a question or a statement alike). */
+export function conditionFamiliesIn(text) { return FAMILIES.filter(([, re]) => re.test(String(text || ''))).map(([k]) => k) }
+
 const sentencesOf = (text) => String(text || '').replace(/\s+/g, ' ').match(/[^.!?]+[.!?]*/g)?.map((s) => s.trim()).filter(Boolean) || []
 
 /**
