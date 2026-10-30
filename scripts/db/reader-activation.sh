@@ -14,6 +14,7 @@
 #   BACKUP_CONFIRMED    the timestamp of the platform backup / PITR point the owner confirmed (recorded, not checked)
 #   OUT                 where the evidence goes (default ./reader-activation-<UTC timestamp>)
 #   MODE=preflight      read-only checks only (the default); MODE=apply runs the preflight, then the OUTSTANDING links
+#   EXPECTED_INVENTORY  the fingerprint of the inventory the owner reviewed; apply refuses without it or if production changed
 #   LINK1_COMPLETION_APPROVED  the inventory fingerprint the owner approved for completing a partial/divergent link 1
 #                       (scripts/db/reader-reconcile.mjs prints it with exactly what completing link 1 would change)
 #
@@ -53,6 +54,9 @@ node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory.json" --json > "$OU
 v() { python3 -c "import json,sys;print(json.load(open('$OUT/reconciliation.json'))['verdict']['$1'])"; }
 FP=$(python3 -c "import json;print(json.load(open('$OUT/reconciliation.json'))['production']['fingerprint'])")
 log "reconciliation (inventory $FP): link1 $(v 1), link2 $(v 2), link3 $(v 3), link4 $(v 4), link5 $(v 5); report: reconciliation.md"
+# the owner's reviewed inventory: the fresh one must be the same production state (EXPECTED_INVENTORY=<fingerprint>)
+if [ -n "${EXPECTED_INVENTORY:-}" ]; then [ "$FP" = "$EXPECTED_INVENTORY" ] || die "production changed since the reviewed inventory: fingerprint $FP, reviewed $EXPECTED_INVENTORY (compare reconciliation.md with the reviewed one)"; log "inventory unchanged since the owner's review ($FP)"
+elif [ "$MODE" = "apply" ]; then die "EXPECTED_INVENTORY is not set: give the fingerprint of the inventory the owner reviewed (reader-reconcile.mjs prints it)"; fi
 TODO=(); seen_absent=0
 for i in 1 2 3 4 5; do st=$(v $i); l=${LINKS[$((i-1))]}
   case "$st" in

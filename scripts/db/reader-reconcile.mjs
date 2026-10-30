@@ -26,7 +26,9 @@ const exp14 = load(join(here, 'reader-reconcile-expected', 'after-links-1-4.json
 const history = JSON.parse(readFileSync(join(here, 'reader-reconcile-expected', 'link1-history.json'), 'utf8')).by_md5;
 const versionOf = (md5) => (history[md5] ?? []).map((v) => `${v.commit} (${v.date})`).filter((v, i, a) => a.indexOf(v) === i).join(', ');
 // the inventory's identity, without its timestamp: an owner approval names this, and a re-read must match it
-const fingerprint = createHash('sha256').update(JSON.stringify({ ...prod, taken_at: undefined })).digest('hex').slice(0, 16);
+// canonical: keys sorted at every level, so psql and any other SQL client's JSON give the same fingerprint
+const canon = (v) => Array.isArray(v) ? `[${v.map(canon).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}` : JSON.stringify(v);
+const fingerprint = createHash('sha256').update(canon({ ...prod, taken_at: undefined })).digest('hex').slice(0, 16);
 const effects = []; // what applying the REVIEWED link 1 would change on objects that already exist
 const expAll = load(join(here, 'reader-reconcile-expected', 'after-links-1-5.json'));
 
