@@ -733,6 +733,19 @@ const BASE_TESTS = [
     rollback: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback.sql')],
     rollbackPosttest: [M('PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql')],
   },
+  // ── the standing seller-facing reply (OPTIONAL link #31, separately approved; after #29): setup = #29's setup + #29.
+  {
+    id: 'action_gateway_standing_reply',
+    setup: [ACTION_ROLE_RESET, SHIM, DURABILITY, S3, RESEARCH, SEND_QUEUE_BASELINE, RUNTIME_PUBLIC_FIXTURE, OPS_PUBLIC_BASELINE, HOLDS_PUBLIC_BASELINE,
+      RUNTIME, KIND_LIMITS_FIX, CONV_DECIDE_BUDGET, CAPS, CONV_AI_SHADOW, MISSIONS, OPS_ACTION_CENTER, TURN_OPERATOR_ITEMS, HOLDS_REGISTRY, FOLLOWUP_LIFECYCLE,
+      ACTION_GATEWAY_BASELINE, ACTION_GATEWAY_T2_BASELINE, NEGOTIATION, SEND_AUTHORIZATION, ACTION_GATEWAY_T34_BASELINE, ACTION_GATEWAY, ACTION_GATEWAY_T2, ACTION_GATEWAY_T34,
+      ACTION_GATEWAY_OHG],
+    pretest: M('PROPOSED_20261028100000_action_gateway_standing_reply_pretest.sql'),
+    apply: [ACTION_GATEWAY_STANDING_REPLY],
+    posttest: [M('PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql')],
+    rollback: [M('PROPOSED_20261028100000_action_gateway_standing_reply_rollback.sql')],
+    rollbackPosttest: [M('PROPOSED_20261028100000_action_gateway_standing_reply_rollback_posttest.sql')],
+  },
   // ── the AI-message ledger's agent_outbound kind: setup = the send_queue baseline + PROPOSED_20261015130000.
   {
     id: 'ai_generated_outbound',

@@ -71,9 +71,9 @@ if that reader tool is wanted in production. It does not depend on A or B.
 - **#31** `PROPOSED_20261028100000_action_gateway_standing_reply.sql`.
 - **A.**
 
-> Gap to close before the rehearsal: #31 has **no runner entry and no pre/posttest files** (only apply + rollback).
-> It is covered by `apps/api/tests/critical/action-gateway-standing-reply-pg.test.mjs` on disposable PG only.
-> B's pretest checks #31 indirectly (its standing CHECK must be #31's).
+> #31 now has a runner entry (`--id action_gateway_standing_reply`) with a pretest, a posttest that proves it is born OFF
+> (no grant carries the standing flag), and a rollback posttest. On disposable PG 17 its full cycle passes:
+> apply, posttest, rollback, rollback posttest, schema fingerprint identical, re-apply.
 
 Verification query (read-only; every value must be `true`):
 
