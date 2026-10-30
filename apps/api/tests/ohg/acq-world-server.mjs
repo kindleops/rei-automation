@@ -30,6 +30,8 @@ import { actionGatewayRuntimeMaintenance } from '../../src/lib/ai/action-gateway
 import { syncDeliveryEvent } from '../../src/lib/supabase/sms-engine.js'
 import { appendLeadEvent } from '../../src/lib/domain/outreach/lead-events.js'
 import { isStopRequest } from '../../src/lib/domain/conversation-ai/stop-request.js'
+import { recordPhoneSuppression } from '../../src/lib/domain/compliance/record-phone-suppression.js'
+import { patchUniversalLeadState } from '../../src/lib/domain/lead-state/patch-universal-lead-state.js'
 import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
 import { buildApp as buildActionApp } from '../../../../mcp/leadcommand-action-mcp/src/app.mjs'
 import { startHttp as startActionHttp } from '../../../../mcp/leadcommand-action-mcp/src/protocol/http.mjs'
@@ -327,15 +329,50 @@ const control = http.createServer(async (req, res) => {
       return send(200, { ok: true, emergency_stop: l.emergency_stop, emergency_stop_at: l.emergency_stop_at })
     }
     // a contact made do-not-contact outside the conversation (an operator's DNC entry): the thread marks + the
-    // suppression list LeadCommand's eligibility reads; no event, no message
+    // suppression list LeadCommand's eligibility reads, written by LeadCommand's ONE suppression writer
+    // (record-phone-suppression.js), which now also puts an opt_out event (source suppression) on the agents' feed
     if (req.method === 'POST' && u.pathname === '/suppress') {
       const b = await body()
       const [t] = await sel(env.owner, 'select id, thread_key from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
       if (!t) return send(404, { error: 'thread not found' })
       await env.owner.query(`update public.inbox_thread_state set contactability_status = 'do_not_contact', is_suppressed = true where id = $1`, [t.id])
-      await env.owner.query(`insert into public.sms_suppression_list (phone_e164, is_active, suppression_type) values ($1, true, 'dnc')`, [t.thread_key])
-      log('suppressed (operator DNC, SIMULATED world) thread', t.id)
-      return send(200, { ok: true, thread_id: t.id, suppression: 'dnc' })
+      const r = await recordPhoneSuppression({ supabase: leadSb, phone: t.thread_key, reason: 'dnc', source: 'operator_dnc', threadKey: t.thread_key, sourceEventId: `world-${Date.now()}` }, { alert: async () => ({ ok: true }) })
+      const listed = await sel(env.owner, `select suppression_type, source from public.sms_suppression_list where phone_e164 = $1`, [t.thread_key])
+      log('suppressed (operator DNC through recordPhoneSuppression, SIMULATED world) thread', t.id, JSON.stringify({ ok: r.ok, fallback: r.fallback_block ?? null }))
+      return send(200, { ok: true, thread_id: t.id, suppression: 'dnc', writer: 'recordPhoneSuppression', result: { ok: r.ok, fail_closed: r.fail_closed ?? false, fallback_block: r.fallback_block ?? null }, list_rows: listed.length })
+    }
+    // a PERSON's change to the lead in LeadCommand (stage / temperature), through the canonical lead-state registry
+    // (patchUniversalLeadState, change_source operator): the registry itself appends lead_state_changed to the feed
+    if (req.method === 'POST' && u.pathname === '/stage') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, thread_key from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      const patch = { ...(b.stage ? { lifecycle_stage: String(b.stage) } : {}), ...(b.temperature ? { lead_temperature: String(b.temperature) } : {}) }
+      const r = await patchUniversalLeadState({ threadKey: t.thread_key, patch, meta: { change_source: 'operator', operator_id: 'world-operator', updated_by: 'world-operator', reason: String(b.reason || 'operator change (certification world)') }, supabase: leadSb })
+      const after = (await sel(env.owner, 'select lifecycle_stage, lead_temperature, operational_status from public.inbox_thread_state where id = $1', [t.id]))[0]
+      log('operator lead-state change (registry)', t.id, JSON.stringify(patch), r?.ok ? 'ok' : JSON.stringify(r).slice(0, 200))
+      return send(r?.ok ? 200 : 500, { ok: r?.ok === true, thread_id: t.id, patch, path: 'patchUniversalLeadState', result: r?.ok ? 'ok' : r, after })
+    }
+    // LeadCommand's lease on a lead lapses (as if agntei had been down past its end): the live assignment's lease_until
+    // moves into the past — nothing else changes (LeadCommand's own automation may resume, by its rules)
+    if (req.method === 'POST' && u.pathname === '/expire-lease') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, thread_key from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      const r = await env.owner.query(`update action_gateway.lead_assignments set assigned_at = clock_timestamp() - interval '2 hours', lease_until = clock_timestamp() - interval '1 second' where lead_ref = action_gateway.thread_ref_of($1) and released_at is null returning agent_id, lease_until`, [t.thread_key])
+      log('lease expired (SIMULATED lapse) on thread', t.id, JSON.stringify(r.rows))
+      return send(200, { ok: true, thread_id: t.id, expired: r.rows })
+    }
+    // a PERSON texts the seller from LeadCommand's inbox (a manual send, recorded as the inbox records it)
+    if (req.method === 'POST' && u.pathname === '/manual-send') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, thread_key, property_id, our_number from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      const id = crypto.randomUUID(); const at = new Date().toISOString()
+      await env.owner.query(`insert into public.message_events (id, provider_message_sid, direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language)
+        values ($1, $2, 'outbound', $3::text, $4::text, $3::text, $5, $6, $6, $7, 'en')`, [id, `SMman${id.slice(0, 8)}`, t.thread_key, t.our_number || HI_SENDER, String(b.body || 'Operator message').slice(0, 600), at, t.property_id])
+      log('manual send by a person (SIMULATED, nothing leaves) on', t.id)
+      return send(200, { ok: true, message_id: id, at })
     }
     if (req.method === 'POST' && u.pathname === '/tick') return send(200, await pumpNow())
     if (req.method === 'POST' && u.pathname === '/carrier-receipt') {

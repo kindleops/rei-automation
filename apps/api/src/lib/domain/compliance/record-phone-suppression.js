@@ -70,6 +70,27 @@ async function runWrite(query) {
 }
 
 /**
+ * link #32: a number now blocked is an `opt_out` event on the agents' wake-up feed (source "suppression"), so an agent
+ * holding that lead loses its sending authority at once — not only when its next text is refused. Codes only: the
+ * phone seals into the thread ref and is never in the event id or payload. Never blocks, never fails the suppression.
+ */
+async function announceSuppression(supabase, { phone_e164, type, source, sourceEventId, nowIso }, deps = {}) {
+  try {
+    const append = deps.appendLeadEvent || (await import("@/lib/domain/outreach/lead-events.js")).appendLeadEvent;
+    const code = (v) => clean(v).toLowerCase().replace(/[^a-z0-9_.:-]/g, "_").slice(0, 60) || null;
+    await append(supabase, {
+      kind: "opt_out",
+      eventKey: `suppression:${code(sourceEventId) || "list"}:${Date.parse(nowIso) || Date.now()}`,
+      threadKey: phone_e164,
+      payload: { source: "suppression", reason: code(type), recorded_by: code(source) },
+      occurredAt: nowIso,
+    });
+  } catch {
+    /* the feed never blocks a suppression */
+  }
+}
+
+/**
  * @param {object} args
  * @param {object} args.supabase
  * @param {string} args.phone        any US phone form; stored as +1E.164
@@ -115,6 +136,7 @@ export async function recordPhoneSuppression(
           .from("sms_suppression_list")
           .upsert(row, { onConflict: "phone_e164,sender_phone_e164", ignoreDuplicates: false }),
       );
+      await announceSuppression(supabase, { phone_e164, type, source: row.source, sourceEventId, nowIso }, deps);
       return { ok: true, reason: type, phone_number: phone_e164, attempts: attempt };
     } catch (error) {
       lastError = error;
@@ -150,6 +172,7 @@ export async function recordPhoneSuppression(
     else fallback_error = message || "fallback_block_failed";
   }
 
+  if (fallback_block) await announceSuppression(supabase, { phone_e164, type, source: row.source, sourceEventId, nowIso }, deps);
   const alert_result = await alert({
     phone_e164,
     thread_key: clean(threadKey) || null,

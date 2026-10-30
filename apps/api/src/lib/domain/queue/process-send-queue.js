@@ -60,7 +60,7 @@ import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsFor
 import { evaluateAgentMessageRowGate, agentMessageRowCancelPayload, readAgentMessageActivation } from "@/lib/domain/queue/agent-message-row-gate.js";
 import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
 import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
-import { evaluateAgentTextRowGate, readAgentTextActivation, readLeadHolder, loadInboundsSince, agentTextRowCancelPayload } from "@/lib/domain/queue/agent-text-row-gate.js";
+import { evaluateAgentTextRowGate, readAgentTextActivation, readLeadHolder, loadInboundsSince, loadOutboundsSince, agentTextRowCancelPayload } from "@/lib/domain/queue/agent-text-row-gate.js";
 import { evaluateAgentHeldTemplateRowGate } from "@/lib/domain/queue/agent-held-template-row-gate.js";
 import { appliesBlankGreetingRule } from "@/lib/domain/messaging/transport-content-rules.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
@@ -1755,6 +1755,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
       readHolder: deps.readAgentLeadHolder || ((thread_key) => readLeadHolder(getSupabase(deps), thread_key)),
       loadInbounds: deps.loadAgentTextInbounds || ((thread_key, since) => loadInboundsSince(getSupabase(deps), thread_key, since)),
+      loadOutbounds: deps.loadAgentTextOutbounds || ((thread_key, since) => loadOutboundsSince(getSupabase(deps), thread_key, since)),
       now,
     });
     if (agent_text_gate.applies && agent_text_gate.action !== "proceed") {

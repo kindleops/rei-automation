@@ -14,6 +14,9 @@
 //   the automation-hold registry holds the thread                                                 → DEFER
 //   any seller message since the text was written (an answer: since the inbound it answers)       → CANCEL (stale: the
 //                                                                                                    agent re-reads and writes again)
+//   any OTHER outbound to the seller since the text was written (a person's manual send from the
+//   inbox, another path)                                                                           → CANCEL (stale: one
+//                                                                                                    voice at a time)
 //   the recipient-local window closed (an answer: the in-session rule, else 08:00–21:00)          → CANCEL with the next
 //                                                                                                    permitted time (never sent late silently)
 //   otherwise → proceed: every existing guard (send-time contact guard, template authority, cadence, duplicate, sender
@@ -48,6 +51,13 @@ export async function readLeadHolder(supabase, threadKey, { strict = true } = {}
   if (r?.error) return /PGRST202|42883|does not exist|Could not find the function/i.test(`${r.error.code || ''} ${r.error.message || ''}`) ? { read_failed: false, agent_id: null, link_absent: true } : { read_failed: true }
   return { read_failed: false, agent_id: typeof r?.data === 'string' && r.data ? r.data : null }
 }
+/** Outbound messages on the thread after `since` (a person's manual send, any other path): ids and times only. */
+export async function loadOutboundsSince(supabase, threadKey, since) {
+  if (!supabase?.from || !clean(threadKey) || !clean(since)) return { read_failed: true, rows: [] }
+  const r = await supabase.from('message_events').select('id,created_at').eq('thread_key', threadKey).eq('direction', 'outbound').gt('created_at', since).order('created_at', { ascending: true }).limit(20)
+  if (r?.error) return { read_failed: true, rows: [] }
+  return { read_failed: false, rows: r?.data || [] }
+}
 export async function loadInboundsSince(supabase, threadKey, since) {
   if (!supabase?.from || !clean(threadKey) || !clean(since)) return { read_failed: true, rows: [] }
   const r = await supabase.from('message_events').select('id,created_at').eq('thread_key', threadKey).eq('direction', 'inbound').gt('created_at', since).order('created_at', { ascending: true }).limit(20)
@@ -61,7 +71,7 @@ export async function loadInboundsSince(supabase, threadKey, since) {
  *           loadInbounds: (threadKey, since) => Promise<{rows, read_failed}>, now?: string, automationHoldChecker?: Function|null }} deps
  * @returns {Promise<{ applies: boolean, action?: 'proceed'|'cancel'|'defer', reason?: string, next_permitted_at?: string|null }>}
  */
-export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadRecord, readHolder, loadInbounds, now = new Date().toISOString(), automationHoldChecker = null } = {}) {
+export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadRecord, readHolder, loadInbounds, loadOutbounds = null, now = new Date().toISOString(), automationHoldChecker = null } = {}) {
   if (!isAgentTextRow(row)) return { applies: false }
   const m = meta(row)
   const call = async (fn, ...a) => { try { return typeof fn === 'function' ? await fn(...a) : null } catch { return null } }
@@ -91,6 +101,12 @@ export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadR
   const newer = await call(loadInbounds, row.thread_key, since)
   if (!newer || newer.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_latest_inbound_unreadable' }
   if ((newer.rows || []).some((x) => clean(x.id) !== clean(at.in_reply_to_message_id))) return { applies: true, action: 'cancel', reason: 'agent_text_stale_new_inbound' }
+  // anyone else who texted the seller since (a person from the inbox, another path) makes it stale too (G10)
+  if (typeof loadOutbounds === 'function') {
+    const out = await call(loadOutbounds, row.thread_key, clean(at.generated_at) || since)
+    if (!out || out.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_latest_outbound_unreadable' }
+    if ((out.rows || []).length) return { applies: true, action: 'cancel', reason: 'agent_text_stale_new_outbound' }
+  }
   // the recipient-local window NOW (the zones stamped at enqueue); closed ⇒ cancelled with the next permitted time
   const answer = Boolean(clean(at.in_reply_to_message_id))
   const timing = evaluateReplyTiming({ purpose: answer ? 'reply' : clean(at.purpose) === 'first_touch' ? 'campaign' : 'followup', at: now, zones: rowRecipientZones(row) || [],
