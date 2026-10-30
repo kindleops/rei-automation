@@ -43,8 +43,14 @@ const TEXT_RULES = [
 // also names selling / a sale / an offer / a proposal.
 const NOT_A_SALE_INTEREST_RE = /\b(?:jv|joint\s+venture|partner(?:ship|ing)?|lease(?:\s+option)?|rent\s+to\s+own|owner\s+financ\w*|seller\s+financ\w*|financing|terms|package\s+deal|number|price|counter|meet\s+(?:me\s+)?in\s+the\s+middle|buy\s+more|wholesal\w*|assign\w*)\b|\$\s?[0-9]/i
 const SALE_OBJECT_RE = /\b(?:sell(?:ing)?|sale|offer|proposal|propuesta|oferta|vender)\b/i
+// Owner 2026-10-30 (blind v8 Z43, scripted run 17): "What has you thinking about selling?" asks the seller's REASON
+// (motivation), not whether they would sell. Read as an interest ask, it was refused as "already answered" / backwards
+// whenever the seller had already shown interest, which blocked the ordinary next question. A what/why question about
+// the reason is not an S2 interest ask; "Have you thought about selling?" still is.
+const MOTIVATION_QUESTION_RE = /^\s*(?:(?:so|and|ok(?:ay)?|got\s+it|thanks?)[\s,.!]+)?(?:what(?:'?s|\s+has|\s+have|\s+is|\s+made|\s+makes|\s+got)?|why(?:\s+are\s+you|\s+do\s+you|'?re\s+you)?)\b[^?]{0,40}?\b(?:thinking|thought|considering|wanting|want|looking|planning|ready)\s+(?:about|of|to|on)\s+sell/i
 export function interestQuestionGuard(sentence) {
   const q = String(sentence || '')
+  if (MOTIVATION_QUESTION_RE.test(q)) return false
   return !(NOT_A_SALE_INTEREST_RE.test(q) && !SALE_OBJECT_RE.test(q))
 }
 

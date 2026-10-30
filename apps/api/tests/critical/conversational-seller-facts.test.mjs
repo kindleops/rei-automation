@@ -134,3 +134,13 @@ test('nothing here weakens opt-out, suppression or identity enforcement', () => 
   const wrong = v('Thanks for confirming. What has you thinking about selling?', thread('wrong number, still mine is not a thing lol'))
   assert.equal(wrong.ok, false)
 })
+
+test('motivation: "What has you thinking about selling?" after the seller showed interest is the next question, not a backwards one', () => {
+  const t = [{ id: 'o1', direction: 'outbound', body: 'Hi, this is Nova, an AI assistant with Reivesti Home Buyers. Are you the owner of 1550 Kapiolani Blvd in Honolulu?', at: ago(30) },
+    { id: 'i1', direction: 'inbound', body: 'Yes I still own it. The roof needs some work though, is that a problem?', at: ago(20) },
+    { id: 'o2', direction: 'outbound', body: 'Thanks for letting me know about the roof. When would you ideally want to sell?', at: ago(19) },
+    { id: 'i2', direction: 'inbound', body: 'Still own it. Thinking I might sell this winter.', at: ago(1) }]
+  assert.deepEqual(v('Thanks for letting me know about this winter. What has you thinking about selling?', t).reasons, [])
+  // asking again WHETHER they would sell is still refused once they said so
+  assert.ok(v('Thanks for letting me know about this winter. Would you consider selling the house?', t).reasons.some((r) => /already_answered:interest|backwards_question:interest/.test(r)))
+})
