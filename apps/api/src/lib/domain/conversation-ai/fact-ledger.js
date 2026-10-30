@@ -80,6 +80,13 @@ export const OWN_ANSWER_STILL_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|sure|
 // is not matched: the affirmative must end in . ! , ; or a dash). A question AFTER it (blind v11 U05 "I do. And you want
 // to know that because...?", U19 "Yeah. Do yall buy houses that need work?") does not undo the answer.
 export const OWN_ANSWER_LEAD_YES_RE = /^\s*(?:yes|yeah|yep|yup|yea|ya|correct|that'?s\s+(?:right|correct)|that\s+is\s+(?:right|correct)|i\s+do|we\s+do|sure\s+do)(?:,?\s+(?:ma'?am|maam|sir))?\s*(?:[.!,;]|\s+-|$)/i
+// blind v16 (PI-LC-2): the short affirmative answers to OUR ownership question ("Are you the owner?", "Are you the
+// homeowner?", "Is this the owner of <address>?") that name no verb: "Yes mine", "yes mine period who is this", "Ours",
+// "yep I am", "Yes I am, who is this?". Read ONLY against our ownership question and recorded as the seller's claim; never
+// when the message also names another owner, a sale or a former ownership (OWN_ANSWER_LEAD_YES_EXCLUDE_RE), speaks for
+// someone (REPRESENTATIVE_RE), negates ("mine was", "I am not") or asks it back ("mine?"). "I am" must END its sentence or
+// name the owner ("I am the tenant" is no answer).
+export const OWN_ANSWER_MINE_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|correct|sure)(?:,?\s+(?:ma'?am|maam|sir))?[\s,.!]*)?(?:(?:(?:it'?s|its|it\s+is|that'?s|thats)\s+)?(?:mine|ours)\b(?!\s*\?)(?!\s+(?:not|isn'?t|was|wasn'?t|used|before|anymore)\b)|(?:i\s+am|i'?m|im|we\s+are|we'?re)(?:\s+the\s+(?:home|property\s+)?owners?)?(?!\s*\?)(?=\s*(?:$|[.,!;:)\-])))/i
 export const OWN_ANSWER_LEAD_YES_EXCLUDE_RE = /\b(?:used\s+to|sold|no\s+longer|not\s+any\s*more|anymore|was\s+(?:mine|ours)|belongs?\s+to|owned\s+by|in\s+(?:his|her|their)\s+name|my\s+(?:mom|dad|mother|father|son|daughter|brother|sister|husband|wife|ex|parents|aunt|uncle|grand\w+)\s+(?:owns|has|still\s+owns))\b/i
 export const OWN_ANSWER_FORMER_RE = /^\s*(?:i\s+|we\s+)?used\s+to(?:\s+(?:own\s+it|but\s+not\s+any\s*more|lol))?\s*[.!]*\s*$|^\s*(?:not\s+any\s*more|no\s+longer|not\s+no\s+more|ya\s+no)\s*[.!]*\s*$/i
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
@@ -281,6 +288,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && (BARE_YES_RE.test(body) || OWN_ANSWER_CONFIRM_RE.test(body)))) addFact(facts, 'ownership', 'confirmed', m)
     else if (lastAsked === 'ownership' && OWN_ANSWER_STILL_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_answer_to_ownership_question')
     else if (lastAsked === 'ownership' && OWN_ANSWER_LEAD_YES_RE.test(body) && !OWN_ANSWER_LEAD_YES_EXCLUDE_RE.test(body) && !REPRESENTATIVE_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_affirmative_answer_to_ownership_question')
+    else if (lastAsked === 'ownership' && OWN_ANSWER_MINE_RE.test(body) && !OWN_ANSWER_LEAD_YES_EXCLUDE_RE.test(body) && !REPRESENTATIVE_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_affirmative_answer_to_ownership_question')
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
     // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is

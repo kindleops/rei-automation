@@ -97,22 +97,68 @@ const cap = (s) => clean(s).split(/[\s._-]+/)[0].replace(/^./, (c) => c.toUpperC
 // blind v13 S10, S21, S38: an attribution to the seller ("You mentioned the basement takes water…") whose topic is none of
 // the ledger's five is accepted only when it is grounded in the seller's OWN words: one seller clause holds at least 60% of
 // its content words (at least two), with the same polarity (a negation on one side and not the other is never grounded)
+// blind v16 (PI-LC-2): the match was too literal for ACCURATE citations ("by march hopefully" → "You mentioned March.";
+// "were moving in jan" → "You mentioned you're moving in January."; "we keep it up" → "You mentioned you keep the house
+// up."). Both sides are now normalized the same way: case and apostrophes, month abbreviations (jan … sept … dec), simple
+// inflection (moving / moved / move), and the property referent (it / the house / the home / the place / the property are
+// one word). Only the seller's INBOUND messages are searched, never our outbounds. Stricter than before where it matters:
+// a time, number or urgency word in the attribution (March, spring, 150k, fast, soon, cash…) must itself be in the
+// seller's clause, and a single content word grounds only when it is such a time word ("You mentioned March.").
 const ATTRIBUTED_CLAUSE_RE = /\byou(?:'d|\s+had|\s+have|'ve)?\s+(?:mentioned|said|told\s+(?:me|us)|noted|shared|explained|indicated)\b(?:\s+that)?([^.?!;]{3,160})/i
 const STOP_WORDS = new Set('the a an and or but of to in on at for with it its it\'s this that these those is are was were be been being you your you\'d you\'ll i i\'d i\'ll me my we our us they them their he she his her if so as by from up out about just really very some any all would could should might may will can do does did have has had get got there here when what which who how than then too also not no never'.split(' '))
 const NEGATION_RE = /\b(?:not|never|no|n't|dont|wont|cant|isnt|arent|wasnt|didnt|doesnt)\b|n't\b/i
-const stem = (w) => w.replace(/'(?:d|ll|s|re|ve|m)$/, '').replace(/(?:ing|ed|es|s)$/, '')
-const contentWords = (text) => [...new Set(String(text || '').toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w)).map(stem).filter((w) => w.length > 2))]
+const MONTHS = { jan: 'january', feb: 'february', mar: 'march', apr: 'april', jun: 'june', jul: 'july', aug: 'august', sep: 'september', sept: 'september', oct: 'october', nov: 'november', dec: 'december', xmas: 'christmas' }
+const REFERENT = new Set(['it', 'its', 'house', 'home', 'place', 'property'])
+const TIME_WORDS = new Set([...Object.values(MONTHS), 'spring', 'summer', 'fall', 'autumn', 'winter', 'holidays', 'holiday', 'thanksgiving', 'easter', 'year', 'month', 'week', 'weekend', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'tomorrow', 'tonight'])
+const CRITICAL_WORDS = new Set([...TIME_WORDS, 'fast', 'quick', 'quickly', 'asap', 'soon', 'urgent', 'urgently', 'now', 'immediately', 'cash', 'desperate', 'need', 'must', 'cheap'])
+const stem = (w) => { const b = w.replace(/'(?:d|ll|s|re|ve|m)$/, '').replace(/(?:ing|ed|es|s)$/, ''); return b.length > 3 ? b.replace(/e$/, '') : b }
+function normalizedTokens(text) {
+  return String(text || '').toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean)
+    .map((w) => MONTHS[w] || w)
+    .map((w) => (REFERENT.has(w) || w === "it's" ? '<property>' : w))
+}
+const groundWord = (w) => (w === '<property>' || TIME_WORDS.has(w) || CRITICAL_WORDS.has(w) ? w : stem(w))
+const contentWords = (text) => [...new Set(normalizedTokens(text).filter((w) => w === '<property>' || /[0-9]/.test(w) || (w.length > 2 && !STOP_WORDS.has(w))).map(groundWord).filter((w) => w === '<property>' || /[0-9]/.test(w) || w.length > 2))]
 export function attributionGroundedInSellerWords(text, thread = []) {
   const m = ATTRIBUTED_CLAUSE_RE.exec(String(text || ''))
   if (!m) return false
   const clause = m[1]
   const words = contentWords(clause)
-  if (words.length < 2) return false
+  if (!words.length || (words.length < 2 && !TIME_WORDS.has(words[0]))) return false
   const sellerClauses = thread.filter((x) => x?.direction === 'inbound').flatMap((x) => String(x.body || '').split(/[.!?;]+|\bbut\b/i)).filter((c) => c.trim())
-  let best = null; let bestHit = 0
-  for (const c of sellerClauses) { const cw = new Set(contentWords(c)); const hit = words.filter((w) => cw.has(w)).length; if (hit > bestHit) { bestHit = hit; best = c } }
+  let best = null; let bestHit = 0; let bestWords = null
+  for (const c of sellerClauses) { const cw = new Set(contentWords(c)); const hit = words.filter((w) => cw.has(w)).length; if (hit > bestHit) { bestHit = hit; best = c; bestWords = cw } }
   if (!best || bestHit / words.length < 0.6) return false
+  // a time, number or urgency word the seller did not use is never grounded by the rest of the clause
+  if (words.some((w) => (CRITICAL_WORDS.has(w) || /[0-9]/.test(w)) && !bestWords.has(w))) return false
   return NEGATION_RE.test(clause) === NEGATION_RE.test(best)
+}
+
+// blind v16 (PI-LC-2): we asked about a topic, the seller never answered, and the seller's LATEST message now raises that
+// topic itself ("what kind of shape does it need to be in for you guys to be interested" after our unanswered "How would you
+// describe the house's condition?"). A DIFFERENT, specific question on that topic answers the seller; it is not a re-ask.
+// Not when the seller has not raised the topic again (repeating an unanswered question is pressure), not when the question is
+// the earlier one again (≥ 70% of its content words), and never for ownership, interest or the asking price.
+const RAISED_TOPIC = {
+  condition: /\b(?:condition|shape|repairs?|fix(?:ed|ing|er)?|roof|hvac|furnace|foundation|plumbing|electrical|needs?\s+(?:any\s+|some\s+)?work|as[\s-]is|updates?|updated|renovat\w*|rehab\w*|damage\w*|leaks?)\b/i,
+  timeline: /\b(?:how\s+(?:soon|fast|quick(?:ly)?|long)|when\s+(?:would|could|can|do|will)\s+(?:you|we|y'?all)|timeline|time\s*frame|clos(?:e|ing)\s+(?:date|by|on|in)|move\s+out)\b/i,
+  occupancy: /\b(?:tenants?|rent(?:ed|er|ers|ing)?|vacant|empty|occupied|(?:lives?|living|staying)\s+(?:there|in\s+it))\b/i,
+}
+function sellerRaisedTopicAgain(kind, { ledger, thread, text }) {
+  const re = RAISED_TOPIC[kind]
+  const q = ledger?.questions?.[kind]
+  if (!re || !q || q.answered || !q.asked_count) return false
+  const last = thread[thread.length - 1]
+  if (last?.direction !== 'inbound') return false
+  const lastAsk = thread.findIndex((m) => m.id === q.asked_message_ids[q.asked_message_ids.length - 1])
+  if (lastAsk < 0 || lastAsk >= thread.length - 1) return false
+  if (!(re.test(String(last.body || '')) || (kind === 'condition' && conditionFamiliesIn(last.body).length))) return false
+  const ours = contentWords(String(text || '').split(/(?<=[.!?])\s+/).filter((s) => /\?/.test(s)).join(' '))
+  if (!ours.length) return false
+  return !q.asked_message_ids.some((id) => {
+    const asked = new Set(contentWords(thread.find((m) => m.id === id)?.body || ''))
+    return ours.filter((w) => asked.has(w)).length / ours.length >= 0.7
+  })
 }
 
 // blind v13 S14: after the seller described ONE part of the property ("Furnace is on its last legs"), a question about
@@ -189,9 +235,10 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
     // blind v10 W39, W40: a no-reply follow-up may repeat the question the seller never answered (LeadCommand's own
     // follow-up templates do: "Following up on …. Are you still the owner?"); only while the seller has sent NOTHING
     // since it was first asked, at most twice more, and never the asking price
-    if (r === 'ledger:unsupported_attribution' && attributionGroundedInSellerWords(t, thread)) continue
+    if (/^ledger:unsupported_attribution(?::(?:timeline|condition))?$/.test(r) && attributionGroundedInSellerWords(t, thread)) continue
     if (r === 'ledger:already_answered:condition' && asksAboutUnreportedCondition(t, thread)) continue
     if (/^ledger:already_asked:/.test(r) && unansweredFollowUpRepeat(r.slice('ledger:already_asked:'.length), { purpose, ledger, thread })) continue
+    if (/^ledger:already_asked:/.test(r) && sellerRaisedTopicAgain(r.slice('ledger:already_asked:'.length), { ledger, thread, text: t })) continue
     if ((r === 'content:contains_link' || r === 'identity:unverified_website') && policy?.allow_links === true) continue
     if (r === 'persona:name_not_established' && namesOk) continue
     // an honest disclosure ("an AI assistant with …") is never refused; a denial is (persona:denies_automation stays)
