@@ -19,6 +19,10 @@ export const SENT_OR_WILL_SEND_RE = /\b(?:i|we)(?:'ve|\s+have)?\s+(?:just\s+|alr
 // engaged thread: STOP and ownership denial never get a reply at all)
 export const NO_CONTACT_PROMISE_RE = /\b(?:(?:won'?t|wont|will\s+not|never|not\s+going\s+to)\s+(?:bother|contact|text|message|call|trouble|reach\s+out(?:\s+to)?|be\s+(?:bothering|contacting|texting|reaching\s+out))(?:\s+you)?(?:\s+(?:again|anymore|any\s+more|further))?|leave\s+you\s+(?:be|alone)|take\s+you\s+off\s+(?:our|my|the)\s+list|(?:remove|removing)\s+(?:you|your\s+number)|won'?t\s+hear\s+from\s+(?:us|me)\s+again|last\s+(?:time|message|text)\s+(?:you'?ll|we|i))\b/i
 
+// blind v9 Y22, v10 W49: "reply STOP and I won't text you again" is true (a STOP suppresses the contact), so a promise
+// conditioned on the seller's STOP is set aside before the no-further-contact check; an unconditional promise still counts
+export const STOP_CONDITIONAL_PROMISE_RE = /\b(?:if\s+you(?:'d|\s+would)?\s+(?:just\s+)?(?:reply|text|respond|send)(?:\s+(?:back\s+)?with)?|(?:just\s+)?(?:reply|text|respond)(?:\s+(?:back\s+)?with)?)\s+["“'‘]?stop["”'’]?(?:\s+(?:at\s+any\s+time|anytime))?\s*(?:,\s*)?(?:and\s+|then\s+|,\s*)?(?:i|we)(?:'ll|\s+will)?\s*(?:won'?t|wont|will\s+not)\s+(?:text|message|contact|bother)(?:\s+you)?(?:\s+(?:again|anymore|any\s+more|further))?/gi
+
 /**
  * @param {string} text
  * @param {{ personaPolicy?: object, establishedPersona?: string|null, companyIdentity?: object }} [opts]
@@ -41,6 +45,6 @@ export function validatePlaybookStyle(text, { personaPolicy = { allow_establishe
   if (INSPECTED_RE.test(t)) r.push('claim:inspected_property')
   if (FUNDS_RE.test(t)) r.push('claim:funds_without_evidence')
   if (SENT_OR_WILL_SEND_RE.test(t)) r.push('claim:sent_or_will_send_email_or_card')
-  if (NO_CONTACT_PROMISE_RE.test(t)) r.push('claim:no_further_contact_while_nurture_scheduled')
+  if (NO_CONTACT_PROMISE_RE.test(t.replace(STOP_CONDITIONAL_PROMISE_RE, ' '))) r.push('claim:no_further_contact_while_nurture_scheduled')
   return { ok: r.length === 0, reasons: [...new Set(r)], version: STYLE_VALIDATOR_VERSION, claimed_names: v2.claimed_names }
 }

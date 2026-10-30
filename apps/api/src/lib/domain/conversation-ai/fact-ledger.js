@@ -50,7 +50,7 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
+export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|(?:i|we)\s+do\s+(?:still\s+)?own\s+(?:it|the|that|this)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
 // rc-8.5.21 v4 (coverage): ANSWER forms to OUR ownership question that confirm ownership without the
 // words "I own" — co-ownership ("me and my brother", "my wife and I"), an entity ("it's in my LLC but
 // yeah", "under my trust"), "we do", Spanish "sí, todavía la tengo" — and the bare former-owner answer
@@ -69,10 +69,15 @@ export const OWN_ANSWER_CONFIRM_RE = new RegExp([
 // against our ownership question, and recorded as the seller's CLAIM (origin seller_claim_*), never as verified
 // ownership: verification stays with the owner-of-record match. A question back ("still mine?") is not an answer.
 export const OWN_ANSWER_STILL_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|sure|correct|uh\s+huh)[\s,.!]*)?(?:(?:it'?s|its|it\s+is|that'?s|thats|i|we|i'?ve|we'?ve)\s+)?still\s+(?:mine|ours|my\s+(?:house|home|place|property)|our\s+(?:house|home|place|property)|own\s+(?:it|that|this|the\s+(?:house|home|place|property))|have\s+it|got\s+it|owns?\s+it)\b(?!\s*\?)(?=\s*(?:$|[.,!;:)\-]|\s(?:but|and|though|tho|why|lol|haha|yes|yeah)\b))|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:that'?s|thats)\s+(?:us|me)\b(?!\s*\?)|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:it'?s|its|it\s+is)\s+ours\b(?!\s*\?)/i
+// blind v10 W04: an affirmative OPENING sentence answering OUR ownership question, followed by more ("Correct. Inherited
+// it from my aunt…", "Yep, it's been a rental for years"). Read ONLY against our ownership question, recorded as the
+// seller's claim; never when the message mentions another owner, a sale or a former ownership, or asks it back.
+export const OWN_ANSWER_LEAD_YES_RE = /^\s*(?:yes|yeah|yep|yup|yea|ya|correct|that'?s\s+(?:right|correct)|that\s+is\s+(?:right|correct)|i\s+do|we\s+do|sure\s+do)\s*(?:[.!,;]|\s+-|$)/i
+export const OWN_ANSWER_LEAD_YES_EXCLUDE_RE = /\?|\b(?:used\s+to|sold|no\s+longer|not\s+any\s*more|anymore|was\s+(?:mine|ours)|belongs?\s+to|owned\s+by|in\s+(?:his|her|their)\s+name|my\s+(?:mom|dad|mother|father|son|daughter|brother|sister|husband|wife|ex|parents|aunt|uncle|grand\w+)\s+(?:owns|has|still\s+owns))\b/i
 export const OWN_ANSWER_FORMER_RE = /^\s*(?:i\s+|we\s+)?used\s+to(?:\s+(?:own\s+it|but\s+not\s+any\s*more|lol))?\s*[.!]*\s*$|^\s*(?:not\s+any\s*more|no\s+longer|not\s+no\s+more|ya\s+no)\s*[.!]*\s*$/i
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
 export const OWN_FORMER_RE = /\b(?:(?:i|we)\s+(?:already\s+|just\s+)?sold\s+(?:it|that|the|this)|^\s*(?:already\s+)?sold\b|\b(?:it|house|home|property)\s+(?:was|has\s+been|got)\s+sold|no\s+longer\s+(?:own|have)\s+(?:it|that|the)|not\s+(?:mine|ours)\s+anymore|gave\s+(?:the|my|that|this)\s+(?:house|home|property|place)\s+to|(?:it|the\s+house|the\s+home|the\s+property)\s+(?:is|belongs\s+to)\s+my\s+(?:son|daughter|kids?|children|brother|sister|mom|dad|mother|father)(?:'s)?\b|(?:signed|deeded|transferred)\s+(?:it|the\s+(?:house|home|property))\s+(?:over\s+)?to|ya\s+la\s+vend\w*|ya\s+no\s+es\s+m[ií]a)/im
-const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
+export const REPRESENTATIVE_RE = /\b(?:i'?m\s+(?:his|her|their|the)\s+(?:son|daughter|wife|husband|spouse|executor|executrix|agent|realtor|attorney|brother|sister|grandson|granddaughter|niece|nephew|caretaker|property\s+manager)|power\s+of\s+attorney|\bpoa\b|on\s+behalf\s+of|executor\s+of|my\s+(?:mom|dad|mother|father|parents|grandma|grandmother|grandpa|grandfather)'?s?\s+(?:house|home|property|place))\b/i
 export const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\s+you|not\s+(?:selling|for\s+sale)|(?:don'?t|do\s+not)\s+want\s+to\s+sell|not\s+looking\s+to\s+sell|never\s+selling)\b/i
 // blind v9 Y20: "not interested in lowball offers" from an owner is a price objection, not a decline to sell. The phrase is
 // set aside before NOT_INTERESTED_RE is read, so any other decline in the same message still counts.
@@ -92,6 +97,8 @@ const CALLBACK_RE = /\b(?:call\s+me|give\s+me\s+a\s+call|can\s+(?:you|u)\s+call|
 const UB = '(?<![\\p{L}\\p{N}])'; const UE = '(?![\\p{L}\\p{N}])'
 const YOU = "(?:you|u|ya|y'?all|you\\s+guys|ur\\s+company|they)"
 export const IDENTITY_REQUEST_RE = new RegExp([
+  // blind v10 W15, W16: "What's this regarding exactly?", "who's asking?"
+  `${UB}(?:what'?s|whats|what\\s+is)\\s+(?:this|that|it)\\s+(?:about|regarding|re|for|in\\s+regards?\\s+to|concerning)${UE}`, `${UB}who(?:'?s|\\s+is)\\s+asking${UE}`,
   `${UB}who\\s+(?:is|'?s|r|are)\\s+(?:this|it|that|you|u)(?:\\s+(?:texting|messaging|writing|again|exactly|with))?${UE}`,
   `${UB}who\\s+(?:wants|needs)\\s+to\\s+know${UE}`, `${UB}who\\s+(?:am\\s+i|is\\s+this)\\s+(?:talking|speaking|texting|chatting)\\s+(?:to|with)${UE}`, `${UB}who\\s+sent\\s+(?:this|that|me\\s+this)${UE}`,
   `${UB}(?:what'?s|whats|what\\s+is|wat'?s|and)\\s+(?:your|ur|yo)\\s+name${UE}`, `${UB}(?:may|can|could)\\s+i\\s+(?:ask|get|have|know)\\s+(?:your|ur|who)\\b`, `${UB}(?:your|ur)\\s+name\\s*\\?`, `${UB}and\\s+you\\s+are\\s*\\?`,
@@ -119,6 +126,9 @@ export const VISIT_REQUEST_EXT_RE = new RegExp([
   `${UB}(?:you\\s+can|feel\\s+free\\s+to|welcome\\s+to)\\s+(?:come|stop|swing)\\s+(?:by|over|see|look)${UE}`,
   `${UB}(?:venga|vengan|pase|pasen|puede\\s+venir|pueden\\s+venir)\\s+(?:a\\s+ver(?:la|lo)?|el\\s+\\p{L}+|cuando\\s+quiera)`,
 ].join('|'), 'iu')
+// blind v10 W37: a tentative plan to sell ("maybe selling in the fall", "might sell next year", "thinking about selling")
+// is CONDITIONAL interest; a negation anywhere in the message keeps it out (the decline rules run first).
+export const TENTATIVE_SELL_RE = /\b(?:maybe|might|may|possibly|probably|prob|perhaps|thinking\s+(?:about|of)|considering|planning\s+(?:on|to))\s+(?:be\s+)?(?:sell(?:ing)?|putting\s+it\s+(?:up|on\s+the\s+market)|list(?:ing)?\s+it)\b/i
 const WANTS_TO_SELL_RE = /\b(?:(?:want|need|ready|looking|trying|wanna|gotta|have|got)\s+(?:to\s+)?(?:sell|get\s+rid\s+of|unload|offload|be\s+done\s+with|move\s+on\s+from)|want\s+(?:it|this|the\s+(?:house|place|property))\s+(?:gone|sold|off\s+my\s+hands)|(?:i'?d|i\s+would|i\s+might|we'?d|we\s+would)\s+(?:sell|consider\s+selling|be\s+open\s+to\s+selling)|open\s+to\s+(?:selling|an?\s+offer|offers))\b|(?<![\p{L}])(?:quiero\s+vender(?:la|lo)?|(?:la|lo)\s+quiero\s+vender|s[ií]\s+(?:la|lo)\s+vendo|me\s+interesa\s+vender(?:la|lo)?|quiero\s+salir\s+de\s+(?:esa|la|esta|mi)\s+(?:casa|propiedad))(?![\p{L}])/iu
 const WHICH_PROPERTY_RE = /\b(?:which\s+(?:property|house|one|address)|what\s+(?:property|address|house))\b/i
 const OBJECTION_RE = /\b(?:too\s+low|lowball|low\s*ball|scam|worth\s+(?:a\s+lot\s+)?more|not\s+(?:that|so)\s+cheap|insult(?:ing)?)\b/i
@@ -259,6 +269,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     else if (lastAsked === 'ownership' && OWN_ANSWER_FORMER_RE.test(body)) addFact(facts, 'ownership', 'former_owner', m)
     else if (OWN_CONFIRM_RE.test(body) || (lastAsked === 'ownership' && (BARE_YES_RE.test(body) || OWN_ANSWER_CONFIRM_RE.test(body)))) addFact(facts, 'ownership', 'confirmed', m)
     else if (lastAsked === 'ownership' && OWN_ANSWER_STILL_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_answer_to_ownership_question')
+    else if (lastAsked === 'ownership' && OWN_ANSWER_LEAD_YES_RE.test(body) && !OWN_ANSWER_LEAD_YES_EXCLUDE_RE.test(body) && !REPRESENTATIVE_RE.test(body)) addFact(facts, 'ownership', 'confirmed', m, 'seller_claim_affirmative_answer_to_ownership_question')
     // rc-8.5.20: the shared matcher ("Not really", "No!!!", "Nope"); a polite "No thanks" or an emoji reply is not a denial
     else if (lastAsked === 'ownership' && bareNoAnswer(body).ownership_denial) addFact(facts, 'ownership', 'denied', m)
     // OWNER DECISION 2026-10-17 (supersedes 831df6cd): a polite "No thanks" to the ownership question is
@@ -284,6 +295,7 @@ export function buildCanonicalLedger({ messages = [], queueRows = [], offers = [
     // rc-8.5.21 v4 (coverage): a stated wish to sell ("just want it gone before winter", "I'd sell", "la quiero
     // vender") is interest — never when the same message negates it
     else if (!facts.seller_interest?.source_message_ids?.includes(m.id) && WANTS_TO_SELL_RE.test(body) && !declinesSelling(body) && !/\b(?:don'?t|dont|do\s+not|never|not|no)\s+(?:\w+\s+){0,2}(?:want|need|ready|sell|selling)\b|(?<![\p{L}])no\s+(?:la|lo)?\s*(?:quiero|voy\s+a)\s+vender/iu.test(body)) addFact(facts, 'seller_interest', 'interested', m, 'stated_wish_to_sell')
+    else if (!facts.seller_interest?.source_message_ids?.includes(m.id) && TENTATIVE_SELL_RE.test(body) && !declinesSelling(body) && !/\b(?:don'?t|dont|do\s+not|never|not|no)\s+(?:\w+\s+){0,2}(?:want|need|ready|sell|selling)\b/i.test(body)) addFact(facts, 'seller_interest', 'conditional', m, 'tentative_plan_to_sell')
     // rc-8.5.21: a financing-terms objection is conditional interest (latest statement wins)
     if (FINANCING_OBJECTION_RE.test(body)) {
       objections.push({ kind: 'financing_terms_objection', source_message_id: m.id })

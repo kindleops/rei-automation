@@ -92,6 +92,14 @@ const cap = (s) => clean(s).split(/[\s._-]+/)[0].replace(/^./, (c) => c.toUpperC
  * @param {string} o.now
  * @returns {{ ok: boolean, code: string|null, reasons: string[], money: { amounts: number[], amount: number|null }, non_owner: object, seller_language: string|null, version: string }}
  */
+function unansweredFollowUpRepeat(kind, { purpose, ledger, thread }) {
+  if (purpose !== 'followup' || kind === 'asking_price') return false
+  const q = ledger?.questions?.[kind]
+  if (!q || q.answered || q.deflected || !q.asked_count || q.asked_count >= 3) return false
+  const firstAsk = thread.findIndex((m) => m.id === q.asked_message_ids[0])
+  return firstAsk >= 0 && !thread.slice(firstAsk + 1).some((m) => m.direction === 'inbound')
+}
+
 export function validateAgentText(body, { purpose = null, messages = [], policy = {}, companyIdentity = NO_COMPANY_IDENTITY, authorEmployee = null, establishedPersona = null, moneyAuthority = null, property = null, firstName = null, ownershipConfirmedByPerson = false, now = new Date().toISOString() } = {}) {
   const text = String(body ?? '')
   const t = text.replace(/\s+/g, ' ').trim()
@@ -145,6 +153,10 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
     if (STYLE_ONLY.has(r)) continue
     // the conversation's ORDER (LeadCommand's S1–S5 playbook stages) is the agent's strategy, not a compliance rule
     if (/^ledger:skips_stage:/.test(r)) continue
+    // blind v10 W39, W40: a no-reply follow-up may repeat the question the seller never answered (LeadCommand's own
+    // follow-up templates do: "Following up on …. Are you still the owner?"); only while the seller has sent NOTHING
+    // since it was first asked, at most twice more, and never the asking price
+    if (/^ledger:already_asked:/.test(r) && unansweredFollowUpRepeat(r.slice('ledger:already_asked:'.length), { purpose, ledger, thread })) continue
     if ((r === 'content:contains_link' || r === 'identity:unverified_website') && policy?.allow_links === true) continue
     if (r === 'persona:name_not_established' && namesOk) continue
     // an honest disclosure ("an AI assistant with …") is never refused; a denial is (persona:denies_automation stays)

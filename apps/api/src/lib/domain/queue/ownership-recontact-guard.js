@@ -42,7 +42,7 @@
 import { bareNoAnswer } from '../conversation-ai/answers.js'
 import { questionKindOf } from '../conversation-ai/questions.js'
 import { moneyMentions } from '../conversation-ai/validator.js'
-import { BARE_YES_RE, OWN_ANSWER_STILL_RE, OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, RETRACTION_RE } from '../conversation-ai/fact-ledger.js'
+import { BARE_YES_RE, OWN_ANSWER_LEAD_YES_EXCLUDE_RE, OWN_ANSWER_LEAD_YES_RE, OWN_ANSWER_STILL_RE, REPRESENTATIVE_RE, OWN_CONFIRM_RE, OWN_DENY_RE, OWN_FORMER_RE, RETRACTION_RE } from '../conversation-ai/fact-ledger.js'
 import { isManualInboxSend } from './is-manual-inbox-send.js'
 import { NEVER_OWNED_LONG_RE } from '../classification/conversation-context.js'
 import { attributeInbounds } from '../conversation-ai/property-facts.js'
@@ -112,6 +112,7 @@ export function ownershipEvidenceItems({ messages = [], properties = [] } = {}) 
     // the casual "still" answer ("Yes still mine", "Still own it") to the ownership question about THIS property: the
     // same reading the fact ledger makes, so the writer, the validator and this guard agree (a claim, never verified)
     else if (ownQ && OWN_ANSWER_STILL_RE.test(body)) push('confirmed', 'still_owns_to_ownership_question', 'answer')
+    else if (ownQ && OWN_ANSWER_LEAD_YES_RE.test(body) && !OWN_ANSWER_LEAD_YES_EXCLUDE_RE.test(body) && !REPRESENTATIVE_RE.test(body)) push('confirmed', 'affirmative_answer_to_ownership_question', 'answer')
     else if (q && q.kind !== 'ownership' && !bareNoAnswer(body).matched && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body) || (q.kind === 'interest' && BARE_YES_RE.test(body)))) push('confirmed', `seller_engagement:${q.kind}`, 'engagement')
     else if (!q && (moneyMentions(body).length || OFFER_REQUEST_RE.test(body)) && prop) push('confirmed', 'seller_engagement:unprompted', 'engagement')
     else if (NOT_OWNER_LABELS.has(label)) push('denied', `label:${label}`, 'label')
