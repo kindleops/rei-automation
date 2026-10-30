@@ -89,12 +89,16 @@ Prepared 2026-10-30. **Nothing is pushed, merged, deployed or applied.**
 | `bd155315` | This report's v9 and v10 sections | docs |
 | `16bbb8be` | Blind v11 run 1 false refusals, fixed by class: <ul><li>an affirmative answer followed by the seller's own question ("I do. And you want to know that because...?") is still the answer;</li><li>"Who is reivesti exactly, like an actual company…" is an identity question;</li><li>"What makes yall any different" asks about the company;</li><li>"gutted the kitchen" and "a new deck" are condition the seller disclosed.</li></ul> | loosens four false-positive classes; tested both ways |
 
-**Safety replay.** Every text that LeadCommand refused in blind rounds v4–v11 was replayed through `16bbb8be`, with the same inputs. The only texts whose verdict changed are ones those rounds' independent graders judged not safety-critical. No opt-out, non-owner, price, offer, hand-over or human claim passes.
+| `3249f6ca` | This report's v11 section and the unattributed-condition gap | docs |
+| `98db5419` | **Property-condition grounding** (owner 2026-10-30), `condition-grounding.js` in `validateAgentText`: <ul><li>a sentence asserting THIS property's condition (repairs, damage, defects, costs, general shape) must be backed by the seller's own words or authorized evidence;</li><li>a seller's report may be acknowledged; a verified finding may be stated as found; an underwriting estimate is never a seller-facing fact (only framed as an estimate, under negotiation authority);</li><li>questions, conditionals and statements about houses in general are untouched;</li><li>no production source of verified findings is wired yet, so in production only the seller's own words ground a condition statement.</li></ul> Also the blind v12 T06/T07 answer forms, and `docs/BASELINE-TEST-FAILURES.md`. | **tightens** (closes the unattributed-condition gap); replaying v4–v12 refuses none of the texts accepted before |
+| `c8f1fda8` | Blind v13 false refusals: an attribution to the seller outside the ledger's five topics is accepted only when grounded in the seller's own words (one clause holding ≥ 60% of its content words, at least two, with the same polarity); a condition question about parts the seller did not describe is new | loosens two false-positive classes; tested both ways |
+
+**Safety replay.** Every text that LeadCommand refused in blind rounds v4–v13 was replayed through `c8f1fda8`, with the same inputs. The only texts whose verdict changed are ones those rounds' independent graders judged not safety-critical. No opt-out, non-owner, price, offer, hand-over or human claim passes.
 
 **Over-suppression (safe direction, unchanged).** LeadCommand's inbound classifier marked two objections as opt-outs (blind v10 W20 "…insultingly low cash offers dont bother", W22 "Honestly this sounds like a scam…"). Opt-out classification is deliberately not loosened. This is for the owner's review.
 
-Suites on `16bbb8be`:
-- critical: 13,064 tests, the same 4 baseline failures;
+Suites on `c8f1fda8`:
+- critical: 13,080 tests, the same 4 baseline failures (`docs/BASELINE-TEST-FAILURES.md`);
 - PG files: 327 pass, 0 fail.
 
 The certification runs on these versions are recorded in `AGNTEI-ACQUISITIONS-CERTIFICATION.md` (agntau).
@@ -115,7 +119,9 @@ LeadCommand code at `c0f62de4`, with agntei at `9ed43f1`. Every result below use
 |---|---|---|
 | **Seller-fact extraction misses some of the seller's own words.** "still mine" and "still own it" yield no ownership fact, and "this winter" and similar dated or seasonal timelines yield no timeline. The ledger checks then refuse truthful "thanks for confirming…" and "…about this winter" replies (blind v8 Z15, Z30; e2e-9). | quality (safe direction: a reply is refused, never sent wrongly) | None needed for safety. A warm seller may get no answer. The fix changes `extract-seller-facts.js` (and with it LeadCommand's own urgency and ownership facts for every lead), so it needs owner review and a new certification cycle. |
 | Re-engagement wording: "after the holidays" is not an attribution topic, and a passed time reference is refused (blind v8 Z53) | quality | Same as above |
-| **An invented, unattributed condition remark passes the gate.** "Sounds like the roof needs repairs", with no condition in the record, is not refused. The condition check catches attributed claims ("…sound like great updates", "you mentioned…"), not an unattributed assertion. Found while writing the v11 negative tests. | quality / honesty (rule 5) | Nova's rules forbid stating anything not backed by the record. No blind round has seen Nova do it. A deterministic check needs care so it does not refuse ordinary empathy ("sorry to hear about the flooding"). For the owner's next review cycle. |
+| ~~An invented, unattributed condition remark passes the gate~~ | **closed by `98db5419`** | — |
+| Attribution grounding is conservative on polarity: "Maybe after tax season, not before" makes "you mentioned maybe after tax season" refused (blind v14 R37) | quality (safe direction) | Comparing negation only on the matched words would fix it. Left as it is so that the certified versions stay frozen. |
+| A bot or person question does not open the one allowed ownership re-ask (blind v14 R47) | quality (safe direction) | Nova's disclosure alone passes. Recognising automation questions as identity questions would fix it. Left as it is so that the certified versions stay frozen. |
 | An expired lead lease hands the lead back to LeadCommand's own AI | medium | Keep `ai_conversation_send_enabled` **off** (deployment invariant §3 step 4); LeadCommand's AI is not on the agent path at all |
 | An answer inside the 30-minute in-session window can go outside 08:00–21:00 | low | This is the owner's earlier ruling. **Confirm it also applies to agent-written texts.** |
 | Handoff and transfer take different advisory locks | low | The worker and dispatch re-check the holder |
