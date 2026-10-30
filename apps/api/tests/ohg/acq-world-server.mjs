@@ -44,7 +44,12 @@ __setAutomationHoldResolverForTests(null) // the REAL hold registry answers ever
 const OUT = process.env.ACQ_WORLD_DIR || path.join(process.env.TMPDIR || '/tmp', 'acq-world')
 const PORTS = { reader: Number(process.env.ACQ_READER_PORT || 4881), action: Number(process.env.ACQ_ACTION_PORT || 4882), control: Number(process.env.ACQ_CONTROL_PORT || 4883) }
 const POSTGREST = process.env.LC_POSTGREST_BIN || '/usr/local/bin/postgrest'
-const MARKET = 'Honolulu, HI'
+// the world's geography: Honolulu by default (the certification world); ACQ_WORLD_GEO=eastern seeds the same sellers in
+// Indianapolis (US Eastern), so a run outside Honolulu's lawful window can still exercise real sends
+const GEO = process.env.ACQ_WORLD_GEO === 'eastern'
+  ? { area: '317', market: 'Indianapolis, IN', city: 'Indianapolis', state: 'IN', zip: '46204', tz: 'America/Indiana/Indianapolis', campaign: 'Indianapolis acquisitions' }
+  : { area: '808', market: 'Honolulu, HI', city: 'Honolulu', state: 'HI', zip: '96816', tz: 'Pacific/Honolulu', campaign: 'Honolulu acquisitions' }
+const MARKET = GEO.market
 const log = (...a) => console.log(new Date().toISOString(), ...a)
 fs.mkdirSync(OUT, { recursive: true, mode: 0o700 })
 const secret = (name, value) => writeSecretFile(path.join(OUT, name), value)
@@ -82,8 +87,8 @@ for (const c of ['contactability_status text', 'disposition text', 'is_suppresse
 const OPTED_OUT_MARKS = `contactability_status = 'opted_out', is_suppressed = true`
 const WRONG_NUMBER_MARKS = `disposition = 'wrong_number', contactability_status = 'invalid_number', is_suppressed = true`
 
-const HI_SENDER = '+18085550199'
-const P = { gold: '+18085550101', soft: '+18085550102', ft_a: '+18085550103', ft_b: '+18085550104', stopped: '+18085550105', wrong: '+18085550106', eastern: '+13175550107' }
+const HI_SENDER = `+1${GEO.area}5550199`
+const P = { gold: `+1${GEO.area}5550101`, soft: `+1${GEO.area}5550102`, ft_a: `+1${GEO.area}5550103`, ft_b: `+1${GEO.area}5550104`, stopped: `+1${GEO.area}5550105`, wrong: `+1${GEO.area}5550106`, eastern: '+13175550107' }
 const PID = { gold: '808100001', soft: '808100002', ft_a: '808100003', ft_b: '808100004', stopped: '808100005', wrong: '808100006', eastern: '808100007' }
 const STREET = { gold: '4471 Marigold Ln', soft: '812 Cedar St', ft_a: '1550 Kapiolani Blvd', ft_b: '2230 Wilder Ave', stopped: '96 Kaimuki Ave', wrong: '310 Lunalilo St', eastern: '77 Pali Hwy' }
 const FIRST = { gold: 'Dana', soft: 'Ray', ft_a: 'Keoni', ft_b: 'Malia', stopped: 'Lee', wrong: 'Pat', eastern: 'Sam' }
@@ -101,18 +106,18 @@ await env.owner.query(`insert into public.textgrid_numbers (phone_number, status
 await env.owner.query(`insert into public.sms_templates (template_id, use_case, language, is_active, safe_for_auto_reply, template_body, template_name) values
   ('t-acq-checkin-1', 'consider_selling_follow_up', 'English', true, true, 'Hi {{seller_first_name}}, {{agent_name}} here again. Any change of plans on {{property_address}}?', 'acquisitions check-in')`)
 
-async function property(k, { city = 'Honolulu', state = 'HI', zip = '96816' } = {}) {
+async function property(k, { city = GEO.city, state = GEO.state, zip = GEO.zip } = {}) {
   await env.owner.query(`insert into public.properties (property_id, property_type, property_address_city, property_address_state, property_address_zip, property_address) values ($1, 'SFR', $2, $3, $4, $5)
     on conflict (property_id) do update set property_address_city = excluded.property_address_city, property_address_state = excluded.property_address_state, property_address_zip = excluded.property_address_zip, property_address = excluded.property_address`, [PID[k], city, state, zip, STREET[k]])
 }
 async function prospect(k) { await env.owner.query(`insert into public.prospects (prospect_id, first_name, full_name) values ($1, $2, $2 || ' K') on conflict do nothing`, [`pr-${k}`, FIRST[k]]) }
 let campaignId = null
 async function target(k, { identity = 'verified', status = 'ready' } = {}) {
-  campaignId ||= (await env.owner.query(`insert into public.campaigns (name, status) values ('Honolulu acquisitions', 'active') returning id`)).rows[0].id
+  campaignId ||= (await env.owner.query(`insert into public.campaigns (name, status) values ($1, 'active') returning id`, [GEO.campaign])).rows[0].id
   await property(k); await prospect(k)
   return (await env.owner.query(`insert into public.campaign_targets (campaign_id, property_id, prospect_id, to_phone_number, market, language, state, property_address, touch_number, target_status, routing_status, identity_status, suppression_status, metadata)
-    values ($1, $2, $3, $4, $5, 'English', 'HI', $6, 1, $7, 'ready', $8, 'clear', jsonb_build_object('candidate_snapshot', jsonb_build_object('seller_first_name', $9::text))) returning id`,
-  [campaignId, PID[k], `pr-${k}`, P[k], MARKET, STREET[k], status, identity, FIRST[k]])).rows[0].id
+    values ($1, $2, $3, $4, $5, 'English', $10, $6, 1, $7, 'ready', $8, 'clear', jsonb_build_object('candidate_snapshot', jsonb_build_object('seller_first_name', $9::text))) returning id`,
+  [campaignId, PID[k], `pr-${k}`, P[k], MARKET, STREET[k], status, identity, FIRST[k], GEO.state])).rows[0].id
 }
 async function thread(k, { inboundBody, daysAgo, ourText }) {
   const t = await seedThread(env.owner, { phone: P[k], property: PID[k], inboundBody, minutesAgo: daysAgo * 24 * 60 })
@@ -151,13 +156,13 @@ const eastern = await target('eastern')
 // the reader's view of the properties (best effort per statement: the chain baseline models these relations)
 for (const k of Object.keys(P)) {
   for (const [sql, args] of [
-    [`insert into public.eg_property_facts (property_id, market, zip_code) values ($1, $2, '96816') on conflict (property_id) do nothing`, [PID[k], MARKET]],
-    [`update public.eg_property_facts set property_address_full = $2, property_address_city = 'Honolulu', property_address_state = 'HI', refreshed_at = now() where property_id = $1`, [PID[k], `${STREET[k]}, Honolulu, HI 96816`]],
+    [`insert into public.eg_property_facts (property_id, market, zip_code) values ($1, $2, $3) on conflict (property_id) do nothing`, [PID[k], MARKET, GEO.zip]],
+    [`update public.eg_property_facts set property_address_full = $2, property_address_city = $3, property_address_state = $4, refreshed_at = now() where property_id = $1`, [PID[k], `${STREET[k]}, ${GEO.city}, ${GEO.state} ${GEO.zip}`, GEO.city, GEO.state]],
     // the graph's verdict agrees with the seed: eligible seeds are queue-eligible; stopped / wrong number are not
     [`insert into public.campaign_target_graph (property_id, canonical_e164, sms_eligible, queue_eligible, queue_block_reason, seller_person_key, prospect_id, timezone, identity_alignment, property_address_full, property_city, property_zip, state, market)
-      values ($1, $2, $3, $3, $4, $5, $5, $6, 'verified', $7, 'Honolulu', '96816', $8, $9)`,
-      [PID[k], P[k], !['stopped', 'wrong'].includes(k), k === 'stopped' ? 'opted_out' : k === 'wrong' ? 'wrong_number' : null, `pr-${k}`, k === 'eastern' ? 'America/Indiana/Indianapolis' : 'Pacific/Honolulu', STREET[k], 'HI', MARKET]],
-    [`update public.properties set property_address_full = $2 where property_id = $1`, [PID[k], `${STREET[k]}, Honolulu, HI 96816`]],
+      values ($1, $2, $3, $3, $4, $5, $5, $6, 'verified', $7, $10, $11, $8, $9)`,
+      [PID[k], P[k], !['stopped', 'wrong'].includes(k), k === 'stopped' ? 'opted_out' : k === 'wrong' ? 'wrong_number' : null, `pr-${k}`, k === 'eastern' ? 'America/Indiana/Indianapolis' : GEO.tz, STREET[k], GEO.state, MARKET, GEO.city, GEO.zip]],
+    [`update public.properties set property_address_full = $2 where property_id = $1`, [PID[k], `${STREET[k]}, ${GEO.city}, ${GEO.state} ${GEO.zip}`]],
   ]) { try { await env.owner.query(sql, args) } catch (e) { log('reader seed skipped:', sql.slice(0, 60), '→', e.message.slice(0, 80)) } }
 }
 
@@ -337,7 +342,7 @@ const control = http.createServer(async (req, res) => {
       if (!t) return send(404, { error: 'thread not found' })
       await env.owner.query(`update public.inbox_thread_state set contactability_status = 'do_not_contact', is_suppressed = true where id = $1`, [t.id])
       const r = await recordPhoneSuppression({ supabase: leadSb, phone: t.thread_key, reason: 'dnc', source: 'operator_dnc', threadKey: t.thread_key, sourceEventId: `world-${Date.now()}` }, { alert: async () => ({ ok: true }) })
-      const listed = await sel(env.owner, `select suppression_type, source from public.sms_suppression_list where phone_e164 = $1`, [t.thread_key])
+      const listed = await sel(env.owner, `select suppression_type from public.sms_suppression_list where phone_e164 = $1`, [t.thread_key]).catch(() => [])
       log('suppressed (operator DNC through recordPhoneSuppression, SIMULATED world) thread', t.id, JSON.stringify({ ok: r.ok, fallback: r.fallback_block ?? null }))
       return send(200, { ok: true, thread_id: t.id, suppression: 'dnc', writer: 'recordPhoneSuppression', result: { ok: r.ok, fail_closed: r.fail_closed ?? false, fallback_block: r.fallback_block ?? null }, list_rows: listed.length })
     }
