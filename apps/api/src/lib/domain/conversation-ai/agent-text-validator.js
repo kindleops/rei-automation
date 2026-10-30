@@ -104,34 +104,80 @@ const cap = (s) => clean(s).split(/[\s._-]+/)[0].replace(/^./, (c) => c.toUpperC
 // one word). Only the seller's INBOUND messages are searched, never our outbounds. Stricter than before where it matters:
 // a time, number or urgency word in the attribution (March, spring, 150k, fast, soon, cash…) must itself be in the
 // seller's clause, and a single content word grounds only when it is such a time word ("You mentioned March.").
+// blind v16 held-out (PI-LC-3): day-of-month dates ("till the 18th" → "after the 18th"; 1st / 22nd / eighteenth are one time
+// word each, and a different day never grounds), the seller's shorthand (next yr, wks, mo, tmrw, nxt, thru, b4…), and the
+// seller's own hedge quoted verbatim ("maybe" → "You mentioned maybe."). The attributed clause ends where our own narration
+// starts (", so I'm checking in …"): only what is attributed is compared.
 const ATTRIBUTED_CLAUSE_RE = /\byou(?:'d|\s+had|\s+have|'ve)?\s+(?:mentioned|said|told\s+(?:me|us)|noted|shared|explained|indicated)\b(?:\s+that)?([^.?!;]{3,160})/i
 const STOP_WORDS = new Set('the a an and or but of to in on at for with it its it\'s this that these those is are was were be been being you your you\'d you\'ll i i\'d i\'ll me my we our us they them their he she his her if so as by from up out about just really very some any all would could should might may will can do does did have has had get got there here when what which who how than then too also not no never'.split(' '))
 const NEGATION_RE = /\b(?:not|never|no|n't|dont|wont|cant|isnt|arent|wasnt|didnt|doesnt)\b|n't\b/i
 const MONTHS = { jan: 'january', feb: 'february', mar: 'march', apr: 'april', jun: 'june', jul: 'july', aug: 'august', sep: 'september', sept: 'september', oct: 'october', nov: 'november', dec: 'december', xmas: 'christmas' }
+const SHORTHAND = { yr: 'year', yrs: 'years', wk: 'week', wks: 'weeks', mo: 'month', mos: 'months', mnth: 'month', mnths: 'months', tmrw: 'tomorrow', tmr: 'tomorrow', tmrow: 'tomorrow', nxt: 'next', thru: 'through', b4: 'before' }
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth']
+const SPELLED_DAY = new Map(ORDINALS.map((w, i) => [w, i + 1]))
+const UNIT_ORDINAL = new Map(ORDINALS.slice(0, 9).map((w, i) => [w, i + 1]))
+// "the 18th", "22nd", "eighteenth", "twenty-first", "thirtieth": one word, day<N>
+function dayOrdinals(text) {
+  return text
+    .replace(/\b(twenty|thirty)[\s-]+(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)\b/g, (_, t, u) => ` day${(t === 'twenty' ? 20 : 30) + UNIT_ORDINAL.get(u)} `)
+    .replace(/\bthirtieth\b/g, ' day30 ')
+    .replace(/\b([0-9]{1,2})(?:st|nd|rd|th)\b/g, (_, n) => ` day${Number(n)} `)
+    .replace(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\b/g, (w) => ` day${SPELLED_DAY.get(w)} `)
+}
+// the seller's own hedge, quoted as it was written ("You mentioned maybe."): never an upgrade of it
+const HEDGE_WORDS = new Set(['maybe', 'possibly', 'perhaps', 'probably', 'eventually', 'someday', 'unsure', 'depends', 'idk'])
 const REFERENT = new Set(['it', 'its', 'house', 'home', 'place', 'property'])
 const TIME_WORDS = new Set([...Object.values(MONTHS), 'spring', 'summer', 'fall', 'autumn', 'winter', 'holidays', 'holiday', 'thanksgiving', 'easter', 'year', 'month', 'week', 'weekend', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'tomorrow', 'tonight'])
-const CRITICAL_WORDS = new Set([...TIME_WORDS, 'fast', 'quick', 'quickly', 'asap', 'soon', 'urgent', 'urgently', 'now', 'immediately', 'cash', 'desperate', 'need', 'must', 'cheap'])
+const CRITICAL_WORDS = new Set([...TIME_WORDS, 'fast', 'quick', 'quickly', 'asap', 'soon', 'urgent', 'urgently', 'now', 'immediately', 'cash', 'desperate', 'need', 'must', 'cheap',
+  // certainty: never added to what the seller hedged ("maybe next yr" is not "next year for sure")
+  'sure', 'definitely', 'definite', 'certain', 'certainly', 'absolutely', 'ready', 'yes'])
 const stem = (w) => { const b = w.replace(/'(?:d|ll|s|re|ve|m)$/, '').replace(/(?:ing|ed|es|s)$/, ''); return b.length > 3 ? b.replace(/e$/, '') : b }
+const isTimeWord = (w) => TIME_WORDS.has(w) || /^day[0-9]{1,2}$/.test(w)
 function normalizedTokens(text) {
-  return String(text || '').toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean)
-    .map((w) => MONTHS[w] || w)
+  return dayOrdinals(String(text || '').toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'")).replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean)
+    .map((w) => MONTHS[w] || SHORTHAND[w] || w)
     .map((w) => (REFERENT.has(w) || w === "it's" ? '<property>' : w))
 }
-const groundWord = (w) => (w === '<property>' || TIME_WORDS.has(w) || CRITICAL_WORDS.has(w) ? w : stem(w))
+const groundWord = (w) => (w === '<property>' || isTimeWord(w) || CRITICAL_WORDS.has(w) || HEDGE_WORDS.has(w) ? w : stem(w))
+const isCritical = (w) => isTimeWord(w) || CRITICAL_WORDS.has(w) || /[0-9]/.test(w)
+// our own narration after the attribution (", so I'm checking in as you asked") is not part of what is attributed
+const attributedPart = (clause) => clause.split(/,\s*(?=(?:and\s+)?(?:so|which|hence|thus|that'?s\s+why|i|i'?m|i'?ll|i'?d|we|we'?re|we'?ll|we'?d)\b)/i)[0]
 const contentWords = (text) => [...new Set(normalizedTokens(text).filter((w) => w === '<property>' || /[0-9]/.test(w) || (w.length > 2 && !STOP_WORDS.has(w))).map(groundWord).filter((w) => w === '<property>' || /[0-9]/.test(w) || w.length > 2))]
 export function attributionGroundedInSellerWords(text, thread = []) {
   const m = ATTRIBUTED_CLAUSE_RE.exec(String(text || ''))
   if (!m) return false
-  const clause = m[1]
+  const clause = attributedPart(m[1])
   const words = contentWords(clause)
-  if (!words.length || (words.length < 2 && !TIME_WORDS.has(words[0]))) return false
+  if (!words.length || (words.length < 2 && !isTimeWord(words[0]) && !HEDGE_WORDS.has(words[0]))) return false
   const sellerClauses = thread.filter((x) => x?.direction === 'inbound').flatMap((x) => String(x.body || '').split(/[.!?;]+|\bbut\b/i)).filter((c) => c.trim())
   let best = null; let bestHit = 0; let bestWords = null
   for (const c of sellerClauses) { const cw = new Set(contentWords(c)); const hit = words.filter((w) => cw.has(w)).length; if (hit > bestHit) { bestHit = hit; best = c; bestWords = cw } }
   if (!best || bestHit / words.length < 0.6) return false
   // a time, number or urgency word the seller did not use is never grounded by the rest of the clause
-  if (words.some((w) => (CRITICAL_WORDS.has(w) || /[0-9]/.test(w)) && !bestWords.has(w))) return false
+  if (words.some((w) => isCritical(w) && !bestWords.has(w))) return false
   return NEGATION_RE.test(clause) === NEGATION_RE.test(best)
+}
+
+// blind v16 held-out (PI-LC-3), ledger:unsupported_attribution:seller_interest: the seller answered OUR interest question
+// with a hedge ("Any thoughts on selling down the road?" → "maybe") and the text quotes that hedge back ("You said maybe on
+// selling."). Accepted only when every attributed word other than selling itself is a hedge word the seller's ANSWER to our
+// interest question used, with the same polarity. Never an upgrade ("you want to sell", "you're ready", "you said yes").
+const SELLING_WORDS = new Set(contentWords('sell sale selling sold interest interested idea thought thinking consider considering down the road line future later'))
+function hedgeQuotedFromInterestAnswer(text, { ledger, thread }) {
+  const m = ATTRIBUTED_CLAUSE_RE.exec(String(text || ''))
+  if (!m) return false
+  const clause = attributedPart(m[1])
+  const words = contentWords(clause).filter((w) => w !== '<property>')
+  const quoted = words.filter((w) => !SELLING_WORDS.has(w))
+  if (!quoted.length || !quoted.every((w) => HEDGE_WORDS.has(w))) return false
+  // our interest question: the ledger's, or any question of ours about selling ("Any thoughts on selling down the road?")
+  const asks = new Set(ledger?.questions?.interest?.asked_message_ids || [])
+  const answers = thread.map((x, i) => [x, i]).filter(([x]) => x.direction === 'outbound' && (asks.has(x.id) || /\b(?:sell|selling|sale)\b[^.!?]*\?/i.test(String(x.body || ''))))
+    .map(([x, i]) => (thread[i + 1]?.direction === 'inbound' ? thread[i + 1] : null)).filter(Boolean)
+  return answers.some((a) => {
+    const aw = new Set(contentWords(a.body))
+    return quoted.every((w) => aw.has(w)) && NEGATION_RE.test(clause) === NEGATION_RE.test(String(a.body || ''))
+  })
 }
 
 // blind v16 (PI-LC-2): we asked about a topic, the seller never answered, and the seller's LATEST message now raises that
@@ -236,6 +282,7 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
     // follow-up templates do: "Following up on …. Are you still the owner?"); only while the seller has sent NOTHING
     // since it was first asked, at most twice more, and never the asking price
     if (/^ledger:unsupported_attribution(?::(?:timeline|condition))?$/.test(r) && attributionGroundedInSellerWords(t, thread)) continue
+    if (r === 'ledger:unsupported_attribution:seller_interest' && hedgeQuotedFromInterestAnswer(t, { ledger, thread })) continue
     if (r === 'ledger:already_answered:condition' && asksAboutUnreportedCondition(t, thread)) continue
     if (/^ledger:already_asked:/.test(r) && unansweredFollowUpRepeat(r.slice('ledger:already_asked:'.length), { purpose, ledger, thread })) continue
     if (/^ledger:already_asked:/.test(r) && sellerRaisedTopicAgain(r.slice('ledger:already_asked:'.length), { ledger, thread, text: t })) continue
