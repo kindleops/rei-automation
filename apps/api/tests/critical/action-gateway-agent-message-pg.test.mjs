@@ -43,7 +43,9 @@ const COMPANY = JSON.stringify({ name: 'Reivesti Home Buyers', human_review: fal
 
 /** A model provider that must never be called: nothing on the agent-text path composes. */
 const noModel = () => fakeProvider(() => { throw new Error('A MODEL WAS CALLED ON THE AGENT-TEXT PATH') })
-const switches = (extra = {}) => ({ ai_agent_text_enabled: 'true', ai_conversation_company_identity: COMPANY, ...extra })
+// the contact scope is REQUIRED (AGENT_TEXT_SCOPE_NOT_SET otherwise): every test number, as an activation lists its contacts
+const TEST_SCOPE = JSON.stringify({ enabled: false, scope: { thread_keys: Array.from({ length: 120 }, (_, i) => `+1312555${String(100 + i).padStart(4, '0')}`), market_ids: ['Chicago'] } })
+const switches = (extra = {}) => ({ ai_agent_text_enabled: 'true', ai_conversation_company_identity: COMPANY, ai_conversation_send_policy: TEST_SCOPE, ...extra })
 
 const GRANTS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['events.read', 1], ['leads.read_pool', 1], ['controls.read', 1]]
 /** An owner mints the standing seller-facing grant for agent texts (grants are immutable: a new grant, never an edit). */
@@ -388,6 +390,9 @@ test('PG agent text: the composer paths are RETIRED for agents — queue_agent_m
     assert.deepEqual([am.error?.code, am.error?.details?.use], ['AGENT_COMPOSES_TEXT', 'sms_send_agent_text'], JSON.stringify(am))
     const rp = await call(gateway, replier, 'queue_authorized_reply', { client_request_id: 'at-ret-0002', thread_id: t.thread_id })
     assert.equal(rp.error?.code, 'AGENT_COMPOSES_TEXT', JSON.stringify(rp))
+    // an agent that sends its own texts may not have LeadCommand's writer draft one (it could send the draft as its own)
+    const dr = await call(gateway, cred, 'draft_seller_reply', { client_request_id: 'at-ret-draft', thread_id: t.thread_id })
+    assert.deepEqual([dr.error?.code, dr.error?.details?.use], ['AGENT_COMPOSES_TEXT', 'sms_send_agent_text'], JSON.stringify(dr))
     // the database refuses the handoff even for a gateway that would still run the retired path
     await setControls(env.owner, { ai_conversation_send_enabled: 'true', ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { thread_keys: [SELLER] } }) })
     const { gateway: legacy } = makeGateway(env, { now: clockMs, legacyComposer: true })

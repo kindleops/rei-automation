@@ -61,6 +61,7 @@ import { evaluateAgentMessageRowGate, agentMessageRowCancelPayload, readAgentMes
 import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
 import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
 import { evaluateAgentTextRowGate, readAgentTextActivation, readLeadHolder, loadInboundsSince, agentTextRowCancelPayload } from "@/lib/domain/queue/agent-text-row-gate.js";
+import { evaluateAgentHeldTemplateRowGate } from "@/lib/domain/queue/agent-held-template-row-gate.js";
 import { appliesBlankGreetingRule } from "@/lib/domain/messaging/transport-content-rules.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
@@ -1717,6 +1718,29 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         reason: ai_gate.reason,
         queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
         final_queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    // ── link #32: ONE VOICE on an agent-held lead — an automated TEMPLATE row (campaign / template follow-up / auto-reply)
+    // for a lead an Agntei employee holds is cancelled; an operator's manual send and the AI rows are untouched ──
+    const held_gate = await evaluateAgentHeldTemplateRowGate(queue_row, {
+      readHolder: deps.readAgentLeadHolder || (deps.supabase || deps.supabaseClient || hasSupabaseConfig() ? ((thread_key) => readLeadHolder(getSupabase(deps), thread_key, { strict: false })) : null),
+    });
+    if (held_gate.applies && held_gate.action !== "proceed") {
+      if (held_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentTextRowCancelPayload(queue_row, { now, reason: held_gate.reason, by: 'agent_held_template_gate' }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, held_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: held_gate.reason,
+        queue_status: held_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: held_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
         queue_row_id,
         queue_item_id: queue_row_id,
       };

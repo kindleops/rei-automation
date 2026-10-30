@@ -8,7 +8,7 @@
 // Request-time gates, in order, each refusing with an explicit code (never silently):
 //   availability     both emergency stops (R2 agent.runtime_limits, queue_emergency_stop_at) → EMERGENCY_STOP_ACTIVE;
 //                    the switch ai_agent_text_enabled (born OFF) → AGENT_TEXT_KILL_SWITCH_OFF
-//   scope            ai_conversation_send_policy.scope WHEN SET → LEAD_NOT_IN_AI_SEND_SCOPE
+//   scope            ai_conversation_send_policy.scope, REQUIRED → AGENT_TEXT_SCOPE_NOT_SET / LEAD_NOT_IN_AI_SEND_SCOPE
 //   the lead         LEAD_NOT_FOUND / LEAD_THREAD_TARGET_MISMATCH; exactly one holder (lead_assignments) → NOT_LEAD_OWNER
 //   eligibility      the pool read's order: holds → AUTOMATION_HOLD; the thread's permission (STOP in any language /
 //                    suppression / opt-out marks / wrong number / not owner) → STOP_REQUESTED / CONTACT_NOT_PERMITTED;
@@ -58,7 +58,7 @@ export const agentTextState = (reads, { campaign_target_id = null, thread_id = n
 export const QUEUE_AGENT_TEXT_SPEC = Object.freeze({
   name: 'queue_agent_text',
   title: 'Send the exact SMS you composed (agent text)',
-  description: 'Send ONE SMS you composed yourself, word for word, to a lead you hold (assign_lead first): body is the exact text (1–320 characters); LeadCommand never writes or changes it. It validates it deterministically and transports it. purpose: first_touch (campaign_target_id, no prior contact), followup / nurture / reengage (a quiet thread), or an ANSWER — reply / qualification / negotiation / appointment — which must name in_reply_to_message_id, the thread\'s latest unanswered seller message (one answer per inbound). attribution {employee, model, provider, route, session_id, turn_id} is stored verbatim with the text (employee and route required). Refusals are explicit: EMERGENCY_STOP_ACTIVE, AGENT_TEXT_KILL_SWITCH_OFF, LEAD_NOT_IN_AI_SEND_SCOPE, NOT_LEAD_OWNER, AUTOMATION_HOLD, STOP_REQUESTED, CONTACT_NOT_PERMITTED, CONTACT_NOT_ELIGIBLE, PRESEND_INELIGIBLE, the purpose rules (IN_REPLY_TO_REQUIRED, IN_REPLY_TO_NOT_LATEST_INBOUND, UNANSWERED_SELLER_MESSAGE, ALREADY_CONTACTED, FOLLOWUP_QUIET_HOURS …), OUTSIDE_RECIPIENT_WINDOW (with next_permitted_at; nothing is scheduled), DAILY_LEAD_CAP_REACHED / DAILY_INITIATED_CAP_REACHED / DAILY_GLOBAL_CAP_REACHED, IDEMPOTENCY_CONFLICT, MONEY_NOT_AUTHORIZED (an amount needs a live negotiation send authorization of this lead: send_permit_id), CONTENT_REJECTED with reasons[]. Seller-facing (T3): a human approves each use unless an owner granted standing seller-facing authority for it.',
+  description: 'Send ONE SMS you composed yourself, word for word, to a lead you hold (assign_lead first): body is the exact text (1–320 characters); LeadCommand never writes or changes it. It validates it deterministically and transports it. purpose: first_touch (campaign_target_id, no prior contact), followup / nurture / reengage (a quiet thread), or an ANSWER — reply / qualification / negotiation / appointment — which must name in_reply_to_message_id, the thread\'s latest unanswered seller message (one answer per inbound). attribution {employee, model, provider, route, session_id, turn_id} is stored verbatim with the text (employee and route required). Refusals are explicit: EMERGENCY_STOP_ACTIVE, AGENT_TEXT_KILL_SWITCH_OFF, AGENT_TEXT_SCOPE_NOT_SET (no contact scope configured: nothing is in scope), LEAD_NOT_IN_AI_SEND_SCOPE, NOT_LEAD_OWNER, AUTOMATION_HOLD, STOP_REQUESTED, CONTACT_NOT_PERMITTED, CONTACT_NOT_ELIGIBLE, PRESEND_INELIGIBLE, the purpose rules (IN_REPLY_TO_REQUIRED, IN_REPLY_TO_NOT_LATEST_INBOUND, UNANSWERED_SELLER_MESSAGE, ALREADY_CONTACTED, FOLLOWUP_QUIET_HOURS …), OUTSIDE_RECIPIENT_WINDOW (with next_permitted_at; nothing is scheduled), DAILY_LEAD_CAP_REACHED / DAILY_INITIATED_CAP_REACHED / DAILY_GLOBAL_CAP_REACHED, IDEMPOTENCY_CONFLICT, MONEY_NOT_AUTHORIZED (an amount needs a live negotiation send authorization of this lead: send_permit_id), CONTENT_REJECTED with reasons[]. Seller-facing (T3): a human approves each use unless an owner granted standing seller-facing authority for it.',
   capability: 'conversation.queue_agent_text', tier: TIERS.T3, resource: 'thread_or_campaign',
   // an owner-minted standing seller-facing grant authorizes it without a per-use approval (as #31 / #32 for the others)
   standing_reply: true,
@@ -115,7 +115,7 @@ export const QUEUE_AGENT_TEXT_LOGIC = Object.freeze({
     const policy = { ...DEFAULT_AGENT_TEXT_POLICY, ...(st.policy || {}) }
     const lead = st.lead
     if (!lead || lead.mismatch) return deny(lead?.mismatch ? 'LEAD_THREAD_TARGET_MISMATCH' : 'LEAD_NOT_FOUND')
-    // the AI send policy's scope, WHEN SET
+    // the contact scope (REQUIRED: unset ⇒ nothing is in scope)
     let aiPolicy
     try { aiPolicy = normalizeSendPolicy((await reads.switches([AI_SEND_POLICY_KEY]))[AI_SEND_POLICY_KEY]) } catch { return deny('AI_SEND_POLICY_UNREADABLE') }
     const sc = agentTextScopeVerdict(aiPolicy, { thread_key: lead.phone, market: st.target?.market || null, campaign_id: lead.campaign_id || null })

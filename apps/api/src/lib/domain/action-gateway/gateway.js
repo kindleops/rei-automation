@@ -332,6 +332,11 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       if (spec.retired && legacyComposerActionsForTests !== true) {
         throw gwErr('refused', spec.retired.code || 'AGENT_COMPOSES_TEXT', `${spec.name} is retired: LeadCommand never composes text for an agent. Compose the exact SMS yourself and send it with ${spec.retired.use || 'sms_send_agent_text'}.`, { use: spec.retired.use || 'sms_send_agent_text', gateway_action: spec.retired.action || 'queue_agent_text' })
       }
+      // an agent that can SEND its own texts may not have LeadCommand's writer draft one: the draft could be sent word for
+      // word under the agent's attribution (independent review, 2026-10-30). Agents without texting authority keep it.
+      if (spec.name === 'draft_seller_reply' && (principal.grants || []).some((g) => g.capability === 'conversation.queue_agent_text' && Date.parse(g.expires_at) > now())) {
+        throw gwErr('refused', 'AGENT_COMPOSES_TEXT', 'draft_seller_reply is not available to an agent that sends its own texts: LeadCommand never composes text for such an agent. Write the SMS yourself and send it with sms_send_agent_text.', { use: 'sms_send_agent_text', gateway_action: 'queue_agent_text' })
+      }
       // the path's PRODUCTION ACTIVATION (T3 / T4): off or NO-GO ⇒ capability_unavailable, whatever the grants say
       await availableOrRefuse(spec, base)
       const grants = grantsFor(principal, spec)

@@ -122,7 +122,9 @@ test('purpose rules: an answer names the latest unanswered inbound; an initiated
   assert.equal(pv({ purpose: 'first_touch', messages: [quiet[2]], target: ready }).code, 'ALREADY_CONTACTED')
   assert.equal(pv({ purpose: 'first_touch', messages: [], target: null }).code, 'FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET')
   // the AI send scope applies only WHEN SET; caps
-  assert.equal(agentTextScopeVerdict({ scope: { thread_keys: [], market_ids: [], campaign_ids: [] } }, { thread_key: '+13125550100' }), null)
+  // no scope configured ⇒ nothing is in scope (an unset scope used to mean every lead the grant allows)
+  assert.equal(agentTextScopeVerdict({ scope: { thread_keys: [], market_ids: [], campaign_ids: [] } }, { thread_key: '+13125550100' }).code, 'AGENT_TEXT_SCOPE_NOT_SET')
+  assert.equal(agentTextScopeVerdict(null, { thread_key: '+13125550100' }).code, 'AGENT_TEXT_SCOPE_NOT_SET')
   assert.equal(agentTextScopeVerdict({ scope: { thread_keys: ['+13125550199'] } }, { thread_key: '+13125550100' }).code, 'LEAD_NOT_IN_AI_SEND_SCOPE')
   assert.equal(agentTextScopeVerdict({ scope: { thread_keys: ['+13125550100'] } }, { thread_key: '+13125550100' }), null)
   assert.equal(agentTextCapVerdict({ usage: { lead_today: 0, initiated_today: 1, global_today: 0 }, policy: POLICY, purpose: 'followup' }).code, 'DAILY_INITIATED_CAP_REACHED')
@@ -210,6 +212,11 @@ test('agent-text row gate: its OWN switch (never the reply engine\'s), the body 
   assert.equal((await gate(row, rec, { readHolder: async () => ({ agent_id: 'agt_sterling' }) })).reason, 'agent_text_author_no_longer_holds_lead')
   assert.equal((await gate(row, rec, { readHolder: async () => ({ agent_id: null }) })).reason, 'agent_text_author_no_longer_holds_lead')
   assert.equal((await gate(row, rec, { loadInbounds: async () => ({ rows: [{ id: 'new-1' }] }) })).reason, 'agent_text_stale_new_inbound')
+  // a text held past its age (an emergency stop, an outage) is never sent when the runner resumes
+  const held = agentRow({ generatedAt: new Date(Date.parse(LAWFUL) - 3 * 3600_000).toISOString() })
+  assert.deepEqual([(await gate(held.row, held.rec)).action, (await gate(held.row, held.rec)).reason], ['cancel', 'agent_text_expired'])
+  const fresh = agentRow({ generatedAt: new Date(Date.parse(LAWFUL) - 30 * 60_000).toISOString() })
+  assert.equal((await gate(fresh.row, fresh.rec)).action, 'proceed')
   const night = await gate(row, rec, { now: '2026-10-29T08:00:00.000Z' }) // 03:00 Chicago
   assert.deepEqual([night.action, night.reason, Date.parse(night.next_permitted_at) > Date.parse('2026-10-29T08:00:00.000Z')], ['cancel', 'agent_text_outside_recipient_window_at_send', true])
   // an answer: bound to ITS inbound; the record must name it

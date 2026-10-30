@@ -91,6 +91,8 @@ await setControls(env.owner, {
   ai_agent_text_enabled: 'true',
   ai_agent_text_policy: JSON.stringify({ max_per_day_global: 200, max_per_lead_per_day: 6, max_initiated_per_lead_per_day: 1, followup_min_quiet_hours: 24, reengage_min_quiet_hours: 72, policy_version: 'acq-world.v1' }),
   ai_conversation_company_identity: JSON.stringify({ name: 'Reivesti Home Buyers', website: null, human_review: false, persona_descriptor: null }),
+  // the contact scope is REQUIRED for agent texts: exactly this world's sellers (the reply engine itself stays off)
+  ai_conversation_send_policy: JSON.stringify({ enabled: false, scope: { thread_keys: Object.values(P) } }),
 })
 await liveDispatch(env)
 await env.owner.query(`insert into public.textgrid_numbers (phone_number, status, market, health_state, daily_limit) values ($1, 'active', $2, 'healthy', 500)`, [HI_SENDER, MARKET])

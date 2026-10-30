@@ -81,11 +81,15 @@ export function agentTextPurposeVerdict({ purpose, inReplyTo = null, messages = 
 }
 
 const arr = (v) => (Array.isArray(v) ? v.map((x) => clean(x)).filter(Boolean) : [])
-/** The AI send policy's scope WHEN SET: null = no scope configured (no restriction); else whether the lead is inside it. */
+/**
+ * The scope an agent text must fall inside: ai_conversation_send_policy.scope (thread keys, markets, campaigns). It is
+ * REQUIRED: with no scope configured nothing is in scope (AGENT_TEXT_SCOPE_NOT_SET; independent review 2026-10-30 — an
+ * unset scope used to mean "every lead the grant allows"). A canary lists its contacts or market here explicitly.
+ */
 export function agentTextScopeVerdict(aiPolicy, { thread_key = null, market = null, campaign_id = null } = {}) {
   const s = aiPolicy?.scope || {}
   const set = arr(s.thread_keys).length + arr(s.market_ids).length + arr(s.campaign_ids).length > 0
-  if (!set) return null
+  if (!set) return deny('AGENT_TEXT_SCOPE_NOT_SET', { scope: 'ai_conversation_send_policy.scope' })
   const inside = (thread_key && arr(s.thread_keys).includes(clean(thread_key))) || (market && arr(s.market_ids).includes(clean(market))) || (campaign_id && arr(s.campaign_ids).includes(clean(campaign_id)))
   return inside ? null : deny('LEAD_NOT_IN_AI_SEND_SCOPE', { scope: 'ai_conversation_send_policy.scope' })
 }
@@ -113,12 +117,15 @@ export function agentTextWindow({ phone, property = null, purpose, now, answers 
 
 /**
  * The contact guards after the holds and the thread's permission (callers run those first, in the pool read's order):
- * the AI send scope when set, the send-time contact guard, the pre-send eligibility engine, the window.
+ * the AI send scope (when a policy is handed in), the send-time contact guard, the pre-send eligibility engine, the window.
  */
 export async function evaluateAgentTextContactGuards({ supabase, lead, target = null, purpose, aiPolicy = null, prospect = null, property = null, now, holdChecker = null, answers = null, window = true }) {
   if (!lead?.phone) return deny('LEAD_NOT_FOUND')
-  const sc = agentTextScopeVerdict(aiPolicy, { thread_key: lead.phone, market: target?.market || null, campaign_id: lead.campaign_id || target?.campaign_id || null })
-  if (sc) return sc
+  // the scope itself is judged by the callers first; here only when a policy is handed in
+  if (aiPolicy) {
+    const sc = agentTextScopeVerdict(aiPolicy, { thread_key: lead.phone, market: target?.market || null, campaign_id: lead.campaign_id || target?.campaign_id || null })
+    if (sc) return sc
+  }
   const row = agentTextGuardRow({ lead, target, purpose })
   let g
   try {

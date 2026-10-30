@@ -7,6 +7,7 @@
 //   the agent-text activation (public.lc_agent_text_activation: BOTH emergency stops — R2 agent.runtime_limits and
 //   queue_emergency_stop_at — and ai_agent_text_enabled + its policy) not available           → CANCEL (nothing sent)
 //   the activation / the record / the holder / the inbounds unreadable                           → DEFER (fail closed)
+//   written more than AGENT_TEXT_MAX_AGE_MS (2 h) ago: held through a stop, an outage or a hold          → CANCEL (expired)
 //   the immutable ai_generated_messages record (kind agent_text) missing, not this intent's, or its body / hash not the
 //   row's body (verifyAiGeneratedRecordForRow)                                                     → CANCEL
 //   the record's author no longer holds the lead (released / transferred: one holder at a time)   → CANCEL
@@ -21,7 +22,8 @@ import { verifyAiGeneratedRecordForRow, sealedThreadRef } from '@/lib/domain/mes
 import { evaluateReplyTiming, rowRecipientZones } from '@/lib/domain/queue/reply-timing.js'
 import { checkAutomationHoldPort } from '@/lib/domain/holds-port/automation-hold-port.js'
 
-export const AGENT_TEXT_ROW_GATE_VERSION = 'agent-text.row-gate.v1'
+export const AGENT_TEXT_ROW_GATE_VERSION = 'agent-text.row-gate.v2'
+export const AGENT_TEXT_MAX_AGE_MS = 2 * 60 * 60 * 1000
 const clean = (v) => String(v ?? '').trim()
 const meta = (row) => (row?.metadata && typeof row.metadata === 'object' ? row.metadata : {})
 
@@ -66,6 +68,10 @@ export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadR
   const a = await call(readActivation)
   if (!a || a.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_activation_unreadable' }
   if (a.available !== true) return { applies: true, action: 'cancel', reason: `agent_text_unavailable_at_send:${clean(a.code).toLowerCase() || 'off'}` }
+  // a text is sent promptly or not at all: one written more than AGENT_TEXT_MAX_AGE_MS ago (held through an emergency
+  // stop, an outage or a long hold) is cancelled, and the agent decides again on what is true now
+  const writtenAt = Date.parse(clean(meta(row).agent_text?.generated_at) || clean(row.created_at))
+  if (Number.isFinite(writtenAt) && Date.parse(now) - writtenAt > AGENT_TEXT_MAX_AGE_MS) return { applies: true, action: 'cancel', reason: 'agent_text_expired' }
   // the body must equal its IMMUTABLE ledger record (kind agent_text, bound to this intent)
   const lookup = await call(loadRecord, row.queue_key)
   if (!lookup || lookup.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_record_unreadable' }
@@ -93,9 +99,9 @@ export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadR
   return { applies: true, action: 'proceed', reason: 'agent_text_gate_open', timing }
 }
 
-export function agentTextRowCancelPayload(row = {}, { now = new Date().toISOString(), reason, next_permitted_at = null } = {}) {
+export function agentTextRowCancelPayload(row = {}, { now = new Date().toISOString(), reason, next_permitted_at = null, by = 'agent_text_row_gate' } = {}) {
   return {
     queue_status: 'cancelled', paused_reason: reason, is_locked: false, locked_at: null, lock_token: null, updated_at: now,
-    metadata: { ...(row?.metadata || {}), skip_reason: reason, final_queue_status: 'cancelled', cancelled_by: 'agent_text_row_gate', finalized_at: now, ...(next_permitted_at ? { next_permitted_at } : {}) },
+    metadata: { ...(row?.metadata || {}), skip_reason: reason, final_queue_status: 'cancelled', cancelled_by: by, finalized_at: now, ...(next_permitted_at ? { next_permitted_at } : {}) },
   }
 }

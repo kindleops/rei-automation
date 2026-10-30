@@ -1410,8 +1410,9 @@ begin
   if not coalesce((v ->> 'ok')::boolean, false) then raise exception 'action_gateway_agent_message: self-check refused the role: %', v -> 'findings'; end if;
   if action_gateway.t34_handoff_kind('queue_agent_message') is distinct from 'action_gateway.execute' then raise exception 'postcondition: the handoff kind'; end if;
   if 'queue_agent_message' = any (action_gateway.standing_t2_actions()) or not (action_gateway.standing_t2_actions() @> array['assign_lead', 'release_lead']) then raise exception 'postcondition: the standing T2 rows'; end if;
-  if action_gateway.agent_message_refusal() is null and not exists (select 1 from public.system_control where key = 'ai_agent_message_enabled') then raise exception 'postcondition: born OFF'; end if;
-  if action_gateway.agent_text_refusal() is null and not exists (select 1 from public.system_control where key = 'ai_agent_text_enabled') then raise exception 'postcondition: agent texts born OFF'; end if;
+  -- born OFF means OFF after the apply, whatever the switches said before it (a switch already 'true' would go live at once)
+  if action_gateway.agent_message_refusal() is null then raise exception 'postcondition: born OFF (ai_agent_message_enabled is already on: turn it off before applying)'; end if;
+  if action_gateway.agent_text_refusal() is null then raise exception 'postcondition: agent texts born OFF (ai_agent_text_enabled is already on: turn it off before applying)'; end if;
   if action_gateway.t34_handoff_kind('queue_agent_text') is distinct from 'action_gateway.execute' or action_gateway.t34_capability_refusal('queue_agent_message') is distinct from 'AGENT_COMPOSES_TEXT'
      or action_gateway.t34_capability_refusal('queue_authorized_reply') is distinct from 'AGENT_COMPOSES_TEXT' then raise exception 'postcondition: agent texts / the retired composer paths'; end if;
   if not ('transfer_lead' = any (action_gateway.standing_t2_actions())) or 'queue_agent_text' = any (action_gateway.standing_t2_actions()) then raise exception 'postcondition: transfer_lead is standing, the text never is'; end if;
