@@ -368,6 +368,18 @@ const control = http.createServer(async (req, res) => {
       log('lease expired (SIMULATED lapse) on thread', t.id, JSON.stringify(r.rows))
       return send(200, { ok: true, thread_id: t.id, expired: r.rows })
     }
+    // one seller phone linked to several properties: LeadCommand re-associates the thread with another property (as
+    // when the same number answers about a second property); the feed's next events then carry that property
+    if (req.method === 'POST' && u.pathname === '/thread-property') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, property_id from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      const [p] = await sel(env.owner, 'select property_id from public.properties where property_id::text = $1', [String(b.property_id || '')])
+      if (!p) return send(404, { error: 'property not found' })
+      await env.owner.query('update public.inbox_thread_state set property_id = $2 where id = $1', [t.id, p.property_id])
+      log('thread re-associated with another property (shared phone)', t.id, String(t.property_id), '->', String(p.property_id))
+      return send(200, { ok: true, thread_id: t.id, from_property: t.property_id, to_property: p.property_id })
+    }
     // a PERSON texts the seller from LeadCommand's inbox (a manual send, recorded as the inbox records it)
     if (req.method === 'POST' && u.pathname === '/manual-send') {
       const b = await body()
@@ -425,7 +437,7 @@ const world = {
     agents: { sterling: 'agt_sterling', nova: 'agt_nova', equity: 'agt_equity', haven: 'agt_haven' },
     seller_facing: { sterling: 'standing conversation.queue_agent_text (basis: disposable certification world) + leads.transfer_lead', nova: 'standing conversation.queue_agent_text (basis: disposable certification world)', equity: 'none', haven: 'none' },
     tools: { send: 'sms_send_agent_text {client_request_id, thread_id | campaign_target_id, purpose, body, in_reply_to_message_id?, send_permit_id?, attribution {employee, model, provider, route, session_id, turn_id}}', transfer: 'transfer_lead (sterling only)', retired: ['sms_send_agent_message', 'queue_authorized_reply'] } },
-  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /carrier-receipt {queue_row_id, status: delivered|undelivered}', 'POST /emergency-stop {on}', 'GET /world'] },
+  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /carrier-receipt {queue_row_id, status: delivered|undelivered}', 'POST /emergency-stop {on}', 'POST /thread-property {thread_id, property_id}', 'GET /world'] },
   seeds: {
     gold: seed('gold', { thread_id: gold.thread_id, expect: 'reply: eligible (the seller asked a question, unanswered: purpose reply, in_reply_to_message_id = latest_inbound_message_id)' }),
     soft: seed('soft', { thread_id: soft.thread_id, expect: 'reengage: eligible (quiet 21 days after "not now, maybe in the spring")' }),
