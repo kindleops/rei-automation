@@ -50,7 +50,7 @@ function useCaseForKind(useCase) {
 }
 
 // ── seller-text evidence (deterministic; each rule names what it proves) ─────
-export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|we\s+(?:still\s+)?own\s+(?:it|the|that)|(?:i|we)\s+do\s+(?:still\s+)?own\s+(?:it|the|that|this)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
+export const OWN_CONFIRM_RE = /\b(?:i\s+(?:still\s+)?own\s+(?:it|the|that|this)|(?:yes|yeah|yep),?\s+(?:i|we)\s+(?:still\s+)?(?:own|do)|(?:i'?m|i\s+am)\s+the\s+(?:owner|homeowner)|(?:it'?s|its|it\s+is|(?:the\s+)?(?:house|home|title|deed)\s+is)\s+(?:in|under)\s+my\s+name|we\s+(?:still\s+)?own\s+(?:it|the|that)|(?:i|we)\s+do\s+(?:still\s+)?own\s+(?:it|the|that|this)|that'?s\s+(?:me|mine|my\s+(?:house|property|home))|(?:that|this)\s+one(?:'?s|\s+is)\s+mine|(?:it|that)\s+is\s+mine|it'?s\s+mine|(?:yes|yeah|yep),?\s+(?:it'?s|that'?s|is)\s+(?:mine|ours)|(?:todav[ií]a\s+|a[uú]n\s+)?es\s+m[ií]a|sigue\s+siendo\s+m[ií]a|soy\s+(?:el|la)\s+(?:due[nñ][oa]|propietari[oa]))(?![\p{L}])/iu
 // rc-8.5.21 v4 (coverage): ANSWER forms to OUR ownership question that confirm ownership without the
 // words "I own" — co-ownership ("me and my brother", "my wife and I"), an entity ("it's in my LLC but
 // yeah", "under my trust"), "we do", Spanish "sí, todavía la tengo" — and the bare former-owner answer
@@ -68,13 +68,14 @@ export const OWN_ANSWER_CONFIRM_RE = new RegExp([
 // "Still own it. Got renters in there", "yep still ours", "still have it") as the message's OPENING clause. Read ONLY
 // against our ownership question, and recorded as the seller's CLAIM (origin seller_claim_*), never as verified
 // ownership: verification stays with the owner-of-record match. A question back ("still mine?") is not an answer.
-export const OWN_ANSWER_STILL_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|sure|correct|uh\s+huh)[\s,.!]*)?(?:(?:it'?s|its|it\s+is|that'?s|thats|i|we|i'?ve|we'?ve)\s+)?still\s+(?:mine|ours|my\s+(?:house|home|place|property)|our\s+(?:house|home|place|property)|own\s+(?:it|that|this|the\s+(?:house|home|place|property))|have\s+it|got\s+it|owns?\s+it)\b(?!\s*\?)(?=\s*(?:$|[.,!;:)\-]|\s(?:but|and|though|tho|why|lol|haha|yes|yeah)\b))|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:that'?s|thats)\s+(?:us|me)\b(?!\s*\?)|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:it'?s|its|it\s+is)\s+ours\b(?!\s*\?)/i
+// blind v12 T07: an honorific after the yes ("Yes ma'am still mine")
+export const OWN_ANSWER_STILL_RE = /^\s*(?:(?:yes|yeah|yep|yup|ya|yea|yess|sure|correct|uh\s+huh)(?:,?\s+(?:ma'?am|maam|sir))?[\s,.!]*)?(?:(?:it'?s|its|it\s+is|that'?s|thats|i|we|i'?ve|we'?ve)\s+)?still\s+(?:mine|ours|my\s+(?:house|home|place|property)|our\s+(?:house|home|place|property)|own\s+(?:it|that|this|the\s+(?:house|home|place|property))|have\s+it|got\s+it|owns?\s+it)\b(?!\s*\?)(?=\s*(?:$|[.,!;:)\-]|\s(?:but|and|though|tho|why|lol|haha|yes|yeah)\b))|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:that'?s|thats)\s+(?:us|me)\b(?!\s*\?)|^\s*(?:(?:yes|yeah|yep|yup|ya|yea)[\s,.!]*)?(?:it'?s|its|it\s+is)\s+ours\b(?!\s*\?)/i
 // blind v10 W04: an affirmative OPENING sentence answering OUR ownership question, followed by more ("Correct. Inherited
 // it from my aunt…", "Yep, it's been a rental for years"). Read ONLY against our ownership question, recorded as the
 // seller's claim; never when the message mentions another owner, a sale or a former ownership, or asks it back ("Yes?"
 // is not matched: the affirmative must end in . ! , ; or a dash). A question AFTER it (blind v11 U05 "I do. And you want
 // to know that because...?", U19 "Yeah. Do yall buy houses that need work?") does not undo the answer.
-export const OWN_ANSWER_LEAD_YES_RE = /^\s*(?:yes|yeah|yep|yup|yea|ya|correct|that'?s\s+(?:right|correct)|that\s+is\s+(?:right|correct)|i\s+do|we\s+do|sure\s+do)\s*(?:[.!,;]|\s+-|$)/i
+export const OWN_ANSWER_LEAD_YES_RE = /^\s*(?:yes|yeah|yep|yup|yea|ya|correct|that'?s\s+(?:right|correct)|that\s+is\s+(?:right|correct)|i\s+do|we\s+do|sure\s+do)(?:,?\s+(?:ma'?am|maam|sir))?\s*(?:[.!,;]|\s+-|$)/i
 export const OWN_ANSWER_LEAD_YES_EXCLUDE_RE = /\b(?:used\s+to|sold|no\s+longer|not\s+any\s*more|anymore|was\s+(?:mine|ours)|belongs?\s+to|owned\s+by|in\s+(?:his|her|their)\s+name|my\s+(?:mom|dad|mother|father|son|daughter|brother|sister|husband|wife|ex|parents|aunt|uncle|grand\w+)\s+(?:owns|has|still\s+owns))\b/i
 export const OWN_ANSWER_FORMER_RE = /^\s*(?:i\s+|we\s+)?used\s+to(?:\s+(?:own\s+it|but\s+not\s+any\s*more|lol))?\s*[.!]*\s*$|^\s*(?:not\s+any\s*more|no\s+longer|not\s+no\s+more|ya\s+no)\s*[.!]*\s*$/i
 export const OWN_DENY_RE = /\b(?:wrong\s+(?:number|person)|(?:not|never)\s+(?:the|my)\s+(?:owner|house|home|property)|(?:i|we)\s+(?:don'?t|dont|do\s+not|never)\s+own(?:ed)?|you\s+have\s+the\s+wrong|(?:that'?s\s+|it'?s\s+|that\s+is\s+|it\s+is\s+)?(?:not|isn'?t|aint|ain'?t)\s+(?:mine|ours)\b(?!\s+any\s*more))\b/i
@@ -86,7 +87,7 @@ export const NOT_INTERESTED_RE = /\b(?:not\s+interested|no\s+thanks?|no\s+thank\
 export const LOWBALL_OBJECTION_RE = /\bnot\s+(?:interested\s+in|looking\s+for|entertaining|taking|accepting)\s+(?:any\s+)?(?:low[\s-]?ball(?:ing)?|low|cheap|insulting|ridiculous|junk|garbage)\s+(?:offers?|bids?|prices?|numbers?)\b/i
 export const withoutLowballObjection = (body) => String(body ?? '').replace(new RegExp(LOWBALL_OBJECTION_RE.source, 'gi'), ' ')
 export const declinesSelling = (body) => NOT_INTERESTED_RE.test(withoutLowballObjection(body))
-export const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)\s*[.!]*\s*$/i
+export const BARE_YES_RE = /^\s*(?:yes|yeah|yep|yup|sure|correct|i\s+do|ok(?:ay)?|si|sí)(?:,?\s+(?:ma'?am|maam|sir))?\s*[.!]*\s*$/i
 const BARE_MAYBE_RE = /^\s*(?:maybe|possibly|perhaps|depends|it\s+depends|could\s+be|might\s+be|not\s+sure)\s*[.!?]*\s*$/i
 // blind v11 U46: "we just gutted the kitchen and put in a new deck" discloses condition
 const CONDITION_RE = /\b(?:(?:gutted|redid|redone|re-?did|remodel(?:ed|led)?|renovated|updated|replaced|new)\s+(?:the\s+|a\s+|our\s+)?(?:kitchen|bath(?:room)?s?|deck|floors?|flooring|windows?|siding|cabinets|porch|basement|water\s+heater|carpet)|roof|hvac|a\/?c\b|furnace|foundation|plumbing|electrical|needs?\s+(?:some\s+|a\s+lot\s+of\s+)?(?:work|repairs?|updating|tlc)|repairs?|fixer(?:[\s-]upper)?|(?:good|great|fair|rough|bad|poor|decent|excellent)\s+(?:shape|condition)|move[\s-]?in\s+ready|(?:fully\s+)?(?:updated|remodeled|renovated)|as[\s-]is|turnkey)\b/i

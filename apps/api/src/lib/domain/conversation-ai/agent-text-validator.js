@@ -32,6 +32,7 @@ import { buildCanonicalLedger } from './fact-ledger.js'
 import { moneyMentions } from './validator.js'
 import { claimedNames } from './playbook/v3/style-validator.js'
 import { isStopRequest } from './stop-request.js'
+import { conditionGroundingReasons } from './condition-grounding.js'
 import { replyLanguageOf } from './send-policy.js'
 import { NO_COMPANY_IDENTITY } from './company-identity.js'
 import { transportContentReasons } from '@/lib/domain/messaging/transport-content-rules.js'
@@ -89,6 +90,7 @@ const cap = (s) => clean(s).split(/[\s._-]+/)[0].replace(/^./, (c) => c.toUpperC
  * @param {object|null} [o.property] the property row (canonical asset group)
  * @param {string|null} [o.firstName] the seller's first name (a name the text may use)
  * @param {boolean} [o.ownershipConfirmedByPerson]
+ * @param {Array<{family:string, source:'seller_reported'|'verified_finding'|'underwriting_estimate'}>} [o.conditionEvidence] authorized condition evidence beyond the seller's own words (condition-grounding.js)
  * @param {string} o.now
  * @returns {{ ok: boolean, code: string|null, reasons: string[], money: { amounts: number[], amount: number|null }, non_owner: object, seller_language: string|null, version: string }}
  */
@@ -100,7 +102,7 @@ function unansweredFollowUpRepeat(kind, { purpose, ledger, thread }) {
   return firstAsk >= 0 && !thread.slice(firstAsk + 1).some((m) => m.direction === 'inbound')
 }
 
-export function validateAgentText(body, { purpose = null, messages = [], policy = {}, companyIdentity = NO_COMPANY_IDENTITY, authorEmployee = null, establishedPersona = null, moneyAuthority = null, property = null, firstName = null, ownershipConfirmedByPerson = false, now = new Date().toISOString() } = {}) {
+export function validateAgentText(body, { purpose = null, messages = [], policy = {}, companyIdentity = NO_COMPANY_IDENTITY, authorEmployee = null, establishedPersona = null, moneyAuthority = null, property = null, firstName = null, ownershipConfirmedByPerson = false, conditionEvidence = [], now = new Date().toISOString() } = {}) {
   const text = String(body ?? '')
   const t = text.replace(/\s+/g, ' ').trim()
   const reasons = []
@@ -171,6 +173,11 @@ export function validateAgentText(body, { purpose = null, messages = [], policy 
   // writer safety (non-owner contact, invented acknowledgement, stale seller time, unsupported identity claims)
   const ws = validateWriterSafety(t, { thread: thread.map((m) => ({ direction: m.direction, body: m.body, at: m.at })), companyIdentity, now, ownershipConfirmedByPerson })
   for (const r of ws.reasons) add(r)
+
+  // property condition: a material condition statement about THIS property must be backed by the seller's own words or
+  // authorized evidence (a verified finding may be stated as found; an underwriting estimate is never a seller-facing
+  // fact). Questions, conditionals and statements about houses in general are untouched.
+  for (const r of conditionGroundingReasons(t, { thread, evidence: conditionEvidence, moneyAuthority })) add(r)
 
   // money: one amount, permitted by a live negotiation send authorization of this lead (≤ its ceiling)
   const amounts = [...new Set(moneyMentions(t).map((m) => Math.round(Number(m.amount) || 0)).filter((n) => n > 0))]
