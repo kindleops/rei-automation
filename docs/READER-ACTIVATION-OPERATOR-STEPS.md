@@ -16,7 +16,7 @@ Run every step on the operator machine, from a LeadCommand checkout of `preserve
 | Check | How | Stop if |
 |---|---|---|
 | Backup / recovery | Supabase dashboard → Database → Backups: the latest daily backup or point-in-time-recovery window for `real-estate-automation`; record its time | No backup in the last 24 h, or PITR unavailable and no fresh backup |
-| The reviewed inventory | The fingerprint `reader-reconcile.mjs` printed for the owner's v2 inventory (link 1 IDENTICAL, links 2–5 ABSENT) | No fingerprint |
+| The reviewed inventory | **`4bcff231005cc26e`**: the owner's v2 inventory of 2026-10-31 (link 1 IDENTICAL, links 2–5 ABSENT). It must have been computed with `reader-reconcile.mjs` at `26cd6ddf` or later (the key-order-independent fingerprint). An older comparator gives another value, and the preflight then stops as "production changed", which is a safe false stop: recompute it. | No fingerprint |
 | Tools | `psql` and `node` ≥ 22 | Missing |
 | Admin connection | `export PROD_ADMIN_URL=…` typed in this shell only; `export EXPECTED_DB_HOST=<the production host>` | — |
 
