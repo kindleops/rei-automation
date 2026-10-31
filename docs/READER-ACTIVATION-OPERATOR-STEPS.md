@@ -11,6 +11,20 @@
 
 Run every step on the operator machine, from a LeadCommand checkout of `preserve/agntei-agent-texts-unreviewed`. No secret is ever typed into a chat, a log or a file in a repository.
 
+## Status at 2026-10-31 (after the first apply)
+
+The first apply committed **link 2** and then stopped: `date +%s%3N` is not portable to macOS, so the timer failed. The script's own guard stopped it before link 3.
+
+**Read-only checks afterwards found:**
+- links 1 and 2 identical to the reviewed files;
+- links 3–5 absent;
+- no row count changed;
+- no role, grant or SMS setting changed.
+
+The new production inventory fingerprint is **`2945b105f819b988`**, and it replaces `4bcff231005cc26e` once the owner approves it.
+
+**The script is fixed** (portable millisecond timer, `shasum` fallback, empty-array safety under macOS bash 3.2, and a guard that every outstanding link was applied before validation). It was re-tested on a Supabase-shaped replica in the same intermediate state, under a macOS `date`. Steps 1–2 below then apply links **3–5** only. The script derives the outstanding links from the reconciliation.
+
 ## 0. Before anything
 
 | Check | How | Stop if |

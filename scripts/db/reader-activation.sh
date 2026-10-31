@@ -27,20 +27,23 @@ LINKS=(PROPOSED_20261019150000_lc_mcp_reader PROPOSED_20261026120000_lc_mcp_conv
 # the reviewed files (LeadCommand bc94ff83); a different file is refused
 SHA=(31a2afb415793ef6 037bedb92904fe56 91e43d634d7c3d52 10ec163f8d82df7c 435dfb8629782461)
 log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$OUT/activation.log"; }
+# portable on macOS (BSD date has no %N, /bin/bash is 3.2, sha256sum may be absent)
+now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+sha16() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-16; }
 die() { log "STOP: $*"; applied_rollbacks; exit 1; }
 APPLIED=()
 applied_rollbacks() { [ ${#APPLIED[@]} -eq 0 ] && return; log "links applied so far: ${APPLIED[*]}"; log "to undo them, in this order (each in one transaction, then compare the §4.2 counts):"; for ((i=${#APPLIED[@]}-1; i>=0; i--)); do log "  psql \"\$PROD_ADMIN_URL\" --single-transaction -v ON_ERROR_STOP=1 -f $M/${APPLIED[$i]}_rollback.sql"; done; }
 [ -n "${PROD_ADMIN_URL:-}" ] || die "PROD_ADMIN_URL is not set (the owner sets it in this shell; it is never printed)"
 [ -n "${EXPECTED_DB_HOST:-}" ] || die "EXPECTED_DB_HOST is not set"
 host=$(python3 -c 'import os,urllib.parse as u;print(u.urlparse(os.environ["PROD_ADMIN_URL"]).hostname or "")')
-[ "$host" = "$EXPECTED_DB_HOST" ] || die "the connection's host ($host) is not EXPECTED_DB_HOST ($EXPECTED_DB_HOST)"
+[ "$host" = "$EXPECTED_DB_HOST" ] || die "the connection's host does not match EXPECTED_DB_HOST (neither is logged)"
 P() { psql "$PROD_ADMIN_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
 RO() { PGOPTIONS='-c default_transaction_read_only=on' psql "$PROD_ADMIN_URL" -X -q -A -t -v ON_ERROR_STOP=1 "$@"; }
 
-log "mode $MODE; host $host; checkout $(git -C "$here" rev-parse --short HEAD); backup confirmed: ${BACKUP_CONFIRMED:-(not given)}"
+log "mode $MODE; host matches EXPECTED_DB_HOST; checkout $(git -C "$here" rev-parse --short HEAD); backup confirmed: ${BACKUP_CONFIRMED:-(not given)}"
 # ---- 0. the files are the reviewed ones --------------------------------------------------------------------------------
 for i in "${!LINKS[@]}"; do f=$M/${LINKS[$i]}.sql; [ -f "$f" ] || die "missing $f"
-  s=$(sha256sum "$f" | cut -c1-16); [ "$s" = "${SHA[$i]}" ] || die "${LINKS[$i]}: sha256 $s is not the reviewed ${SHA[$i]}"
+  s=$(sha16 "$f"); [ "$s" = "${SHA[$i]}" ] || die "${LINKS[$i]}: sha256 $s is not the reviewed ${SHA[$i]}"
   [ -f "$M/${LINKS[$i]}_rollback.sql" ] || die "missing rollback for ${LINKS[$i]}"; done
 log "files: the five reviewed links and their rollbacks are present"
 # ---- 1. read-only preflight (a read-only session: nothing can be written) ---------------------------------------------
@@ -92,9 +95,11 @@ grep -q $'\terror$' "$OUT/counts-before.tsv" && die "a baseline count failed (se
 [ "$MODE" = "apply" ] || { log "preflight passed (read-only). Outstanding: ${TODO[*]:-none}. Re-run with MODE=apply to apply exactly those."; exit 0; }
 [ -n "${BACKUP_CONFIRMED:-}" ] || die "BACKUP_CONFIRMED is not set: confirm the platform backup / PITR point first (§4.1)"
 # ---- 2. apply links 1–5, in order, one transaction each ---------------------------------------------------------------
-for l in "${TODO[@]}"; do t0=$(date +%s%3N)
+for l in ${TODO[@]+"${TODO[@]}"}; do t0=$(now_ms) || die "the timer failed"
   P --single-transaction -f "$M/$l.sql" > "$OUT/$l.log" 2>&1 || { tail -5 "$OUT/$l.log" | tee -a "$OUT/activation.log"; die "$l failed (rolled back as one transaction)"; }
-  APPLIED+=("$l"); log "applied $l ($(( $(date +%s%3N) - t0 )) ms)"; done
+  APPLIED+=("$l"); t1=$(now_ms) || die "the timer failed"; log "applied $l ($((t1 - t0)) ms)"; done
+# every outstanding link must have been applied before anything is validated
+[ "${#APPLIED[@]}" = "${#TODO[@]}" ] || die "only ${#APPLIED[@]} of ${#TODO[@]} outstanding links were applied: stopping before validation"
 # ---- 3. validation (§7), read-only enforcement, unchanged data ---------------------------------------------------------
 v=$(RO -F ' ' -c "select r.rolcanlogin = false and r.rolbypassrls = false and r.rolsuper = false,
   has_function_privilege('lc_mcp_reader','public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)','EXECUTE'),
@@ -130,9 +135,9 @@ diff "$OUT/counts-before.tsv" "$OUT/counts-after.tsv" > "$OUT/counts-diff.txt" |
 log "data unchanged: every counted relation has the same row count before and after"
 snap > "$OUT/catalog-after.txt" && [ -s "$OUT/catalog-after.txt" ] || die "the post-apply catalog snapshot could not be read"
 removed=$(comm -23 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt"); added=$(comm -13 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt")
-allowed=$(for l in "${TODO[@]}"; do grep -oiE "create (or replace )?function public\.[a-z0-9_]+" "$M/$l.sql" | awk '{print $NF}' | sed 's/^public\.//'; done | sort -u)
+allowed=$(for l in ${TODO[@]+"${TODO[@]}"}; do grep -oiE "create (or replace )?function public\.[a-z0-9_]+" "$M/$l.sql" | awk '{print $NF}' | sed 's/^public\.//'; done | sort -u)
 bad_removed=$(printf '%s\n' "$removed" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; echo "$k $n"; done)
-bad_added=$(printf '%s\n' "$added" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; [ "$k" = pol ] && printf '%s\n' "${TODO[@]}" | grep -q lc_mcp_reader$ && [ "$(echo "$rest" | cut -d' ' -f1)" = lc_mcp_reader_select ] && continue; [ "$k" = rel ] && printf '%s\n' "${TODO[@]}" | grep -q lc_mcp_reader$ && continue; echo "$k $n"; done)
+bad_added=$(printf '%s\n' "$added" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; [ "$k" = pol ] && printf '%s\n' ${TODO[@]+"${TODO[@]}"} | grep -q lc_mcp_reader$ && [ "$(echo "$rest" | cut -d' ' -f1)" = lc_mcp_reader_select ] && continue; [ "$k" = rel ] && printf '%s\n' ${TODO[@]+"${TODO[@]}"} | grep -q lc_mcp_reader$ && continue; echo "$k $n"; done)
 [ -z "$bad_removed$bad_added" ] || { printf 'removed or changed:\n%s\nadded or changed:\n%s\n' "$bad_removed" "$bad_added" > "$OUT/catalog-unexpected.txt"; die "the catalog changed beyond the applied links' own functions (catalog-unexpected.txt)"; }
 log "catalog: only the applied links' functions changed ($(printf '%s\n' "$added" | grep -c '^fn ') function entries added or replaced); no relation or policy changed"
 RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-after.txt"
