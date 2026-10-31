@@ -54,11 +54,11 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { readCredentialFile, assertReaderJwt, assertPublicApiKey, ambientCredentialNames, RETIRED_LIVE_ENV } from '../src/data/credential.mjs'
-import { RELATION_NAMES, RPC_SIGNATURES } from '../src/data/inventory.mjs'
+import { RELATION_NAMES, ALL_RPC_SIGNATURES } from '../src/data/inventory.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PKG = path.resolve(HERE, '..')
-export const MAX_CALLS = 24
+export const MAX_CALLS = 32
 /** Every tool of the catalog, with its scope (the script runs without the @/ loader, so it cannot import the catalog). */
 export const TOOL_SCOPES = Object.freeze({
   leadcommand_search_leads: 'leadcommand.leads.read', leadcommand_get_lead: 'leadcommand.leads.read',
@@ -68,10 +68,20 @@ export const TOOL_SCOPES = Object.freeze({
   leadcommand_get_lead_contact_status: 'leadcommand.contact_status.read',
   leadcommand_get_ops_supervisor_status: 'leadcommand.ops_supervisor.read', leadcommand_search_action_center: 'leadcommand.action_center.read',
   leadcommand_get_thread_hold_status: 'leadcommand.holds.read', leadcommand_get_followup_intent_health: 'leadcommand.followups.read',
-  // 1.1 conversation intelligence (opt-in; SOURCE_NOT_APPLIED is an accepted answer until its migration is applied)
+  // 1.1 conversation intelligence (links 2 and 5): must answer with data
   leadcommand_get_lead_conversation: 'leadcommand.conversations.read', leadcommand_search_conversation_worklist: 'leadcommand.conversations.read',
   leadcommand_get_opportunity_ranking: 'leadcommand.conversations.read', leadcommand_get_pipeline_summary: 'leadcommand.pipeline.read',
+  // 1.2 corpus census and screen (link 3), 1.3 acquisition reads per thread (link 4)
+  leadcommand_get_corpus_census: 'leadcommand.pipeline.read', leadcommand_search_lead_screen: 'leadcommand.pipeline.read',
+  leadcommand_get_thread_followups: 'leadcommand.followups.read', leadcommand_get_thread_execution_log: 'leadcommand.conversations.read',
+  leadcommand_get_thread_offers: 'leadcommand.conversations.read', leadcommand_get_thread_contact_eligibility: 'leadcommand.contact_status.read',
+  leadcommand_search_operator_tasks: 'leadcommand.action_center.read',
 })
+/** Operations reads whose SOURCES come from operations migrations a database may not hold (automation_holds, followup_intents,
+ * the Action Center and ops-supervisor registries): SOURCE_NOT_APPLIED is a recorded answer for these ONLY. Every other read —
+ * the conversation, pipeline, census, screen and acquisition reads of links 2–5 — must answer with data. */
+export const OPS_SOURCE_OPTIONAL = Object.freeze(new Set(['leadcommand_search_action_center', 'leadcommand_get_thread_hold_status',
+  'leadcommand_get_followup_intent_health', 'leadcommand_get_ops_supervisor_status', 'leadcommand_search_operator_tasks', 'leadcommand_get_thread_followups']))
 export const ACCEPTANCE_SCOPES = [...new Set(Object.values(TOOL_SCOPES))].join(' ')
 const PROVENANCE_KINDS = new Set(['fact', 'derived', 'inferred', 'stale', 'missing'])
 const PHONE = /(?<![0-9A-Za-z])\+?1?[-. (]*[2-9][0-9]{2}[-. )]*[0-9]{3}[-. ]*[0-9]{4}(?![0-9])/
@@ -120,9 +130,19 @@ export async function databaseRefusesWrites({ url, reader, apiKey, fetchImpl = g
     await expect42501(`DELETE ${t}`, () => fetchImpl(`${url}/rest/v1/${t}?${pk}=is.null`, { method: 'DELETE', headers: h() }))
   }
   await expect42501('SELECT send_queue (outside the inventory)', () => fetchImpl(`${url}/rest/v1/send_queue?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
-  // the operations sources are reachable ONLY through the lc_mcp_* definer projections
-  await expect42501('SELECT automation_holds (definer projection only)', () => fetchImpl(`${url}/rest/v1/automation_holds?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
-  await expect42501('SELECT followup_intents (definer projection only)', () => fetchImpl(`${url}/rest/v1/followup_intents?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
+  // the operations sources are reachable ONLY through the lc_mcp_* definer projections. A database that does not hold
+  // the source table at all (its migration was never applied there) answers 404 PGRST205: nothing exists to read. That
+  // is recorded as `absent`, never as `refused_by_database`; any other answer still fails.
+  const expectRefusedOrAbsent = async (label, req) => {
+    const r = await req()
+    const b = await body(r)
+    const refused = (r.status === 401 || r.status === 403) && b?.code === '42501'
+    const absent = r.status === 404 && b?.code === 'PGRST205'
+    out.push({ probe: label, status: r.status, code: b?.code ?? null, refused_by_database: refused, absent })
+    if (!refused && !absent) fail('database', `${label} was NOT refused by the database (HTTP ${r.status}, code ${b?.code ?? 'none'})`)
+  }
+  await expectRefusedOrAbsent('SELECT automation_holds (definer projection only)', () => fetchImpl(`${url}/rest/v1/automation_holds?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
+  await expectRefusedOrAbsent('SELECT followup_intents (definer projection only)', () => fetchImpl(`${url}/rest/v1/followup_intents?select=id&limit=1`, { headers: h({ prefer: 'count=none' }) }))
   {
     const r = await fetchImpl(`${url}/rest/v1/operator_membership?columns=user_id`, { method: 'POST', headers: h({ 'content-profile': 'agent' }), body: '[]' })
     const b = await body(r)
@@ -130,7 +150,7 @@ export async function databaseRefusesWrites({ url, reader, apiKey, fetchImpl = g
     out.push({ probe: 'INSERT agent.operator_membership', status: r.status, code: b?.code ?? null, refused_by_database: b?.code === '42501', refused: ok })
     if (!ok) fail('database', `agent.operator_membership insert was not refused (HTTP ${r.status}, code ${b?.code ?? 'none'})`)
   }
-  const r = await fetchImpl(`${url}/rest/v1/rpc/lc_mcp_reader_self_check`, { method: 'POST', headers: h({ prefer: 'count=none' }), body: JSON.stringify({ p_relations: RELATION_NAMES, p_functions: RPC_SIGNATURES }) })
+  const r = await fetchImpl(`${url}/rest/v1/rpc/lc_mcp_reader_self_check`, { method: 'POST', headers: h({ prefer: 'count=none' }), body: JSON.stringify({ p_relations: RELATION_NAMES, p_functions: ALL_RPC_SIGNATURES }) })
   const rep = await body(r)
   if (r.status !== 200) fail('database', `the privilege report could not be read as the role (HTTP ${r.status}, code ${rep?.code ?? 'none'})`)
   if (rep.current_user !== 'lc_mcp_reader') fail('database', `requests run as ${rep.current_user}, not lc_mcp_reader`)
@@ -198,7 +218,15 @@ async function startServer(env, work) {
 }
 
 /** Stage 2: every granted tool (all 17 by default), bounded, through the real server over Streamable HTTP. */
-export async function everyCapability(env, { zip = null, market = null, work }) {
+/** --known-defect <tool>:<code> (repeatable): a NAMED, owner-visible defect. The call is recorded as known_defect and the run
+ * ends PASS_WITH_KNOWN_DEFECTS, never PASS. Any other failure — or a different code from that tool — still fails. */
+export function knownDefects(argv) {
+  const out = new Map()
+  argv.forEach((a, i) => { if (a === '--known-defect' && argv[i + 1]) { const [t, c] = argv[i + 1].split(':'); if (t && c) out.set(t, c) } })
+  return out
+}
+
+export async function everyCapability(env, { zip = null, market = null, work, defects = new Map() }) {
   if (!zip && !market) fail('capability', 'give an anchor: --zip <5 digits> or --market "<label>"')
   const srv = await startServer(env, work)
   const client = new Client({ name: 'leadcommand-live-acceptance', version: '1.0.0' })
@@ -210,8 +238,13 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
     const t0 = Date.now()
     const r = await client.callTool({ name, arguments: args })
     const text = JSON.stringify(r.structuredContent ?? null)
-    if (r.isError && expectError && r.structuredContent?.error?.code === expectError) {
-      results.push({ tool: name, ms: Date.now() - t0, rows: null, provenance: [], bytes: Buffer.byteLength(text), expected_error: expectError })
+    const code = r.structuredContent?.error?.code
+    if (r.isError && ((expectError && code === expectError) || (OPS_SOURCE_OPTIONAL.has(name) && code === 'SOURCE_NOT_APPLIED'))) {
+      results.push({ tool: name, ms: Date.now() - t0, rows: null, provenance: [], bytes: Buffer.byteLength(text), expected_error: code })
+      return null
+    }
+    if (r.isError && defects.get(name) === code) {
+      results.push({ tool: name, ms: Date.now() - t0, rows: null, provenance: [], bytes: Buffer.byteLength(text), known_defect: code })
       return null
     }
     if (r.isError) fail('capability', `${name} failed: ${r.structuredContent?.error?.class}/${r.structuredContent?.error?.code}`)
@@ -252,12 +285,21 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
       else await call('leadcommand_get_thread_hold_status', { thread_id: '00000000-0000-0000-0000-000000000000' }, { expectError: 'NOT_FOUND' })
     }
     if (granted('leadcommand_get_followup_intent_health')) await call('leadcommand_get_followup_intent_health', {})
-    // 1.1 conversation intelligence: bounded reads; an unapplied migration answers SOURCE_NOT_APPLIED (recorded, not a failure)
-    const NA = { expectError: 'SOURCE_NOT_APPLIED' }
+    // 1.1 conversation intelligence: bounded reads that must answer with data (links 2 and 5 are applied)
+    const NA = {} // links 2–5 are applied: the conversation and pipeline reads must answer with data
     if (granted('leadcommand_get_lead_conversation')) await call('leadcommand_get_lead_conversation', { property_id: pid, window_days: 365, limit: 10 }, NA)
-    if (granted('leadcommand_search_conversation_worklist')) await call('leadcommand_search_conversation_worklist', { category: 'unanswered_inbound', window_days: 30, limit: 3 }, NA)
+    if (granted('leadcommand_search_conversation_worklist')) {
+      const wl = await call('leadcommand_search_conversation_worklist', { category: 'unanswered_inbound', window_days: 30, limit: 3 }, NA)
+      threadId ||= wl?.rows?.[0]?.thread_id || wl?.rows?.[0]?.conversation_id || null
+    }
     if (granted('leadcommand_get_opportunity_ranking')) await call('leadcommand_get_opportunity_ranking', { window_days: 14, max_threads: 25, top: 5 }, NA)
     if (granted('leadcommand_get_pipeline_summary')) await call('leadcommand_get_pipeline_summary', { dimension: 'market', limit: 10 }, NA)
+    if (granted('leadcommand_get_corpus_census')) await call('leadcommand_get_corpus_census', {})
+    if (granted('leadcommand_search_lead_screen')) await call('leadcommand_search_lead_screen', { limit: 5 })
+    if (granted('leadcommand_search_operator_tasks')) await call('leadcommand_search_operator_tasks', { limit: 3 })
+    const threadReads = ['leadcommand_get_thread_followups', 'leadcommand_get_thread_execution_log', 'leadcommand_get_thread_offers', 'leadcommand_get_thread_contact_eligibility'].filter(granted)
+    if (threadReads.length && !threadId) fail('capability', 'no thread id from the Action Center or the worklist for the per-thread acquisition reads')
+    for (const t of threadReads) await call(t, { thread_id: threadId })
     const covered = new Set(results.map((x) => x.tool))
     const want = Object.keys(TOOL_SCOPES).filter(granted)
     const skipped = Object.keys(TOOL_SCOPES).filter((t) => !granted(t))
@@ -270,7 +312,7 @@ export async function everyCapability(env, { zip = null, market = null, work }) 
 }
 
 /** Stage 3: the audit file. */
-export function auditMatches(file, { calls, secrets }) {
+export function auditMatches(file, { calls, secrets, defects = new Map() }) {
   const raw = fs.readFileSync(file, 'utf8')
   for (const s of secrets) if (s && raw.includes(s)) fail('audit', 'a credential appears in the audit file')
   const lines = raw.trim().split('\n').map((l) => JSON.parse(l))
@@ -279,10 +321,12 @@ export function auditMatches(file, { calls, secrets }) {
   const tc = lines.filter((l) => l.event === 'tool_call')
   if (tc.length !== calls) fail('audit', `${tc.length} tool_call records for ${calls} calls`)
   // expected refusals, audited as failed with their code: a nil-id hold probe (NOT_FOUND); a 1.1 conversation read
-  // before its migration is applied (SOURCE_NOT_APPLIED)
+  // before its source exists (SOURCE_NOT_APPLIED, operations reads only)
   const expected = (l) => (l.tool === 'leadcommand_get_thread_hold_status' && l.error_code === 'NOT_FOUND')
-    || (TOOL_SCOPES[l.tool] && /^leadcommand\.(conversations|pipeline)\.read$/.test(TOOL_SCOPES[l.tool]) && l.error_code === 'SOURCE_NOT_APPLIED')
-  if (!tc.every((l) => (l.outcome === 'ok' || expected(l)) && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal))) fail('audit', 'a tool_call record is not ok / live / hashed')
+    || (defects.get(l.tool) === l.error_code)
+    || (OPS_SOURCE_OPTIONAL.has(l.tool) && l.error_code === 'SOURCE_NOT_APPLIED')
+  const bad = tc.find((l) => !((l.outcome === 'ok' || expected(l)) && l.data_mode === 'live' && /^#[0-9a-f]{12}$/.test(l.principal)))
+  if (bad) fail('audit', `a tool_call record is not ok / live / hashed (${bad.tool}: outcome ${bad.outcome}, code ${bad.error_code ?? 'none'}, data_mode ${bad.data_mode})`)
   return { self_check: { stage: check.stage, outcome: check.outcome, running_as: check.running_as, expires_at: check.expires_at }, tool_calls: tc.length }
 }
 
@@ -293,10 +337,13 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     const pf = preflight(env)
     summary.stages.preflight = { ok: true, role: pf.token.role, token_days_left: pf.token.days_left, api_key: pf.key.kind, data_service: new URL(pf.url).host }
     summary.stages.database = { ok: true, ...(await databaseRefusesWrites(pf)) }
-    const cap = await everyCapability(env, { zip: arg(argv, '--zip'), market: arg(argv, '--market'), work })
+    const defects = knownDefects(argv)
+    const cap = await everyCapability(env, { zip: arg(argv, '--zip'), market: arg(argv, '--market'), work, defects })
     summary.stages.capability = { ok: true, property_id: cap.property_id, campaign_id: cap.campaign_id, calls: cap.calls, results: cap.results, skipped_not_granted: cap.skipped_not_granted }
-    summary.stages.audit = { ok: true, ...auditMatches(cap.audit, { calls: cap.calls, secrets: [pf.reader, pf.apiKey, cap.tokenForCheck] }) }
-    summary.result = 'PASS'
+    summary.stages.audit = { ok: true, ...auditMatches(cap.audit, { calls: cap.calls, secrets: [pf.reader, pf.apiKey, cap.tokenForCheck], defects }) }
+    const hit = cap.results.filter((x) => x.known_defect).map((x) => `${x.tool}:${x.known_defect}`)
+    summary.known_defects = hit
+    summary.result = hit.length ? 'PASS_WITH_KNOWN_DEFECTS' : 'PASS'
   } catch (e) {
     summary.result = 'FAIL'
     summary.error = e instanceof StageFailed ? e.message : `${e?.code || e?.name || 'error'}: ${String(e?.message || e).slice(0, 300)}`
@@ -304,7 +351,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     fs.rmSync(work, { recursive: true, force: true })
   }
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
-  return summary.result === 'PASS' ? 0 : 1
+  return summary.result === 'PASS' ? 0 : summary.result === 'PASS_WITH_KNOWN_DEFECTS' ? 3 : 1
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
