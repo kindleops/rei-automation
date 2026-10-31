@@ -25,6 +25,20 @@ The new production inventory fingerprint is **`2945b105f819b988`**, and it repla
 
 **The script is fixed** (portable millisecond timer, `shasum` fallback, empty-array safety under macOS bash 3.2, and a guard that every outstanding link was applied before validation). It was re-tested on a Supabase-shaped replica in the same intermediate state, under a macOS `date`. Steps 1–2 below then apply links **3–5** only. The script derives the outstanding links from the reconciliation.
 
+**Second apply (2026-10-31, as reported by the operator session):**
+- Evidence: `~/reader-activation-20261031T073948Z-apply2` on the operator machine.
+- Links 3, 4 and 5 were applied; links 1 and 2 were already in place; links 6–9 were not touched.
+- Validation was all true, and the reader's self-check was true (20 relations, 20 functions).
+- The reader has no write privilege on any `public` relation and no CREATE on `public`.
+- All 26 counted tables are unchanged.
+- The catalog changed only by the 9 function entries of these links.
+- The post-apply reconciliation found all five links identical (31 of 31 objects).
+- The all-history worklist shows 2,135 threads with a seller message.
+
+The production inventory fingerprint is now **`9db15fb47a5e4d64`**. Steps 0–2 are complete; continue at step 3.
+
+**Provenance note:** that run used checkout `f362bc85` with the operator session's own local portability edits, equivalent to `d6115504`. Its diff is preserved in the evidence directory as `script-as-run.diff`.
+
 ## 0. Before anything
 
 | Check | How | Stop if |
