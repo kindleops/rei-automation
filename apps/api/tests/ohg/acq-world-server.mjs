@@ -91,10 +91,10 @@ const OPTED_OUT_MARKS = `contactability_status = 'opted_out', is_suppressed = tr
 const WRONG_NUMBER_MARKS = `disposition = 'wrong_number', contactability_status = 'invalid_number', is_suppressed = true`
 
 const HI_SENDER = `+1${GEO.area}5550199`
-const P = { gold: `+1${GEO.area}5550101`, soft: `+1${GEO.area}5550102`, ft_a: `+1${GEO.area}5550103`, ft_b: `+1${GEO.area}5550104`, stopped: `+1${GEO.area}5550105`, wrong: `+1${GEO.area}5550106`, eastern: '+13175550107' }
-const PID = { gold: '808100001', soft: '808100002', ft_a: '808100003', ft_b: '808100004', stopped: '808100005', wrong: '808100006', eastern: '808100007' }
-const STREET = { gold: '4471 Marigold Ln', soft: '812 Cedar St', ft_a: '1550 Kapiolani Blvd', ft_b: '2230 Wilder Ave', stopped: '96 Kaimuki Ave', wrong: '310 Lunalilo St', eastern: '77 Pali Hwy' }
-const FIRST = { gold: 'Dana', soft: 'Ray', ft_a: 'Keoni', ft_b: 'Malia', stopped: 'Lee', wrong: 'Pat', eastern: 'Sam' }
+const P = { gold: `+1${GEO.area}5550101`, soft: `+1${GEO.area}5550102`, ft_a: `+1${GEO.area}5550103`, ft_b: `+1${GEO.area}5550104`, stopped: `+1${GEO.area}5550105`, wrong: `+1${GEO.area}5550106`, eastern: '+13175550107', sold: `+1${GEO.area}5550108` }
+const PID = { gold: '808100001', soft: '808100002', ft_a: '808100003', ft_b: '808100004', stopped: '808100005', wrong: '808100006', eastern: '808100007', sold: '808100008' }
+const STREET = { gold: '4471 Marigold Ln', soft: '812 Cedar St', ft_a: '1550 Kapiolani Blvd', ft_b: '2230 Wilder Ave', stopped: '96 Kaimuki Ave', wrong: '310 Lunalilo St', eastern: '77 Pali Hwy', sold: '45 Hibiscus Ct' }
+const FIRST = { gold: 'Dana', soft: 'Ray', ft_a: 'Keoni', ft_b: 'Malia', stopped: 'Lee', wrong: 'Pat', eastern: 'Sam', sold: 'Kim' }
 
 await setControls(env.owner, {
   // the agents' own texts: switched ON in THIS world only (born OFF everywhere else); the default caps
@@ -161,6 +161,9 @@ await env.owner.query(`insert into public.phones (phone_id, canonical_e164, phon
 await env.owner.query(`update public.inbox_thread_state set ${WRONG_NUMBER_MARKS} where id = $1`, [wrong.thread_id])
 // 7 eastern: a campaign target with an Eastern-time (317) number: the 08:00–21:00 recipient window decides
 const eastern = await target('eastern')
+// 8 sold (link 10): a quiet conversation whose property LeadCommand's facts show SOLD since — a warranty deed recorded
+// 5 days ago to a new owner, after the seller's last message (14 days ago). Research reads it through its own tools.
+const sold = RECORD_SYNC ? await thread('sold', { inboundBody: 'Maybe later this year, not sure yet', daysAgo: 14, ourText: 'Hi Kim, this is Helen. Do you still own the house on Hibiscus Ct?' }) : null
 
 // the reader's view of the properties (best effort per statement: the chain baseline models these relations)
 for (const k of Object.keys(P)) {
@@ -175,6 +178,10 @@ for (const k of Object.keys(P)) {
   ]) { try { await env.owner.query(sql, args) } catch (e) { log('reader seed skipped:', sql.slice(0, 60), '→', e.message.slice(0, 80)) } }
 }
 
+if (sold) {
+  await env.owner.query(`update public.eg_property_facts set last_sale_on = (now() - interval '5 days')::date, sale_date = (now() - interval '5 days')::date, sale_price = 312000, last_sale_doc_type = 'Warranty Deed', owner_name = 'NEW HORIZON HOLDINGS LLC', owner_type = 'corporate', is_corporate_owner = true where property_id = $1`, [PID.sold]).catch((e) => log('sold facts not set:', e.message.slice(0, 120)))
+  await env.owner.query(`insert into public.acquisition_opportunities (dedupe_key, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status, market) values ('opp:sold', $1, $2, 'ownership_confirmation', 'active', $3)`, [PID.sold, P.sold, MARKET])
+}
 // ── 3. the agent principals: one credential each; owner-minted STANDING seller-facing grants for the two senders ─
 const READS = [['conversation.read_context', 1], ['acquisitions.read_delivery', 1], ['acquisitions.read_annotations', 1]]
 const WRITES = [['acquisitions.set_lead_temperature', 2], ['acquisitions.update_lead_status', 2], ['acquisitions.record_conversation_note', 2], ['acquisitions.record_seller_statement', 2],
@@ -483,6 +490,7 @@ const world = {
     stopped: seed('stopped', { campaign_target_id: stopped, thread_id: stoppedThread.thread_id, expect: 'ineligible STOP_REQUESTED (answered STOP: opt-out marks + suppression list); every send is refused STOP_REQUESTED' }),
     wrong: seed('wrong', { thread_id: wrong.thread_id, expect: 'ineligible CONTACT_NOT_PERMITTED (confirmed wrong number: disposition wrong_number, contactability invalid_number)' }),
     eastern: seed('eastern', { campaign_target_id: eastern, expect: 'eligible, but refused OUTSIDE_RECIPIENT_WINDOW while 08:00–21:00 Eastern is closed (see pool.window_open)' }),
+    ...(sold ? { sold: seed('sold', { thread_id: sold.thread_id, expect: 'record sync: LeadCommand\'s property facts show a warranty deed recorded 5 days ago to a new owner (after the seller\'s last message 14 days ago)' }) } : {}),
   },
   org: ORG, owner: OWNER, operator: OPERATOR, out_dir: OUT,
 }
