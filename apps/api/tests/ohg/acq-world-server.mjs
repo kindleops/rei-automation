@@ -69,6 +69,9 @@ for (const stmt of fs.readFileSync(widen, 'utf8').split('\n').filter((l) => l.tr
 for (const f of ['PROPOSED_20261019150000_lc_mcp_reader.sql', 'PROPOSED_20261026120000_lc_mcp_conversation_intel.sql', 'PROPOSED_20261026150000_lc_mcp_corpus_census.sql', 'PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql', ...(process.env.ACQ_EXTRA_READER_LINKS || '').split(',').filter(Boolean)]) {
   try { await applyInTransaction(env.db.pool, MIG(f)); log('applied', f) } catch (e) { log('NOT applied', f, '→', e.message.slice(0, 160)) }
 }
+// link 10 (record sync): versioned canonical records, their history and record_changed events (ACQ_RECORD_SYNC=0 leaves it out)
+const RECORD_SYNC = process.env.ACQ_RECORD_SYNC !== '0'
+if (RECORD_SYNC) { await applyInTransaction(env.db.pool, MIG('PROPOSED_20261101120000_record_sync.sql')); log('applied', 'PROPOSED_20261101120000_record_sync.sql') }
 
 // ── 2. the world: org, operators, switches, senders, the fallback template ───────────────────────────────────
 await seedT34(env)
@@ -138,6 +141,12 @@ const soft = await thread('soft', { inboundBody: 'Not right now, maybe in the sp
 await env.owner.query(`insert into public.message_events (id, provider_message_sid, direction, thread_key, from_phone_number, to_phone_number, message_body, event_timestamp, created_at, property_id, language)
   values ($1, 'SMsoftack1', 'outbound', $2::text, $3::text, $2::text, 'Understood, thanks Ray. Good luck with the move.', now() - interval '21 days', now() - interval '21 days', $4, 'en')`, [crypto.randomUUID(), P.soft, HI_SENDER, PID.soft])
 await env.owner.query(`update public.inbox_thread_state set latest_direction = 'outbound', latest_message_at = now() - interval '21 days', outbound_count = 2 where id = $1`, [soft.thread_id])
+// link 10: the pipeline record (acquisition_opportunities) of the two conversations, so deal-level fields (pipeline
+// stage of the deal, opportunity status, property market status, agreement status) have their canonical home
+if (RECORD_SYNC) for (const [k, t] of [['gold', gold], ['soft', soft]]) {
+  await env.owner.query(`insert into public.acquisition_opportunities (dedupe_key, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status, market) values ($1, $2, $3, 'ownership_confirmation', 'active', $4)`, [`opp:${k}`, PID[k], P[k], MARKET])
+  await env.owner.query(`update public.inbox_thread_state set lifecycle_stage = 'ownership_confirmation', seller_stage = 'ownership_confirmation', stage_source = 'system' where id = $1`, [t.thread_id])
+}
 // 3 / 4 first-touch targets: eligible, no conversation
 const ftA = await target('ft_a')
 const ftB = await target('ft_b')
@@ -171,6 +180,7 @@ const READS = [['conversation.read_context', 1], ['acquisitions.read_delivery', 
 const WRITES = [['acquisitions.set_lead_temperature', 2], ['acquisitions.update_lead_status', 2], ['acquisitions.record_conversation_note', 2], ['acquisitions.record_seller_statement', 2],
   ['followups.schedule', 2], ['followups.cancel', 2], ['tasks.create_operator_task', 1], ['holds.set_thread_hold', 2]]
 const LEADS = [['leads.assign_lead', 2], ['leads.release_lead', 2], ['leads.read_assignment', 1], ['leads.read_pool', 1], ['events.read', 1], ['controls.read', 1]]
+const RECORDS = RECORD_SYNC ? [['records.read', 1], ['records.apply_change', 2]] : []
 const BASIS = 'disposable certification world'
 const mintStanding = (agent_id, capability) => env.owner.query(
   `insert into action_gateway.capability_grants (org_id, agent_id, capability, max_tier, scope, envelope, max_uses_per_hour, max_uses_per_day, max_spend_usd_per_day, max_failures_per_hour, max_cap_hits_per_hour, granted_by, valid_from, expires_at, standing_seller_facing, standing_basis)
@@ -179,12 +189,15 @@ const creds = {}
 // the two senders: an owner-minted STANDING grant for conversation.queue_agent_text (basis 'disposable certification
 // world'); Sterling, the head of acquisitions, also holds leads.transfer_lead (he reassigns and supervises), Nova does not
 for (const [k, id] of [['sterling', 'agt_sterling'], ['nova', 'agt_nova']]) {
-  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ...WRITES, ...LEADS, ...(k === 'sterling' ? [['leads.transfer_lead', 2]] : [])], tier_ceiling: 3, read_scopes: ['conversation_context.read'] })
+  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ...WRITES, ...LEADS, ...RECORDS, ...(k === 'sterling' ? [['leads.transfer_lead', 2]] : [])], tier_ceiling: 3, read_scopes: ['conversation_context.read'] })
   await mintStanding(id, 'conversation.queue_agent_text')
 }
-for (const [k, id] of [['equity', 'agt_equity'], ['haven', 'agt_haven']]) {
-  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ['acquisitions.record_conversation_note', 2]], tier_ceiling: 2, read_scopes: ['conversation_context.read'] })
+for (const [k, id] of [['equity', 'agt_equity'], ['haven', 'agt_haven'], ...(RECORD_SYNC ? [['scout', 'agt_scout']] : [])]) {
+  creds[k] = await registerAgent(env.owner, { agent_id: id, grants: [...READS, ['acquisitions.record_conversation_note', 2], ...RECORDS], tier_ceiling: 2, read_scopes: ['conversation_context.read'] })
 }
+// agntei's console: a person's edit made in agntei is written as that person's change (records.apply_person_change is
+// this credential's alone; it names the person) — never an agent's own credential
+if (RECORD_SYNC) creds.console = await registerAgent(env.owner, { agent_id: 'agt_agntei_console', grants: [['records.read', 1], ['records.apply_person_change', 2]], tier_ceiling: 2, read_scopes: ['conversation_context.read'] })
 for (const [k, v] of Object.entries(creds)) secret(`cred-${k}`, v)
 
 // ── 4. PostgREST + the /rest/v1 shim, the reader in LIVE mode ────────────────────────────────────────────────
@@ -358,6 +371,29 @@ const control = http.createServer(async (req, res) => {
       log('operator lead-state change (registry)', t.id, JSON.stringify(patch), r?.ok ? 'ok' : JSON.stringify(r).slice(0, 200))
       return send(r?.ok ? 200 : 500, { ok: r?.ok === true, thread_id: t.id, patch, path: 'patchUniversalLeadState', result: r?.ok ? 'ok' : r, after })
     }
+    // link 10: a PERSON's change made in LeadCommand's own screens — the dashboard's PATCH /api/cockpit/lead-state/patch
+    // calls the canonical registry (patchUniversalLeadState) with change_source manual and the operator's id: any field
+    // the registry accepts (stage, temperature, status, disposition, archive, follow-up date)
+    if (req.method === 'POST' && u.pathname === '/lead-state') {
+      const b = await body()
+      const [t] = await sel(env.owner, 'select id, thread_key from public.inbox_thread_state where id::text = $1', [String(b.thread_id || '')])
+      if (!t) return send(404, { error: 'thread not found' })
+      const patch = b.patch && typeof b.patch === 'object' ? b.patch : {}
+      const by = String(b.operator_id || 'operator_dana')
+      const r = await patchUniversalLeadState({ threadKey: t.thread_key, patch, meta: { change_source: String(b.change_source || 'manual'), operator_id: by, updated_by: by, reason: String(b.reason || 'edited in LeadCommand'), source_view: 'leadcommand_dashboard' }, supabase: leadSb })
+      log('LeadCommand screen edit (registry)', t.id, JSON.stringify(patch), r?.ok ? 'ok' : JSON.stringify(r).slice(0, 200))
+      return send(r?.ok ? 200 : 500, { ok: r?.ok === true, thread_id: t.id, patch, path: 'patchUniversalLeadState (LeadCommand dashboard)', result: r?.ok ? (r.blocked ? 'blocked' : 'ok') : r })
+    }
+    // link 10 evidence: the lead's canonical record (values, versions, provenance) and its change history, read as the
+    // database owner straight from the tables
+    if (req.method === 'GET' && u.pathname.startsWith('/record/')) {
+      const id = decodeURIComponent(u.pathname.slice('/record/'.length))
+      const state = (await sel(env.owner, 'select public.action_gateway_record_state($1::uuid) s', [id]))[0]?.s ?? null
+      const history = await sel(env.owner, 'select change_id, entity, field, old_value, new_value, version, source, actor_kind, actor_id, via, intent_id, evidence, reason, created_at from lc_sync.record_changes where thread_id = $1::uuid order by created_at', [id])
+      const row = (await sel(env.owner, 'select lifecycle_stage, conversation_stage, lead_temperature, operational_status, disposition, is_archived, archive_reason, follow_up_at, manual_temperature_lock, manual_stage_lock from public.inbox_thread_state where id = $1::uuid', [id]))[0] ?? null
+      const opp = (await sel(env.owner, 'select o.id, o.acquisition_stage, o.opportunity_status, o.property_market_status, o.property_status_verified, o.agreement_status, o.agreement_environment, o.archived_at from public.acquisition_opportunities o join public.inbox_thread_state t on t.thread_key = o.primary_thread_key where t.id = $1::uuid', [id]))[0] ?? null
+      return send(200, { thread_id: id, state, history, row, opportunity: opp })
+    }
     // LeadCommand's lease on a lead lapses (as if agntei had been down past its end): the live assignment's lease_until
     // moves into the past — nothing else changes (LeadCommand's own automation may resume, by its rules)
     if (req.method === 'POST' && u.pathname === '/expire-lease') {
@@ -434,10 +470,11 @@ const world = {
   company_identity: { name: 'Reivesti Home Buyers', human_review: false, persona_descriptor: null },
   reader: { url: `http://127.0.0.1:${PORTS.reader}/mcp`, token_file: readerToken, mode: 'live (local PostgREST over the disposable database)' },
   action: { url: `${actionListener.url}`, credential_files: Object.fromEntries(Object.keys(creds).map((k) => [k, path.join(OUT, `cred-${k}`)])),
-    agents: { sterling: 'agt_sterling', nova: 'agt_nova', equity: 'agt_equity', haven: 'agt_haven' },
+    agents: { sterling: 'agt_sterling', nova: 'agt_nova', equity: 'agt_equity', haven: 'agt_haven', ...(RECORD_SYNC ? { scout: 'agt_scout', console: 'agt_agntei_console' } : {}) },
+    record_sync: RECORD_SYNC ? { link: 'PROPOSED_20261101120000_record_sync', agents: 'records.read + records.apply_change (standing T2)', console: 'records.apply_person_change (a person\'s edit from agntei)' } : null,
     seller_facing: { sterling: 'standing conversation.queue_agent_text (basis: disposable certification world) + leads.transfer_lead', nova: 'standing conversation.queue_agent_text (basis: disposable certification world)', equity: 'none', haven: 'none' },
     tools: { send: 'sms_send_agent_text {client_request_id, thread_id | campaign_target_id, purpose, body, in_reply_to_message_id?, send_permit_id?, attribution {employee, model, provider, route, session_id, turn_id}}', transfer: 'transfer_lead (sterling only)', retired: ['sms_send_agent_message', 'queue_authorized_reply'] } },
-  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /carrier-receipt {queue_row_id, status: delivered|undelivered}', 'POST /emergency-stop {on}', 'POST /thread-property {thread_id, property_id}', 'GET /world'] },
+  control: { url: `http://127.0.0.1:${PORTS.control}`, endpoints: ['POST /seller-reply {thread_id, body}', 'GET /state/:thread_id', 'GET /target/:campaign_target_id', 'GET /events?after=<cursor>', 'GET /sends', 'POST /tick', 'POST /carrier-receipt {queue_row_id, status: delivered|undelivered}', 'POST /emergency-stop {on}', 'POST /thread-property {thread_id, property_id}', 'POST /lead-state {thread_id, patch, change_source?, operator_id?}', 'GET /record/:thread_id', 'GET /world'] },
   seeds: {
     gold: seed('gold', { thread_id: gold.thread_id, expect: 'reply: eligible (the seller asked a question, unanswered: purpose reply, in_reply_to_message_id = latest_inbound_message_id)' }),
     soft: seed('soft', { thread_id: soft.thread_id, expect: 'reengage: eligible (quiet 21 days after "not now, maybe in the spring")' }),

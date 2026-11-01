@@ -74,6 +74,8 @@ export function createGatewayReads({ db }) {
     /** OHG (link #29): the receipts of the replies agents queued on a thread, with their queue rows and delivery states. */
     async replyStatus(threadId, limit = 20) { return (await definerRead(db, 'action_gateway_reply_status', { p_thread_id: threadId, p_limit: limit })) || [] },
     async annotations(threadId, limit = 50) { return (await definerRead(db, 'action_gateway_annotations', { p_thread_id: threadId, p_limit: limit })) || [] },
+    async recordState(threadId) { return (await definerRead(db, 'action_gateway_record_state', { p_thread_id: threadId })) || null },
+    async recordHistory(threadId, limit = 50) { return (await definerRead(db, 'action_gateway_record_history', { p_thread_id: threadId, p_limit: limit })) || [] },
     async latestMessage(thread_key) {
       const [m] = await rows(db.from('message_events').select('id,direction,created_at').eq('thread_key', thread_key).order('created_at', { ascending: false }).limit(1), 'latest_message')
       return m || null

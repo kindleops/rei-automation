@@ -71,7 +71,7 @@ export async function loadInboundsSince(supabase, threadKey, since) {
  *           loadInbounds: (threadKey, since) => Promise<{rows, read_failed}>, now?: string, automationHoldChecker?: Function|null }} deps
  * @returns {Promise<{ applies: boolean, action?: 'proceed'|'cancel'|'defer', reason?: string, next_permitted_at?: string|null }>}
  */
-export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadRecord, readHolder, loadInbounds, loadOutbounds = null, now = new Date().toISOString(), automationHoldChecker = null } = {}) {
+export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadRecord, readHolder, loadInbounds, loadOutbounds = null, readLeadArchive = null, now = new Date().toISOString(), automationHoldChecker = null } = {}) {
   if (!isAgentTextRow(row)) return { applies: false }
   const m = meta(row)
   const call = async (fn, ...a) => { try { return typeof fn === 'function' ? await fn(...a) : null } catch { return null } }
@@ -93,6 +93,12 @@ export async function evaluateAgentTextRowGate(row = {}, { readActivation, loadR
   const h = await call(readHolder, row.thread_key)
   if (!h || h.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_lead_holder_unreadable' }
   if (!clean(h.agent_id) || clean(h.agent_id) !== clean(m.agent_id)) return { applies: true, action: 'cancel', reason: 'agent_text_author_no_longer_holds_lead' }
+  // link 10: an archived lead (sold, unavailable, duplicate, dead) is out of active work — nothing more is sent to it
+  if (typeof readLeadArchive === 'function') {
+    const ar = await call(readLeadArchive, row.thread_key)
+    if (!ar || ar.read_failed) return { applies: true, action: 'defer', reason: 'agent_text_lead_archive_unreadable' }
+    if (ar.archived === true) return { applies: true, action: 'cancel', reason: 'agent_text_lead_archived' }
+  }
   const hold = await checkAutomationHoldPort({ threadKey: row.thread_key, propertyId: row.property_id || null, masterOwnerId: row.master_owner_id || null, capability: 'outbound_send' }, { checker: automationHoldChecker })
   if (hold.held) return { applies: true, action: 'defer', reason: `agent_text_automation_hold:${hold.hold_type}` }
   // anything the seller wrote after the text was written (an answer: after the inbound it answers) makes it stale

@@ -1756,6 +1756,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       readHolder: deps.readAgentLeadHolder || ((thread_key) => readLeadHolder(getSupabase(deps), thread_key)),
       loadInbounds: deps.loadAgentTextInbounds || ((thread_key, since) => loadInboundsSince(getSupabase(deps), thread_key, since)),
       loadOutbounds: deps.loadAgentTextOutbounds || ((thread_key, since) => loadOutboundsSince(getSupabase(deps), thread_key, since)),
+      readLeadArchive: deps.readLeadArchive || ((thread_key) => readLeadArchiveState(getSupabase(deps), thread_key)),
       now,
     });
     if (agent_text_gate.applies && agent_text_gate.action !== "proceed") {
@@ -3490,3 +3491,14 @@ export async function processSendQueue(input = {}, deps = {}) {
 }
 
 export default processSendQueueItem;
+
+/** link 10: whether a lead was archived (sold, unavailable, duplicate, dead) — an archived lead gets no more agent texts. */
+async function readLeadArchiveState(supabase, thread_key) {
+  try {
+    const { data, error } = await supabase.from("inbox_thread_state").select("is_archived, archive_scope").eq("thread_key", thread_key).limit(5);
+    if (error) return { read_failed: true };
+    return { archived: (data || []).some((r) => r?.is_archived === true && String(r?.archive_scope || "lead") === "lead") };
+  } catch {
+    return { read_failed: true };
+  }
+}
