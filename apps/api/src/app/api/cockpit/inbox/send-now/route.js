@@ -22,20 +22,28 @@ export async function POST(request) {
   const payload = await parseJsonSafe(request)
 
 
+  // The operator principal is the SERVER's verdict about this session
+  // (ensureMutationAuth -> resolveOperatorPrincipal). It travels as its own
+  // argument, never inside the payload, so no body field can impersonate it.
+  const operator = auth.operator
+
   logger.info('cockpit_send_now.route_request', {
     thread_key: String(payload?.thread_key ?? payload?.metadata?.thread_key ?? payload?.to_phone_number ?? '').trim() || null,
     to_phone_number: String(payload?.to_phone_number ?? payload?.phone ?? '').trim() || null,
     from_phone_number: String(payload?.from_phone_number ?? payload?.our_number ?? '').trim() || null,
     message_body_length: String(payload?.message_body ?? payload?.message_text ?? '').trim().length,
+    operator_id: operator?.id || null,
+    operator_authenticated: operator?.authenticated === true,
   })
-  
+
   try {
-    const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false } })
+    const result = await runInboxAction({ action: 'send-now', payload: { ...payload, dry_run: false }, operator })
     const status = result.ok ? 200 : Number(result.status || (result.reason === 'invalid_canonical_thread_key' ? 400 : 423))
     logger.info('cockpit_send_now.route_response', {
       ok: result.ok,
       status,
       reason: result.reason || null,
+      send_authority: result.send_authority || result.authority || null,
       queue_inserted: result.queue_inserted === true,
       queue_row_id: result.queue_row_id || null,
       queue_id: result.queue_id || null,

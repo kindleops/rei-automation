@@ -21,7 +21,8 @@ import {
   BUYER_DISPOSITION_SEND_KIND,
   isBuyerDispositionSend,
 } from "@/lib/supabase/sms-engine.js";
-import { isManualInboxSendContext } from "@/lib/providers/textgrid.js";
+import { evaluateTextgridRuntimeBrakeForSend } from "@/lib/providers/textgrid.js";
+import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import {
   buyerOutreachDedupeKey,
   classifyBuyerTargets,
@@ -54,12 +55,23 @@ test("an ordinary seller row is not buyer traffic", () => {
   assert.equal(isBuyerDispositionSend({ metadata: { source: "campaign" } }), false);
 });
 
-test("the buyer send kind is NOT manual_inbox — it must not inherit the quiet-hours bypass", () => {
+test("the buyer send kind is NOT manual_inbox — and no metadata lifts the adapter brake anyway", () => {
   // The whole reason a distinct kind exists. manual_inbox is exempt from the
   // contact window; buyer outreach is scheduled bulk traffic and is not.
+  // Since the manual-send-authority hotfix the adapter has NO metadata-keyed
+  // exemption at all: a buyer row, and even a row that CLAIMS manual_inbox,
+  // both meet the automation brake. Only a server-side authority verdict differs.
+  const brake = evaluateQueueSendRuntimeBrakes(
+    { queue_processor_mode: "live", queue_emergency_stop_at: "2026-11-02T00:00:00.000Z" },
+    { action: "sendTextgridSMS", failClosed: false }
+  );
+  assert.equal(brake.ok, false);
   const buyerRow = { send_kind: BUYER_DISPOSITION_SEND_KIND, metadata: { send_kind: BUYER_DISPOSITION_SEND_KIND, outreach_domain: "buyer" } };
-  assert.equal(isManualInboxSendContext(buyerRow), false);
-  assert.equal(isManualInboxSendContext({ metadata: buyerRow.metadata }), false);
+  assert.equal(evaluateTextgridRuntimeBrakeForSend(brake, buyerRow).ok, false);
+  assert.equal(evaluateTextgridRuntimeBrakeForSend(brake, { metadata: buyerRow.metadata }).ok, false);
+  const impersonating = { source: "manual_inbox", send_source: "manual_inbox", manual_operator_send: true, metadata: { source: "manual_inbox", manual_operator_send: true } };
+  assert.equal(evaluateTextgridRuntimeBrakeForSend(brake, impersonating).ok, false, "manual_inbox metadata is not authority");
+  assert.equal(evaluateTextgridRuntimeBrakeForSend(brake, impersonating).reason, "queue_emergency_stop_active");
 });
 
 // ── idempotency

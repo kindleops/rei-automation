@@ -18,6 +18,10 @@ import { resolveStickyThreadSender } from "@/lib/domain/delivery/thread-sender.j
 import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
+  describeSendAuthorityForMetadata,
+  evaluateManualSendAuthority,
+} from "@/lib/domain/queue/manual-send-authority.js";
+import {
   insertSupabaseSendQueueRow,
   checkBlacklistPriorFailure,
   normalizeSendQueueRow,
@@ -1743,7 +1747,13 @@ function mapProcessedManualSendFailure(reason = "", error_message = "") {
   };
 }
 
-export async function executeManualInboxSendNow(input = {}, deps = {}) {
+export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
+  // `operator` and `send_authority` are SERVER concepts. If a request body
+  // carried either name it is discarded here, before anything reads the input:
+  // the principal arrives only as deps.operator (from the route's auth layer)
+  // and the verdict is only ever produced below.
+  const { operator: _client_operator_ignored, send_authority: _client_verdict_ignored, ...input } =
+    raw_input && typeof raw_input === "object" ? raw_input : {};
   const {
     createQueueRowImpl = createInboxSendNowQueueRow,
     sendTextgridImpl = sendTextgridSMS,
@@ -1769,16 +1779,37 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   // secret is not a send licence. The verdict is now BINDING: a denial returns
   // before any claim, any provider call, or any durable send state.
   //
-  // Same authority the queue runner uses; no second implementation. Fails
-  // closed on an absent, malformed, or unreadable control value.
-  const send_authority = await evaluateCanonicalSendAuthority({
-    getSystemValue: get_system_value,
-    action: "manual_inbox_send_now",
-    scopedCanary: deps.scoped_canary === true,
-  });
+  // WHICH authority depends on WHO is asking, and only the server knows that.
+  //
+  //   deps.operator present  -> an authenticated human on an operator route
+  //                             (cockpit/inbox/send-now). The manual-send
+  //                             authority applies: manual_send_mode must be
+  //                             "enabled" and global_send_shutdown_at clear.
+  //                             queue_emergency_stop_at is the AUTOMATION brake
+  //                             and does not silence the human.
+  //   deps.operator absent   -> internal routes, agent approvals, workflows,
+  //                             anything without a server principal. Exactly
+  //                             the canonical automation authority as before.
+  //
+  // Either way the verdict is BINDING and fails closed on an absent, malformed
+  // or unreadable control value; a denial returns before any claim, provider
+  // call, or durable send state. Nothing in `input` can choose the branch.
+  const operator = deps.operator ?? null;
+  const send_authority = operator !== null
+    ? await evaluateManualSendAuthority({
+        getSystemValue: get_system_value,
+        operator,
+        action: "manual_inbox_send_now",
+      })
+    : await evaluateCanonicalSendAuthority({
+        getSystemValue: get_system_value,
+        action: "manual_inbox_send_now",
+        scopedCanary: deps.scoped_canary === true,
+      });
   if (!send_authority.ok) {
     logger.warn("inbox_send_now.denied_by_runtime_authority", {
       reason: send_authority.reason,
+      authority: send_authority.authority || "canonical_runtime",
       queue_execution_mode: send_authority.queue_execution_mode ?? null,
     });
     return {
@@ -1794,8 +1825,10 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       provider_message_sid: null,
       diagnostics: send_authority.diagnostics || null,
       authority_version: send_authority.authority_version,
+      send_authority: send_authority.authority || "canonical_runtime",
     };
   }
+  const send_authority_metadata = describeSendAuthorityForMetadata(send_authority);
   // Reaching here means the canonical authority AUTHORIZED the send, so no
   // bypass ever occurred. The flags are retained (always false) because
   // downstream metadata consumers read them.
@@ -1911,6 +1944,8 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
             }
           : {}),
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
+        // Which authority licensed this send, durable on the row.
+        ...(send_authority_metadata || {}),
         manual_send_attempted_at: now,
         manual_lock_token,
       }
@@ -2086,6 +2121,9 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       store: deps.store,
       getSystemValue: get_system_value,
       scoped_canary: deps.scoped_canary === true,
+      // The same server-side principal: dispatch re-evaluates the SAME
+      // authority immediately before provider_request_started.
+      operator,
       sendProvider: (args) => sendTextgridImpl({
         ...args,
       client_reference_id: clean(queue_row_id) || clean(audit_result?.queue_key) || null,
@@ -2112,13 +2150,14 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
         ok: false,
         sent: false,
         queue_created: Boolean(queue_row_id),
-        status: 409,
+        status: dispatch.stage === "runtime_authority" ? 423 : 409,
         error: dispatch.reason,
         reason: dispatch.reason,
         provider_attempted: false,
         provider_message_id: null,
         operator_action_id,
         logical_communication_id: dispatch.logical_communication_id || null,
+        send_authority: send_authority.authority || "canonical_runtime",
       };
     }
     send_result = dispatch.raw_provider_result;

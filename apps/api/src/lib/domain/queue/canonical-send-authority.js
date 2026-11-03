@@ -43,15 +43,34 @@ import {
 import {
   evaluateUnrestrictedDispatchGate,
 } from "@/lib/domain/queue/queue-execution-mode.js";
+import {
+  GLOBAL_SEND_SHUTDOWN_KEY,
+  isGlobalSendShutdownActive,
+} from "@/lib/domain/queue/manual-send-authority.js";
 
 export const CANONICAL_SEND_AUTHORITY_VERSION = "canonical_send_authority_v1";
 
-/** Control-plane keys this authority reads. Order is irrelevant; all are required. */
+/**
+ * Control-plane keys this authority reads. Order is irrelevant; all are required.
+ *
+ * global_send_shutdown_at is the TRUE global shutdown (manual-send-authority.js
+ * reads the same key for operator sends), so one key stops everything. Like
+ * queue_emergency_stop_at it is a brake: its absence is "clear", not "deny".
+ */
 export const REQUIRED_CONTROL_KEYS = Object.freeze([
   "queue_processor_mode",
   "queue_emergency_stop_at",
   "queue_execution_mode",
+  GLOBAL_SEND_SHUTDOWN_KEY,
 ]);
+
+function globalShutdownDenial(action, shutdown_at) {
+  return denial(
+    "global_send_shutdown_active",
+    "Global send shutdown is active; every outbound send is blocked.",
+    { action, diagnostics: { global_send_shutdown_at: String(shutdown_at ?? "").trim() || null } }
+  );
+}
 
 function denial(reason, message, extra = {}) {
   return {
@@ -82,6 +101,21 @@ export async function evaluateCanonicalSendAuthority({
   scopedCanary = false,
 } = {}) {
   if (scopedCanary === true) {
+    // The scoped-canary architecture is the authority for brakes and modes,
+    // but a true global shutdown outranks even a bounded canary.
+    if (typeof getSystemValue === "function") {
+      let shutdown_at;
+      try {
+        shutdown_at = await getSystemValue(GLOBAL_SEND_SHUTDOWN_KEY);
+      } catch (error) {
+        return denial(
+          "control_plane_unreadable",
+          "Control-plane read failed; send authority cannot be established.",
+          { action, detail: String(error?.message ?? "read_failed") }
+        );
+      }
+      if (isGlobalSendShutdownActive(shutdown_at)) return globalShutdownDenial(action, shutdown_at);
+    }
     return {
       ok: true,
       action,
@@ -102,11 +136,13 @@ export async function evaluateCanonicalSendAuthority({
   let processor_mode;
   let emergency_stop_at;
   let execution_mode;
+  let global_shutdown_at;
   try {
-    [processor_mode, emergency_stop_at, execution_mode] = await Promise.all([
+    [processor_mode, emergency_stop_at, execution_mode, global_shutdown_at] = await Promise.all([
       getSystemValue("queue_processor_mode"),
       getSystemValue("queue_emergency_stop_at"),
       getSystemValue("queue_execution_mode"),
+      getSystemValue(GLOBAL_SEND_SHUTDOWN_KEY),
     ]);
   } catch (error) {
     return denial(
@@ -114,6 +150,11 @@ export async function evaluateCanonicalSendAuthority({
       "Control-plane read failed; send authority cannot be established.",
       { action, detail: String(error?.message ?? "read_failed") }
     );
+  }
+
+  // 0. True global shutdown. One key, every path.
+  if (isGlobalSendShutdownActive(global_shutdown_at)) {
+    return globalShutdownDenial(action, global_shutdown_at);
   }
 
   // 1. Emergency stop + queue_processor_mode. failClosed:true so an ABSENT

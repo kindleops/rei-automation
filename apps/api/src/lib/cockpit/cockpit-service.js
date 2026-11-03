@@ -433,6 +433,10 @@ export async function runInboxAction({
   payload = {},
   supabase = defaultSupabase,
   getFlags = getSystemFlags,
+  // The authenticated operator principal, minted by the route's auth layer
+  // (cockpit/_shared.js resolveOperatorPrincipal). A top-level argument on
+  // purpose: `payload.operator` is client data and is never consulted.
+  operator = null,
 } = {}) {
   const dryRun = asBoolean(payload.dry_run, true)
   const operatorOverride = asBoolean(payload.operator_override, false) || asBoolean(payload.force, false)
@@ -583,7 +587,11 @@ export async function runInboxAction({
         use_case_template: clean(payload.use_case_template) || (isMapOwnershipCheck ? 'ownership_check' : undefined),
         created_from: clean(payload.created_from) || (isMapOwnershipCheck ? 'leadcommand_map' : 'leadcommand_inbox'),
       },
-      { supabase }
+      // With a server-side principal the send runs under the manual-send
+      // authority (manual_send_mode + global_send_shutdown_at). Without one
+      // (agent approvals, workflows, anything that is not an authenticated
+      // operator route) it stays under the canonical automation authority.
+      { supabase, operator }
     )
 
     if (!sendResult.ok) {

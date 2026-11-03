@@ -66,11 +66,19 @@ function makeClaimConflictSupabase() {
 }
 
 // ── THE INVARIANT ────────────────────────────────────────────────────────────
-// A manual operator send is NOT an authority to cross the emergency stop. This
+// A manual-send REQUEST is NOT an authority to cross the emergency stop. This
 // file previously asserted the opposite: the brake was evaluated, recorded as
 // `bypassed_queue_emergency_stop` metadata, and the send proceeded to claim the
 // row and call the provider. That was a genuine production bypass and these
 // tests now pin its closure.
+//
+// 2026-11-02 refinement (manual-send-authority hotfix): without a SERVER-SIDE
+// operator principal (deps.operator, minted by the route's auth layer) every
+// call below is automation and queue_emergency_stop_at denies it, exactly as
+// before. An authenticated operator runs under a separate authority
+// (manual_send_mode + global_send_shutdown_at); see
+// manual-send-authority-hotfix.test.mjs for that half. The last test here pins
+// the separation from this side.
 
 test("emergency stop DENIES a manual inbox send before any row, claim, or provider call", async () => {
   const supabase = makeClaimConflictSupabase();
@@ -209,6 +217,45 @@ test("compliance still blocks even when the runtime authority AUTHORIZES the sen
   assert.equal(result.detail_reason, "opt_out");
   assert.equal(result.queue_inserted, false);
   assert.equal(insert_called, false);
+});
+
+test("the SEPARATION: a server-side operator principal is judged by the manual authority, not the automation brake", async () => {
+  // Same request, same active emergency stop. The only difference is that the
+  // server established an authenticated operator (deps.operator), and the
+  // control plane says manual_send_mode=enabled. Then the stop does not deny.
+  const operator = { authenticated: true, auth_source: "ops_dashboard_session", via: "header:x-ops-dashboard-secret", id: "op-1", email: null };
+  const withManual = (key) => (key === "manual_send_mode" ? "enabled" : emergencySystemValue(key));
+
+  const supabase = makeClaimConflictSupabase();
+  const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+    loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
+    getSystemValue: withManual,
+    supabase,
+    operator,
+    createQueueRowImpl: async () => ({ ok: true, queue_row_id: "manual-authority-row" }),
+    sendTextgridImpl: async () => ({ ok: true, sid: "must-not-reach-here-claim-conflicts" }),
+  });
+  // The brake did NOT deny. (This fixture's send_queue refuses the claim, which
+  // is the next gate and proves the authority verdict was AUTHORIZE.)
+  assert.notEqual(result.reason, "queue_emergency_stop_active");
+  assert.equal(result.reason, "queue_item_claim_conflict");
+  assert.equal(supabase.calls.updates, 1, "the claim was attempted: authority was granted");
+
+  // And with manual_send_mode absent, the same principal is denied by ITS switch,
+  // still before any row or claim.
+  const supabase2 = makeClaimConflictSupabase();
+  const denied = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
+    loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
+    getSystemValue: emergencySystemValue,
+    supabase: supabase2,
+    operator,
+    createQueueRowImpl: async () => ({ ok: true, queue_row_id: "must-not-be-created" }),
+    sendTextgridImpl: async () => ({ ok: true }),
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.reason, "manual_send_disabled");
+  assert.equal(denied.status, 423);
+  assert.equal(supabase2.calls.updates, 0);
 });
 
 test("manual inbox send service does not dispatch through the global queue runner", async () => {

@@ -84,6 +84,10 @@ test("operator-owned denylist covers every mandated execution-posture key", () =
     "queue_runner_enabled",
     "queue_auto_send_enabled",
     "outbound_sms_enabled",
+    // Separated controls: the true global shutdown and the authenticated
+    // manual-send switch. Campaign automation may never write either.
+    "global_send_shutdown_at",
+    "manual_send_mode",
   ]) {
     assert.ok(OPERATOR_OWNED_SYSTEM_KEYS.includes(key), `${key} must be operator-owned`);
     assert.equal(isOperatorOwnedSystemKey(key), true);

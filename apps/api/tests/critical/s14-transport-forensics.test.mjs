@@ -83,11 +83,17 @@ test("live canary: production control values refuse the send at the emergency br
   assert.equal(brake.ok, false);
   assert.equal(brake.reason, "queue_emergency_stop_active");
 
-  // dispatchSellerQueueRow's sendProvider passes only to/from/body, so there is
-  // no manual-inbox context and the emergency-stop bypass does not apply.
+  // dispatchSellerQueueRow's sendProvider passes only to/from/body. And since
+  // the manual-send-authority hotfix there is no metadata-keyed excuse at all:
+  // a context that CLAIMS manual_inbox meets the same brake.
   const decision = evaluateTextgridRuntimeBrakeForSend(brake, {});
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "queue_emergency_stop_active");
+  const claimed = evaluateTextgridRuntimeBrakeForSend(brake, {
+    source: "manual_inbox", manual_operator_send: true, metadata: { source: "manual_inbox", manual_operator_send: true },
+  });
+  assert.equal(claimed.ok, false);
+  assert.equal(claimed.reason, "queue_emergency_stop_active");
 });
 
 test("live canary: the OLD unstamped refusal reproduces the production row exactly", () => {

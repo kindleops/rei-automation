@@ -69,9 +69,27 @@ test("queue_execution_mode=stopped DENIES", async () => {
 
 // ── fail closed: absence and malformation are never permission ───────────────
 
+test("global_send_shutdown_at DENIES (one key stops everything)", async () => {
+  const r = await evaluateCanonicalSendAuthority({
+    getSystemValue: withValues({ global_send_shutdown_at: "2026-11-02T00:00:00.000Z" }),
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "global_send_shutdown_active");
+  assert.equal(r.sent, false);
+  // ...even for a scoped canary, which is otherwise its own authority.
+  const canary = await evaluateCanonicalSendAuthority({
+    getSystemValue: withValues({ global_send_shutdown_at: "2026-11-02T00:00:00.000Z", queue_execution_mode: "scoped_canary_only" }),
+    scopedCanary: true,
+  });
+  assert.equal(canary.ok, false);
+  assert.equal(canary.reason, "global_send_shutdown_active");
+  assert.ok(REQUIRED_CONTROL_KEYS.includes("global_send_shutdown_at"));
+});
+
 test("EVERY required control is load-bearing: removing any one DENIES", async () => {
   for (const key of REQUIRED_CONTROL_KEYS) {
-    if (key === "queue_emergency_stop_at") continue; // absence of a brake is correct
+    // Absence of a BRAKE is correct: the two stop keys deny when set, not when missing.
+    if (key === "queue_emergency_stop_at" || key === "global_send_shutdown_at") continue;
     const r = await evaluateCanonicalSendAuthority({ getSystemValue: withValues({ [key]: null }) });
     assert.equal(r.ok, false, `${key} absent must deny`);
   }

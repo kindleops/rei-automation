@@ -119,6 +119,37 @@ export function responseFromResult(result, status = 200) {
   return NextResponse.json(result, { status })
 }
 
+/**
+ * The authenticated operator principal, built SERVER-SIDE from the verified
+ * auth result. This is the only place a principal is minted.
+ *
+ * - `authenticated: true` comes from requireOpsDashboardAuth: the presented
+ *   session matched OPS_DASHBOARD_SECRET. In production the browser never holds
+ *   that secret; the Cloudflare Worker attaches it only after verifying a
+ *   Supabase session against the operator allowlist (infra/cloudflare/worker).
+ * - `id` is the Worker-stamped x-ops-user-id: provenance for the audit trail,
+ *   never authority (the Worker's own words).
+ * - Nothing here reads the request BODY. A body field cannot become a principal.
+ *
+ * Returns null when the session is not actually authenticated (e.g. a dev
+ * process with no secret configured), so callers fall back to the automation
+ * authority rather than being granted operator authority by default.
+ */
+export function resolveOperatorPrincipal(request, auth) {
+  if (!auth || auth.ok !== true || auth.authenticated !== true) return null
+  const via = String(auth.via ?? '').trim()
+  if (!via) return null
+  const user_id = String(request?.headers?.get?.('x-ops-user-id') ?? '').trim() || null
+  return Object.freeze({
+    kind: 'ops_dashboard_operator',
+    authenticated: true,
+    auth_source: 'ops_dashboard_session',
+    via,
+    id: user_id,
+    email: null,
+  })
+}
+
 export function ensureMutationAuth(request) {
   const auth = requireOpsDashboardAuth(request)
   if (!auth.authorized) {
@@ -127,9 +158,9 @@ export function ensureMutationAuth(request) {
     Object.entries(cors).forEach(([key, value]) => {
       response.headers.set(key, value)
     })
-    return { ok: false, response }
+    return { ok: false, response, operator: null }
   }
-  return { ok: true, auth: auth.auth }
+  return { ok: true, auth: auth.auth, operator: resolveOperatorPrincipal(request, auth.auth) }
 }
 
 /** Dashboard read auth — same ops-dashboard gate as mutations; named for read routes. */

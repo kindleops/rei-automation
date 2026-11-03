@@ -10,6 +10,12 @@ import {
 } from "@/lib/config/textgrid-config.js";
 import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
+import {
+  GLOBAL_SEND_SHUTDOWN_KEY,
+  describeSendAuthorityForMetadata,
+  isGlobalSendShutdownActive,
+  isManualSendAuthorityVerdict,
+} from "@/lib/domain/queue/manual-send-authority.js";
 import { warn, info } from "@/lib/logging/logger.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
@@ -153,26 +159,20 @@ function objectMetadata(value = null) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-export function isManualInboxSendContext(context = {}) {
-  const metadata = objectMetadata(context.metadata);
-  return (
-    asBoolean(context.manual_operator_send, false) ||
-    asBoolean(metadata.manual_operator_send, false) ||
-    lower(context.source) === "manual_inbox" ||
-    lower(context.send_source) === "manual_inbox" ||
-    lower(metadata.source) === "manual_inbox" ||
-    lower(metadata.send_source) === "manual_inbox"
-  );
-}
-
-export function shouldBypassTextgridRuntimeBrakeForManualSend(runtime_brake = {}, context = {}) {
-  return (
-    runtime_brake?.ok === false &&
-    runtime_brake.reason === "queue_emergency_stop_active" &&
-    isManualInboxSendContext(context)
-  );
-}
-
+/**
+ * Decide whether the queue runtime brake blocks this send, and normalize the
+ * provenance metadata recorded on it.
+ *
+ * NO METADATA EXCUSES THE BRAKE. This function used to lift an active
+ * emergency stop whenever the context SAID it was a manual inbox send
+ * (source === "manual_inbox", manual_operator_send === true). Those are strings
+ * any caller can write, so any caller could impersonate an operator at the
+ * adapter. The only things that may stand in for the automation brake are
+ * decided by the caller of this function with durable or server-side evidence:
+ * a verified scoped-canary transport authority, or a manual-operator verdict
+ * issued by manual-send-authority.js (checked with isManualSendAuthorityVerdict
+ * in sendTextgridSMS, never here).
+ */
 export function evaluateTextgridRuntimeBrakeForSend(runtime_brake = {}, context = {}) {
   const metadata = { ...objectMetadata(context.metadata) };
   const source = clean(context.source) || clean(metadata.source) || null;
@@ -191,26 +191,7 @@ export function evaluateTextgridRuntimeBrakeForSend(runtime_brake = {}, context 
     return {
       ok: true,
       blocked: false,
-      bypassed_queue_emergency_stop_for_manual_send: false,
       metadata: normalized_metadata,
-    };
-  }
-
-  if (shouldBypassTextgridRuntimeBrakeForManualSend(runtime_brake, {
-    source,
-    send_source,
-    manual_operator_send,
-    metadata,
-  })) {
-    return {
-      ok: true,
-      blocked: false,
-      reason: runtime_brake.reason,
-      bypassed_queue_emergency_stop_for_manual_send: true,
-      metadata: {
-        ...normalized_metadata,
-        bypassed_queue_emergency_stop_for_manual_send: true,
-      },
     };
   }
 
@@ -494,6 +475,13 @@ export async function sendTextgridSMS({
   transport_authority = null,
   logical_communication_id = null,
   supabaseClient = null,
+  // The authority verdict this send runs under, as issued by
+  // manual-send-authority.js or canonical-send-authority.js. Only a verdict
+  // the manual authority actually ISSUED (WeakSet-tracked, see
+  // isManualSendAuthorityVerdict) is treated as a manual-operator send; a
+  // verdict-shaped object from anywhere else, and every metadata/source
+  // string, is automation and meets the automation brake.
+  send_authority = null,
 }) {
   const send_metadata = { ...objectMetadata(metadata) };
   const send_context = {
@@ -504,8 +492,51 @@ export async function sendTextgridSMS({
       asBoolean(send_metadata.manual_operator_send, false),
     metadata: send_metadata,
   };
+  const manual_operator_authority = isManualSendAuthorityVerdict(send_authority);
+  if (manual_operator_authority) {
+    // Record which authority licensed the send, on the send itself.
+    Object.assign(send_metadata, describeSendAuthorityForMetadata(send_authority));
+  }
 
   if (hasSupabaseConfig()) {
+    // ── TRUE GLOBAL SHUTDOWN: one key, every path, checked at the last hop ──
+    // Defence in depth behind the authorities (both already deny on it). An
+    // operator verdict, a canary authority, nothing lifts this one.
+    const global_send_shutdown_at = await getSystemValue(GLOBAL_SEND_SHUTDOWN_KEY);
+    if (isGlobalSendShutdownActive(global_send_shutdown_at)) {
+      info("send.blocked_global_send_shutdown", {
+        to_input: to,
+        client_reference_id,
+        manual_operator_authority,
+        source: send_context.source,
+        send_source: send_context.send_source,
+      });
+      throw localRefusal(
+        "global_send_shutdown_active",
+        "sendTextgridSMS: global_send_shutdown_active - send blocked by global send shutdown",
+        { to, from, body }
+      );
+    }
+  }
+
+  if (hasSupabaseConfig() && manual_operator_authority) {
+    // An authenticated operator under manual_send_mode=enabled is not campaign
+    // automation: the queue emergency stop / processor mode brake does not
+    // apply. The verdict was evaluated by the dispatch seam immediately before
+    // provider_request_started; the global shutdown was re-checked just above.
+    Object.assign(send_metadata, {
+      ...(send_context.source ? { source: send_context.source } : {}),
+      ...(send_context.send_source ? { send_source: send_context.send_source } : {}),
+      manual_operator_send: true,
+    });
+    info("send.manual_operator_authority", {
+      to_input: to,
+      client_reference_id,
+      send_authority: send_metadata.send_authority,
+      send_authority_version: send_metadata.send_authority_version,
+      operator_id: send_metadata.operator_id || null,
+    });
+  } else if (hasSupabaseConfig()) {
     const runtime_brake = evaluateQueueSendRuntimeBrakes(
       {
         queue_processor_mode: await getSystemValue("queue_processor_mode"),
@@ -569,17 +600,6 @@ export async function sendTextgridSMS({
       });
     } else {
       Object.assign(send_metadata, runtime_brake_decision.metadata);
-    }
-    if (runtime_brake_decision.bypassed_queue_emergency_stop_for_manual_send) {
-      info("send.bypassed_runtime_brake", {
-        reason: runtime_brake_decision.reason,
-        to_input: to,
-        client_reference_id,
-        source: send_context.source || "manual_inbox",
-        send_source: send_context.send_source || "manual_inbox",
-        manual_operator_send: true,
-        bypassed_queue_emergency_stop_for_manual_send: true,
-      });
     }
   }
 

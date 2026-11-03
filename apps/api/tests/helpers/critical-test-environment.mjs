@@ -49,6 +49,9 @@ const DEFAULT_TEST_SYSTEM_VALUES = Object.freeze({
   allow_regional_fallback_for_first_touch: 'false',
   campaign_mode: 'test',
   queue_emergency_stop_at: '',
+  // The true global shutdown (manual-send-authority.js). Clear by default so
+  // adapter tests under a stub Supabase config stay hermetic.
+  global_send_shutdown_at: '',
 })
 
 function isAllowedUrl(url) {

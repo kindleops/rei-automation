@@ -8,6 +8,12 @@ import { supabase } from '@/lib/supabase/client.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 import { SYSTEM_CONTROL_AUTHORITIES } from '@/lib/domain/queue/operator-brake-authority.js'
 import {
+  GLOBAL_SEND_SHUTDOWN_KEY,
+  MANUAL_SEND_MODE_DISABLED,
+  MANUAL_SEND_MODE_KEY,
+  normalizeManualSendMode,
+} from '@/lib/domain/queue/manual-send-authority.js'
+import {
   asBoolean,
   asPositiveInteger,
   blockedRuntimeBrakeResult,
@@ -75,6 +81,12 @@ const CONTROL_KEYS = [
   'queue_execution_mode',
   // Seller Autopilot v2 per-language switch (comma list; absent = English,Spanish)
   'seller_autopilot_v2_languages',
+  // Separated controls (manual-send-authority.js): the TRUE global shutdown,
+  // and the switch for authenticated operator manual sends. Neither is touched
+  // by emergency_stop / rearmEmergencyStopAfterOneSend, which remain the
+  // campaign + queue automation brake.
+  GLOBAL_SEND_SHUTDOWN_KEY,
+  MANUAL_SEND_MODE_KEY,
 ]
 
 const DEFAULTS = {
@@ -110,6 +122,9 @@ const DEFAULTS = {
   queue_last_run_diagnostics: '',
   queue_emergency_stop_at: '',
   queue_execution_mode: 'stopped',
+  [GLOBAL_SEND_SHUTDOWN_KEY]: '',
+  // Absent = off. Enabling operator manual sends is an explicit operator write.
+  [MANUAL_SEND_MODE_KEY]: MANUAL_SEND_MODE_DISABLED,
 }
 
 // This route IS the operator control plane: it is the only path allowed to write
@@ -382,6 +397,20 @@ function parseBody(body = {}) {
   }
   if (patch.queue_execution_mode) {
     patch.queue_execution_mode = normalizeQueueExecutionMode(patch.queue_execution_mode)
+  }
+  if (patch[MANUAL_SEND_MODE_KEY] !== undefined) {
+    // Only the exact word turns operator sends on; a typo turns them off.
+    patch[MANUAL_SEND_MODE_KEY] = normalizeManualSendMode(patch[MANUAL_SEND_MODE_KEY])
+  }
+  if (patch[GLOBAL_SEND_SHUTDOWN_KEY] !== undefined) {
+    // A bare "on" becomes a timestamp so the audit row says WHEN; any clear
+    // marker ('' / false / off / cleared) is stored as cleared.
+    const raw = clean(patch[GLOBAL_SEND_SHUTDOWN_KEY]).toLowerCase()
+    if (['1', 'true', 'yes', 'on', 'now'].includes(raw)) {
+      patch[GLOBAL_SEND_SHUTDOWN_KEY] = new Date().toISOString()
+    } else if (['0', 'false', 'off', 'none', 'null', 'cleared', 'clear', ''].includes(raw)) {
+      patch[GLOBAL_SEND_SHUTDOWN_KEY] = ''
+    }
   }
   return patch
 }

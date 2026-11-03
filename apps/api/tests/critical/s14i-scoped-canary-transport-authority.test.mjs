@@ -345,6 +345,7 @@ async function sendUnderActiveBrake({ transport_authority, supabaseClient, fetch
   primeSystemControlValue("queue_processor_mode", PROD_BRAKE.queue_processor_mode);
   primeSystemControlValue("queue_emergency_stop_at", PROD_BRAKE.queue_emergency_stop_at);
   primeSystemControlValue("queue_execution_mode", "scoped_canary_only");
+  primeSystemControlValue("global_send_shutdown_at", "");
   if (fetchImpl) globalThis.fetch = fetchImpl;
   try {
     const result = await sendTextgridSMS({

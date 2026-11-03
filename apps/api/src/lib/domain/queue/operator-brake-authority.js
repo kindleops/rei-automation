@@ -34,6 +34,11 @@ export const OPERATOR_OWNED_SYSTEM_KEYS = Object.freeze([
   // The bounded internal-proof contact-window session: creating, extending,
   // or retargeting it is an operator act, never campaign automation.
   "internal_proof_session",
+  // The true global shutdown and the authenticated-manual-send switch
+  // (manual-send-authority.js). Campaign automation may neither clear a global
+  // shutdown nor turn operator sends on or off.
+  "global_send_shutdown_at",
+  "manual_send_mode",
 ]);
 
 /**
