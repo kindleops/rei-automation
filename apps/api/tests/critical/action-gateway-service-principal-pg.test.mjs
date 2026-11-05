@@ -18,7 +18,8 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { pgAvailable, skipReason, applyInTransaction } from '../pg/agent-pg-harness.mjs'
-import { servicePrincipalDb, registerService, SP_ROLLBACK, SP_LINK } from '../helpers/service-principal-pg.mjs'
+import { servicePrincipalDb, registerService, SP_ROLLBACK, SP_LINK, assertionFor, keyFor, delegateKeys } from '../helpers/service-principal-pg.mjs'
+import { newAssertionKeyPair } from '../../src/lib/domain/action-gateway/acting-assertion.js'
 import { makeGateway, seedThread, sel, registerAgent, PEPPER, ORG, OWNER, OPERATOR } from '../helpers/action-gateway-pg.mjs'
 import { seedT34, setControls, crypto } from '../helpers/action-gateway-t34-world.mjs'
 import { __setAutomationHoldResolverForTests } from '../../src/lib/domain/holds/automation-hold.js'
@@ -29,7 +30,8 @@ __setAutomationHoldResolverForTests(null)
 const RECORD_GRANTS = [['records.read', 1], ['records.apply_change', 2]]
 const CAMPAIGN_GRANTS = [['campaigns.create_draft', 1], ['campaigns.read', 1]]
 const key = (p) => `${p}-${crypto.randomUUID().slice(0, 8)}`
-const as = (gateway, credential, actingAgent) => (tool, args) => gateway.call({ credential, ...(actingAgent === undefined ? {} : { actingAgent }), tool, args })
+// a delegated call is SIGNED by the acting agent's registered key over the exact call (unless a test says otherwise)
+const as = (gateway, credential, actingAgent, { sign = true } = {}) => (tool, args) => gateway.call({ credential, ...(actingAgent === undefined ? {} : { actingAgent, ...(sign && /^agt_[a-z0-9_]+$/.test(String(actingAgent)) ? { actingAssertion: assertionFor(actingAgent, tool, args) } : {}) }), tool, args })
 
 async function world({ serviceCeiling = 2 } = {}) {
   const env = await servicePrincipalDb()
@@ -98,9 +100,24 @@ test('PG service principal: missing header, unknown agent, non-delegate, disable
       const r = await as(gateway, svc, 'agt_sterling')('apply_record_change', { ...args(), [k]: 'agt_outsider' })
       assert.equal(r.error.code, 'FORGED_CONTEXT', k)
     }
+    // THE ACTING AGENT IS PROVEN, NOT CLAIMED: the header alone, another agent's signature, a signature over other
+    // arguments or another tool, a stale signature and a forged one are all refused before anything opens
+    const call = (o) => gateway.call({ credential: svc, actingAgent: 'agt_sterling', tool: 'apply_record_change', args: args(), ...o })
+    const a = args()
+    assert.equal((await as(gateway, svc, 'agt_sterling', { sign: false })('apply_record_change', a)).error.code, 'ACTING_ASSERTION_REQUIRED')
+    assert.equal((await call({ args: a, actingAssertion: assertionFor('agt_scout', 'apply_record_change', a) })).error.code, 'ACTING_ASSERTION_INVALID', 'scout cannot sign for sterling')
+    assert.equal((await call({ args: a, actingAssertion: assertionFor('agt_sterling', 'apply_record_change', { ...a, value: 'cold' }) })).error.code, 'ACTING_ASSERTION_INVALID', 'a signature covers the exact arguments')
+    assert.equal((await call({ args: a, actingAssertion: assertionFor('agt_sterling', 'get_record_state', a) })).error.code, 'ACTING_ASSERTION_INVALID', 'and the exact tool')
+    assert.equal((await call({ args: a, actingAssertion: assertionFor('agt_sterling', 'apply_record_change', a, { now: Date.now() - 10 * 60_000 }) })).error.code, 'ACTING_ASSERTION_STALE')
+    assert.equal((await call({ args: a, actingAssertion: assertionFor('agt_sterling', 'apply_record_change', a, { privateKey: newAssertionKeyPair().privateKey }) })).error.code, 'ACTING_ASSERTION_INVALID', 'a key the owner never registered')
+    assert.equal((await call({ args: a, actingAssertion: 'v1.123.abc' })).error.code, 'ACTING_ASSERTION_MALFORMED')
+    // swapping the header to another delegate while replaying sterling's valid signature: refused
+    assert.equal((await gateway.call({ credential: svc, actingAgent: 'agt_scout', tool: 'apply_record_change', args: a, actingAssertion: assertionFor('agt_sterling', 'apply_record_change', a) })).error.code, 'ACTING_ASSERTION_INVALID')
     await env.owner.query(`update action_gateway.service_delegates set enabled = false, disabled_at = now(), disabled_by = $1 where agent_principal_id = 'agt_sterling'`, [OWNER])
     assert.equal((await as(gateway, svc, 'agt_sterling')('apply_record_change', args())).error.code, 'DELEGATE_DISABLED')
     assert.equal(await intents(), 0)
+    // a key rotation is an owner's act, never the gateway role's
+    await assert.rejects(env.owner.query(`update action_gateway.service_delegates set assertion_key = $1 where agent_principal_id = 'agt_scout'`, [newAssertionKeyPair().publicKey]), /OWNER_ONLY/)
     const refused = await sel(env.owner, `select agent_id, code, detail from action_gateway.action_audit_events where event_type = 'call_refused'`)
     assert.ok(refused.length >= 9 && refused.every((e) => e.detail.via_service_id === 'svc_agntei'), 'every refusal is audited with the service')
   } finally { await env.db.drop() }
@@ -144,7 +161,7 @@ test('PG service principal: revocation answers on the next request (delegate dis
     // a delegate-only agent: its own digest cleared; the service still acts for it, its old credential is dead
     const ownCred = await registerAgent(env.owner, { agent_id: 'agt_closer', grants: RECORD_GRANTS, tier_ceiling: 2, read_scopes: ['conversation_context.read'] })
     await env.owner.query(`update action_gateway.agent_principals set credential_digest = null, credential_rotated_at = clock_timestamp() where agent_id = 'agt_closer'`)
-    await env.owner.query('insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by) values ($1, $2, $3, $4)', ['svc_agntei', 'agt_closer', ORG, OWNER])
+    await env.owner.query('insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by, assertion_key) values ($1, $2, $3, $4, $5)', ['svc_agntei', 'agt_closer', ORG, OWNER, keyFor('agt_closer').publicKey])
     assert.equal((await gateway.call({ credential: ownCred, tool: 'get_record_state', args: { thread_id: t.thread_id } })).error.code, 'CREDENTIAL_UNKNOWN')
     const c = await as(gateway, svc, 'agt_closer')('apply_record_change', RC(t, 'temperature', 'warm', await version(env, t.thread_id, 'temperature')))
     assert.equal(c.status, 'succeeded', JSON.stringify(c))
@@ -252,7 +269,7 @@ test('PG mint-service-credential: creates the service + delegates (by id and by 
     fs.writeFileSync(pepperFile, PEPPER, { mode: 0o600 })
     const run = async (...argv) => { const lines = []; await mintService(['--org', ORG, '--owner', OWNER, ...argv], { db: env.owner, out: (s) => lines.push(s) }); return lines.join('') }
     const printed = await run('--create', '--service-id', 'svc_agntei', '--sponsor', OPERATOR, '--tier-ceiling', '2', '--pepper-file', pepperFile, '--display-name', 'agntei acquisitions',
-      '--delegate', 'agt_sterling', '--delegate', 'scout agent', '--days', '30')
+      '--delegate', `agt_sterling=${keyFor('agt_sterling').publicKey}`, '--delegate', `scout agent=${keyFor('agt_scout').publicKey}`, '--days', '30')
     const tokens = printed.match(/lcsvc_[A-Za-z0-9_-]{43}/g)
     assert.equal(tokens.length, 1, 'the credential is printed exactly once')
     const token = tokens[0]
@@ -275,8 +292,13 @@ test('PG mint-service-credential: creates the service + delegates (by id and by 
     // --disable-delegate by name: refused on the next request; --add-delegate re-enables (and detaches the agent's own credential)
     assert.equal(JSON.parse(await run('--disable-delegate', 'Scout Agent', '--service-id', 'svc_agntei')).disabled, true)
     assert.equal((await draft('agt_scout')).error.code, 'DELEGATE_DISABLED')
-    const added = JSON.parse(await run('--add-delegate', 'agt_scout', '--service-id', 'svc_agntei', '--detach-agent-credentials'))
+    // re-adding with a NEW key rotates it (recorded as the owner's): the old key's signatures stop working at once
+    const rotated = newAssertionKeyPair()
+    const added = JSON.parse(await run('--add-delegate', `agt_scout=${rotated.publicKey}`, '--service-id', 'svc_agntei', '--detach-agent-credentials'))
     assert.deepEqual([added.delegate.agent_id, added.delegate.enabled, added.delegate.own_credential], ['agt_scout', true, false])
+    assert.equal((await draft('agt_scout')).error.code, 'ACTING_ASSERTION_INVALID', 'the old key no longer proves scout')
+    assert.equal((await sel(env.owner, `select key_rotated_by from action_gateway.service_delegates where agent_principal_id = 'agt_scout'`))[0].key_rotated_by, OWNER)
+    delegateKeys.set('agt_scout', rotated)
     assert.equal((await draft('agt_scout')).status, 'succeeded')
     assert.equal((await gateway.call({ credential: ownScout, tool: 'get_campaign', args: { campaign_id: crypto.randomUUID() } })).error.code, 'CREDENTIAL_UNKNOWN', 'the detached agent credential is dead')
     const scoutRow = (await sel(env.owner, `select credential_digest, credential_expires_at from action_gateway.agent_principals where agent_id = 'agt_scout'`))[0]
@@ -288,7 +310,8 @@ test('PG mint-service-credential: creates the service + delegates (by id and by 
     // refusals: bad ids, unknown delegate, ambiguous usage
     await assert.rejects(run('--create', '--service-id', 'agntei', '--sponsor', OPERATOR, '--tier-ceiling', '2', '--pepper-file', pepperFile), /svc_/)
     await assert.rejects(run('--create', '--service-id', 'svc_two', '--sponsor', OPERATOR, '--tier-ceiling', '5', '--pepper-file', pepperFile), /tier-ceiling/)
-    await assert.rejects(run('--create', '--service-id', 'svc_two', '--sponsor', OPERATOR, '--tier-ceiling', '2', '--pepper-file', pepperFile, '--delegate', 'agt_ghost'), /no agent principal/)
+    await assert.rejects(run('--create', '--service-id', 'svc_two', '--sponsor', OPERATOR, '--tier-ceiling', '2', '--pepper-file', pepperFile, '--delegate', `agt_ghost=${keyFor('agt_ghost').publicKey}`), /no agent principal/)
+    await assert.rejects(run('--create', '--service-id', 'svc_two', '--sponsor', OPERATOR, '--tier-ceiling', '2', '--pepper-file', pepperFile, '--delegate', 'agt_sterling'), /public key/)
     assert.equal((await sel(env.owner, `select count(*)::int n from action_gateway.service_principals where service_id = 'svc_two'`))[0].n, 0, 'a refused create leaves nothing behind')
     await assert.rejects(run('--list', '--revoke'), /usage/)
     await assert.rejects(mintService(['--org', ORG, '--owner', OWNER, '--list', '--database-url-file', path.resolve('x.url')]), /outside the repository|repository/)

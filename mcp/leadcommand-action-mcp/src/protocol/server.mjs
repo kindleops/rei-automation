@@ -86,8 +86,9 @@ export function riskOf(t) {
  * One Server per connection (stdio: one; HTTP: one per session); all share the ONE gateway.
  * @param {{ gateway, credentialOf: () => string|null, actingAgentOf?: (extra: object) => string|null, transport?: string, sessionGate?: object|null, processGate?: object|null, callTimeoutMs?: number }} deps
  *   actingAgentOf: the X-LC-Acting-Agent header of the request carrying the call (HTTP only; stdio has no headers)
+ *   actingAssertionOf: its X-LC-Acting-Assertion header (the acting agent's signature over the tool name and raw arguments as requested)
  */
-export function createMcpServer({ gateway, credentialOf, actingAgentOf = null, transport = 'stdio', sessionGate = null, processGate = null, callTimeoutMs = 45_000 }) {
+export function createMcpServer({ gateway, credentialOf, actingAgentOf = null, actingAssertionOf = null, transport = 'stdio', sessionGate = null, processGate = null, callTimeoutMs = 45_000 }) {
   const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } }, instructions: INSTRUCTIONS })
   // retired actions (LeadCommand would compose the words: AGENT_COMPOSES_TEXT) are not advertised
   const tools = gateway.listTools().filter((t) => !t.retired).map((t) => ({
@@ -120,7 +121,10 @@ export function createMcpServer({ gateway, credentialOf, actingAgentOf = null, t
     if (tool == null) throw new McpError(ErrorCode.InvalidParams, `Tool ${String(req.params.name).slice(0, 64)} not found`)
     const args = alias ? alias.adapt(req.params.arguments ?? {}) : (req.params.arguments ?? {})
     const actingAgent = typeof actingAgentOf === 'function' ? actingAgentOf(extra) : null
-    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), ...(actingAgent != null ? { actingAgent } : {}), tool, args, transport }))
+    const actingAssertion = typeof actingAssertionOf === 'function' ? actingAssertionOf(extra) : null
+    // the assertion is over the call AS REQUESTED (MCP name, raw arguments), before any alias adapts it
+    const signed = { signedTool: String(req.params.name), signedArgs: req.params.arguments ?? {} }
+    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), ...(actingAgent != null ? { actingAgent, actingAssertion, ...signed } : {}), tool, args, transport }))
     let out
     try {
       out = await (sessionGate ? sessionGate.run(() => (processGate ? processGate.run(run) : run())) : processGate ? processGate.run(run) : run())

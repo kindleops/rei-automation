@@ -14,13 +14,25 @@ import { pgAvailable, skipReason } from '../../../apps/api/tests/pg/agent-pg-har
 import { pgSupabase } from '../../../apps/api/tests/helpers/pg-supabase.mjs'
 import { registerAgent, seedThread, gatewayPool, setControls, sel, ORG } from '../../../apps/api/tests/helpers/action-gateway-pg.mjs'
 import { seedT34 } from '../../../apps/api/tests/helpers/action-gateway-t34-world.mjs'
-import { servicePrincipalDb, registerService } from '../../../apps/api/tests/helpers/service-principal-pg.mjs'
+import { servicePrincipalDb, registerService, assertionFor } from '../../../apps/api/tests/helpers/service-principal-pg.mjs'
 
 const skip = pgAvailable() ? false : skipReason
 const httpEnv = () => baseEnv({ LEADCOMMAND_ACTION_MCP_TRANSPORT: 'streamable-http', LEADCOMMAND_ACTION_MCP_HTTP_BIND: '127.0.0.1', LEADCOMMAND_ACTION_MCP_HTTP_PORT: '0', LEADCOMMAND_ACTION_MCP_AGENT_CREDENTIAL_FILE: '' })
-async function client(url, token, acting) {
+/**
+ * An SDK client for one acting agent: every tools/call request is SIGNED with that agent's registered key over the exact
+ * call (X-LC-Acting-Assertion), exactly as the integration does; sign: false sends the bare header only.
+ */
+async function client(url, token, acting, { sign = true, signAs = acting } = {}) {
   const c = new Client({ name: 'e2e-service', version: '1.0.0' })
-  await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}`, ...(acting ? { 'X-LC-Acting-Agent': acting } : {}) } } }))
+  const signingFetch = async (input, init = {}) => {
+    const headers = new Headers(init.headers)
+    if (acting && sign && typeof init.body === 'string') {
+      const m = JSON.parse(init.body)
+      if (m?.method === 'tools/call') headers.set('X-LC-Acting-Assertion', assertionFor(signAs, m.params.name, m.params.arguments ?? {}))
+    }
+    return fetch(input, { ...init, headers })
+  }
+  await c.connect(new StreamableHTTPClientTransport(new URL(url), { fetch: signingFetch, requestInit: { headers: { Authorization: `Bearer ${token}`, ...(acting ? { 'X-LC-Acting-Agent': acting } : {}) } } }))
   return c
 }
 const json = (r) => r.structuredContent
@@ -63,6 +75,12 @@ test('E2E (PG) service principal: one lcsvc_ credential, the acting agent per re
 
     // scout's OWN grants: no draft capability
     assert.equal(json(await scout.callTool({ name: 'create_campaign_draft', arguments: { client_request_id: 'e2e-draft-0002', name: 'Scout tries', property_ids: ['2128263281'] } })).error.code, 'CAPABILITY_NOT_GRANTED')
+    // the header alone (no signature) and a header naming sterling signed by scout's key: both refused over real HTTP
+    const unsigned = await client(listener.url, svc, 'agt_sterling', { sign: false })
+    assert.equal(json(await unsigned.callTool({ name: 'get_campaign', arguments: { campaign_id: id } })).error.code, 'ACTING_ASSERTION_REQUIRED')
+    const impostor = await client(listener.url, svc, 'agt_sterling', { signAs: 'agt_scout' })
+    assert.equal(json(await impostor.callTool({ name: 'get_campaign', arguments: { campaign_id: id } })).error.code, 'ACTING_ASSERTION_INVALID')
+    await unsigned.close(); await impostor.close()
     // no header: the service never acts as itself
     assert.equal(json(await bare.callTool({ name: 'get_campaign', arguments: { campaign_id: id } })).error.code, 'ACTING_AGENT_REQUIRED')
     // identity in arguments stays refused

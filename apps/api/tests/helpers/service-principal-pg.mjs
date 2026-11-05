@@ -6,6 +6,18 @@ import { applyInTransaction, runSqlFile, REPO_DIR } from '../pg/agent-pg-harness
 import { recordSyncDb } from './record-sync-pg.mjs'
 import { MIG, PEPPER, ORG, OWNER, OPERATOR } from './action-gateway-pg.mjs'
 import { mintServiceCredential } from '../../src/lib/domain/action-gateway/credentials.js'
+import { newAssertionKeyPair, signActingAssertion } from '../../src/lib/domain/action-gateway/acting-assertion.js'
+
+/** Each registered delegate's Ed25519 key pair (the integration's side): agent id -> { publicKey, privateKey }. */
+export const delegateKeys = new Map()
+export function keyFor(agent) {
+  if (!delegateKeys.has(agent)) delegateKeys.set(agent, newAssertionKeyPair())
+  return delegateKeys.get(agent)
+}
+/** The X-LC-Acting-Assertion value for one call, signed with the agent's registered key (or a given key). */
+export function assertionFor(agent, tool, args, { privateKey = keyFor(agent).privateKey, now = Date.now() } = {}) {
+  return signActingAssertion({ privateKey, agent, tool, args, now })
+}
 
 export const SP_LINK = MIG('PROPOSED_20261105120000_action_gateway_service_principals.sql')
 export const SP_ROLLBACK = MIG('PROPOSED_20261105120000_action_gateway_service_principals_rollback.sql')
@@ -28,6 +40,6 @@ export async function registerService(owner, { service_id = 'svc_agntei', org = 
   const { token, digest } = mintServiceCredential(PEPPER)
   await owner.query(`insert into action_gateway.service_principals (service_id, org_id, display_name, sponsor_user_id, credential_digest, credential_expires_at, tier_ceiling, created_by)
                      values ($1, $2, $3, $4, $5, now() + make_interval(days => $6), $7, $8)`, [service_id, org, `Service ${service_id}`, sponsor, digest, expiresDays, tier_ceiling, created_by])
-  for (const a of delegates) await owner.query('insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by) values ($1, $2, $3, $4)', [service_id, a, org, created_by])
+  for (const a of delegates) await owner.query('insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by, assertion_key) values ($1, $2, $3, $4, $5)', [service_id, a, org, created_by, keyFor(a).publicKey])
   return token
 }

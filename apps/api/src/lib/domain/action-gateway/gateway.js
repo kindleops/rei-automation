@@ -34,6 +34,7 @@ import { createActionCatalog } from './catalog.js'
 import { ACTION_LOGIC, POLICY_VERSION } from './actions.js'
 import { buildApprovalRequest, judgeApproval } from './approvals.js'
 import { credentialDigest, serviceCredentialDigest, credentialKind } from './credentials.js'
+import { verifyActingAssertion } from './acting-assertion.js'
 import { gwErr, ActionGatewayError, classifyGatewayError } from './errors.js'
 import { FORGED_CONTEXT_KEYS, ESCALATION_KEYS, LIMITS, TIER_LABEL, TERMINAL_STATES, ACTION_GATEWAY_VERSION, READ_SCOPES, APPROVAL_GRANT_TTL_MS, AGENT_ID_RE } from './constants.js'
 import { APPROVAL_TTL_MS } from '../../agent/capabilities/contracts.js'
@@ -177,9 +178,10 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     agentChecks(a, { delegated: true })
     base.agent_id = a.agent_id
     const ceiling = Math.min(Number(a.tier_ceiling), Number(s.tier_ceiling))
+    if (typeof r?.assertion_key !== 'string') throw gwErr('forbidden', 'ACTING_ASSERTION_KEY_MISSING', 'this delegate has no registered assertion key; an owner registers the agent\'s public key')
     const principal = Object.freeze({ ...a, tier_ceiling: ceiling, agent_tier_ceiling: Number(a.tier_ceiling),
       via: Object.freeze({ kind: 'service', service_id: s.service_id, display_name: s.display_name, tier_ceiling: Number(s.tier_ceiling), sponsor_user_id: s.sponsor_user_id }) })
-    return { principal, service: s, digest, kind: 'service' }
+    return { principal, service: s, digest, kind: 'service', assertionKey: r.assertion_key }
   }
 
   /** The agent's USABLE standing grants for this capability (version-ordered); typed refusals otherwise. */
@@ -390,14 +392,27 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   }
 
   /** @param {{ credential: string, actingAgent?: string|null, tool: string, args: object, transport?: string }} o actingAgent = the X-LC-Acting-Agent header (service credentials) */
-  async function call({ credential, actingAgent = null, tool, args, transport = 'unknown' } = {}) {
+  /**
+   * A service call must PROVE its acting agent: an Ed25519 signature by that agent's registered key over the exact
+   * call (agent, the MCP tool name as requested, the raw arguments, time). The header alone is only a claim.
+   */
+  function proveActing(auth, { actingAssertion, signedTool, signedArgs, tool, args }) {
+    if (auth.kind !== 'service') return
+    const code = verifyActingAssertion({ publicKey: auth.assertionKey, header: actingAssertion, agent: auth.principal.agent_id, tool: signedTool ?? tool, args: signedArgs ?? args, now: now() })
+    if (code) throw gwErr('forbidden', code, code === 'ACTING_ASSERTION_REQUIRED' ? 'a service call must carry X-LC-Acting-Assertion signed by the acting agent\'s registered key' : 'the acting-agent assertion does not prove this agent made this exact call')
+  }
+
+  /** @param {{ credential: string, actingAgent?: string|null, actingAssertion?: string|null, signedTool?: string, signedArgs?: object, tool: string, args: object, transport?: string }} o */
+  async function call({ credential, actingAgent = null, actingAssertion = null, signedTool, signedArgs, tool, args, transport = 'unknown' } = {}) {
     const started = now()
     const base = { correlation_id: crypto.randomUUID(), action: null, capability: null, tier: null, agent_id: null, transport }
     const spec = catalog.get(tool)
     try {
       if (!spec) throw gwErr('invalid_input', 'UNKNOWN_ACTION', `unknown tool ${String(tool).slice(0, 64)}`)
       Object.assign(base, { action: spec.name, capability: spec.capability, tier: spec.tier })
-      const { principal, digest } = await authenticate(credential, base, { actingAgent })
+      const auth = await authenticate(credential, base, { actingAgent })
+      const { principal, digest } = auth
+      proveActing(auth, { actingAssertion, signedTool, signedArgs, tool, args })
       delegableOrRefuse(spec, principal)
       await controlsOrStop(spec, base)
       if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base, digest)

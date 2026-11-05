@@ -16,10 +16,14 @@
 //
 // Commands (exactly one):
 //   --create --service-id svc_<name> --sponsor <operator uuid> --tier-ceiling 1-4 --pepper-file <0600 file>
-//            [--display-name "agntei acquisitions"] [--days 1-90] [--delegate <agent id or display name>]... [--detach-agent-credentials]
+//            [--display-name "agntei acquisitions"] [--days 1-90] [--delegate <agent id or display name>=<agent public key>]... [--detach-agent-credentials]
 //            creates the service principal and its delegates, then prints the credential ONCE.
 //   --list [--service-id svc_<name>]                   the services of the org and their delegates (no secrets, no digests)
-//   --add-delegate <agent id or display name> --service-id svc_<name> [--detach-agent-credentials]
+//   --add-delegate <agent id or display name>=<agent public key> --service-id svc_<name> [--detach-agent-credentials]
+//                                                      (re-adding with a different key ROTATES it, recorded as yours)
+// <agent public key>: the agent's Ed25519 PUBLIC key (43 characters, base64url) printed by the integration (agntei:
+//   autonomy-rollout.mjs service keys). Every call made for that agent must be signed with the matching private key,
+//   which never leaves the integration; the X-LC-Acting-Agent header alone is never accepted.
 //   --disable-delegate <agent id or display name> --service-id svc_<name>
 //   --revoke --service-id svc_<name>                   final; every request with that credential is refused at once
 //
@@ -31,13 +35,14 @@ import { fileURLToPath } from 'node:url'
 import { readCredentialFile } from '../../leadcommand-mcp/src/data/credential.mjs'
 import { mintServiceCredential } from '@/lib/domain/action-gateway/credentials.js'
 import { AGENT_ID_RE, SERVICE_ID_RE } from '@/lib/domain/action-gateway/constants.js'
+import { ASSERTION_KEY_RE } from '@/lib/domain/action-gateway/acting-assertion.js'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const inside = (p) => { const a = path.resolve(p); return a === REPO || a.startsWith(`${REPO}${path.sep}`) }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DISPLAY_RE = /^[A-Za-z0-9 ._()-]{1,80}$/
 export const MAX_DAYS = 90
-export const USAGE = 'usage: --database-url-file <0600 file> --org <uuid> --owner <uuid> (--create --service-id svc_<name> --sponsor <uuid> --tier-ceiling 1-4 --pepper-file <0600 file> [--display-name <name>] [--days 1-90] [--delegate <agent>]... [--detach-agent-credentials] | --list [--service-id svc_<name>] | --add-delegate <agent> --service-id svc_<name> [--detach-agent-credentials] | --disable-delegate <agent> --service-id svc_<name> | --revoke --service-id svc_<name>)'
+export const USAGE = 'usage: --database-url-file <0600 file> --org <uuid> --owner <uuid> (--create --service-id svc_<name> --sponsor <uuid> --tier-ceiling 1-4 --pepper-file <0600 file> [--display-name <name>] [--days 1-90] [--delegate <agent>=<public key>]... [--detach-agent-credentials] | --list [--service-id svc_<name>] | --add-delegate <agent>=<public key> --service-id svc_<name> [--detach-agent-credentials] | --disable-delegate <agent> --service-id svc_<name> | --revoke --service-id svc_<name>)'
 export const WARNING = 'WARNING: this is the ONLY time this service credential is shown. Put it in the agntei host\'s secret store now. LeadCommand keeps only its digest and cannot show it again; if it is lost, revoke this service and mint a new one.'
 
 const fail = (msg) => { throw Object.assign(new Error(msg), { code: 'MINT_SERVICE_REFUSED' }) }
@@ -85,11 +90,23 @@ async function serviceRow(c, org, serviceId) {
  * Register (or re-enable) one delegate. A delegate WITHOUT a credential of its own (or detached now) is valid exactly as
  * long as the service credential: its registration window is aligned to the service's expiry.
  */
+/** "<agent>=<public key>" -> { ref, key }; the key is the agent's Ed25519 public key (43 base64url characters). */
+export function delegateArg(v) {
+  const i = String(v).lastIndexOf('=')
+  const ref = i > 0 ? String(v).slice(0, i).trim() : String(v).trim()
+  const key = i > 0 ? String(v).slice(i + 1).trim() : ''
+  if (!ASSERTION_KEY_RE.test(key)) fail(`"${ref}": give the agent's public key as <agent>=<key> (43 base64url characters, printed by the integration); calls for an agent are accepted only with its signature`)
+  return { ref, key }
+}
 async function addDelegate(c, { org, owner, service, agentRef, detach }) {
-  const a = await resolveAgent(c, org, agentRef)
+  const { ref, key } = delegateArg(agentRef)
+  const a = await resolveAgent(c, org, ref)
   if (a.status !== 'active') fail(`agent ${a.agent_id} is ${a.status}`)
-  await c.query(`insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by) values ($1, $2, $3, $4)
-                 on conflict (service_principal_id, agent_principal_id) do update set enabled = true, disabled_at = null, disabled_by = null`, [service.service_id, a.agent_id, org, owner])
+  await c.query(`insert into action_gateway.service_delegates (service_principal_id, agent_principal_id, org_id, created_by, assertion_key) values ($1, $2, $3, $4, $5)
+                 on conflict (service_principal_id, agent_principal_id) do update set enabled = true, disabled_at = null, disabled_by = null,
+                   assertion_key = excluded.assertion_key,
+                   key_rotated_at = case when service_delegates.assertion_key is distinct from excluded.assertion_key then clock_timestamp() else service_delegates.key_rotated_at end,
+                   key_rotated_by = case when service_delegates.assertion_key is distinct from excluded.assertion_key then $4::uuid else service_delegates.key_rotated_by end`, [service.service_id, a.agent_id, org, owner, key])
   let own = a.has_own_credential
   if (detach && own) {
     await c.query(`update action_gateway.agent_principals set credential_digest = null, credential_rotated_at = clock_timestamp(), credential_expires_at = $3
@@ -153,7 +170,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
         const pepperFile = one('--pepper-file')
         if (!pepperFile) fail('--pepper-file is required (the SAME 0600 file the Action MCP server reads)')
         const pepper = readCredentialFile(resolve(pepperFile), '--pepper-file')
-        for (const d of many('--delegate')) if (!AGENT_ID_RE.test(d) && !DISPLAY_RE.test(d)) fail(`--delegate "${d}" is neither an agent id nor a display name`)
+        for (const d of many('--delegate')) { const { ref } = delegateArg(d); if (!AGENT_ID_RE.test(ref) && !DISPLAY_RE.test(ref)) fail(`--delegate "${ref}" is neither an agent id nor a display name`) }
         const { token, digest } = mintServiceCredential(pepper)
         const summary = await tx(c, async () => {
           const s = (await c.query(`insert into action_gateway.service_principals (service_id, org_id, display_name, sponsor_user_id, credential_digest, credential_expires_at, tier_ceiling, created_by)
@@ -162,7 +179,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
           const delegates = []
           for (const d of many('--delegate')) delegates.push(await addDelegate(c, { org, owner, service: s, agentRef: d, detach: has('--detach-agent-credentials') }))
           return { created: true, service_id: s.service_id, display_name: s.display_name, tier_ceiling: `T${s.tier_ceiling}`, credential_expires_at: new Date(s.credential_expires_at).toISOString(), delegates,
-            header: 'X-LC-Acting-Agent: <agent id of a delegate>', authorization: 'Bearer <the credential below>' }
+            header: 'X-LC-Acting-Agent: <agent id of a delegate>; X-LC-Acting-Assertion: <that agent\'s signature over the call>', authorization: 'Bearer <the credential below>' }
         })
         out(`${JSON.stringify(summary)}\n`)
         out(`${WARNING}\n`)

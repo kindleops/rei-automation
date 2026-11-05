@@ -99,7 +99,13 @@ create table action_gateway.service_delegates (
   updated_at           timestamptz not null default now(),
   disabled_at          timestamptz,
   disabled_by          uuid,
+  -- the acting agent's PUBLIC Ed25519 key (raw 32 bytes, base64url): every call through the service carries the agent's
+  -- signature over that exact call (X-LC-Acting-Assertion); the header naming the agent is never trusted on its own
+  assertion_key        text not null check (assertion_key ~ '^[A-Za-z0-9_-]{43}$'),
+  key_rotated_at       timestamptz,
+  key_rotated_by       uuid,
   primary key (service_principal_id, agent_principal_id),
+  check ((key_rotated_at is null) = (key_rotated_by is null)),
   check (enabled = (disabled_at is null)),
   check ((disabled_at is null) = (disabled_by is null))
 );
@@ -151,7 +157,13 @@ begin
   if tg_op = 'DELETE' then raise exception using errcode = 'P0001', message = 'ACTION_GATEWAY_APPEND_ONLY: a delegate is disabled, never deleted'; end if;
   if tg_op = 'UPDATE' and (new.service_principal_id, new.agent_principal_id, new.org_id, new.created_by, new.created_at)
                            is distinct from (old.service_principal_id, old.agent_principal_id, old.org_id, old.created_by, old.created_at) then
-    raise exception using errcode = 'P0001', message = 'ACTION_GATEWAY_IMMUTABLE: a delegate changes only by enabling or disabling it';
+    raise exception using errcode = 'P0001', message = 'ACTION_GATEWAY_IMMUTABLE: a delegate changes only by enabling or disabling it, or an owner rotating its key';
+  end if;
+  if tg_op = 'UPDATE' and new.assertion_key is distinct from old.assertion_key then
+    if new.key_rotated_by is null or new.key_rotated_at is null or (old.key_rotated_at is not null and new.key_rotated_at <= old.key_rotated_at)
+       or not exists (select 1 from agent.operator_membership m where m.org_id = new.org_id and m.user_id = new.key_rotated_by and m.role = 'owner') then
+      raise exception using errcode = 'P0001', message = 'ACTION_GATEWAY_OWNER_ONLY: a delegate key is rotated by an org owner, with a new key_rotated_at';
+    end if;
   end if;
   if not exists (select 1 from action_gateway.service_principals s where s.service_id = new.service_principal_id and s.org_id = new.org_id) then
     raise exception using errcode = 'P0001', message = 'ACTION_GATEWAY_DELEGATE_ORG: the service principal is not in this org';
@@ -327,6 +339,7 @@ declare
   p action_gateway.agent_principals%rowtype;
   v_status text;
   v_agent jsonb := null;
+  v_key text := null;
 begin
   if v_org is null or p_credential_digest is null or p_credential_digest !~ '^[0-9a-f]{64}$' then return null; end if;
   select * into s from action_gateway.service_principals x where x.credential_digest = p_credential_digest and x.org_id = v_org;
@@ -343,7 +356,7 @@ begin
       select * into d from action_gateway.service_delegates x where x.service_principal_id = s.service_id and x.agent_principal_id = p.agent_id and x.org_id = v_org;
       if d.service_principal_id is null then v_status := 'not_delegated';
       elsif not d.enabled then v_status := 'delegate_disabled';
-      else v_status := 'ok'; v_agent := action_gateway.agent_principal_json(p);
+      else v_status := 'ok'; v_agent := action_gateway.agent_principal_json(p); v_key := d.assertion_key;
       end if;
     end if;
   end if;
@@ -354,7 +367,8 @@ begin
       'delegates', coalesce((select jsonb_agg(x.agent_principal_id order by x.agent_principal_id) from action_gateway.service_delegates x
                               where x.service_principal_id = s.service_id and x.org_id = v_org and x.enabled), '[]'::jsonb)),
     'acting_status', v_status,
-    'agent', v_agent);
+    'agent', v_agent,
+    'assertion_key', v_key);
 end
 $fn$;
 comment on function public.action_gateway_service_principal(text, text) is 'Action Gateway: a service credential digest (+ the X-LC-Acting-Agent id) -> the service principal, the delegation state, and the acting agent''s own principal only when its delegation is enabled.';

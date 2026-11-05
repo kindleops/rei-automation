@@ -26,6 +26,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { createConcurrencyGate, createRateLimiter } from '../../../leadcommand-mcp/src/safety/limits.mjs'
 import { AGENT_CREDENTIAL_RE, SERVICE_CREDENTIAL_RE } from '@/lib/domain/action-gateway/credentials.js'
 import { ACTING_AGENT_HEADER } from '@/lib/domain/action-gateway/constants.js'
+import { ACTING_ASSERTION_HEADER } from '@/lib/domain/action-gateway/acting-assertion.js'
 
 const AUTH_FAIL_PER_MIN = 30
 
@@ -55,6 +56,12 @@ export function actingAgentHeader(headers) {
   const v = headers && typeof headers.get === 'function' ? headers.get(ACTING_AGENT_HEADER) : headers?.[ACTING_AGENT_HEADER]
   if (v == null || v === '') return null
   return Array.isArray(v) ? v.join(', ').slice(0, 128) : String(v).slice(0, 128)
+}
+/** The X-LC-Acting-Assertion header (the acting agent's signature over the exact call), or null when absent. */
+export function actingAssertionHeader(headers) {
+  const v = headers && typeof headers.get === 'function' ? headers.get(ACTING_ASSERTION_HEADER) : headers?.[ACTING_ASSERTION_HEADER]
+  if (v == null || v === '') return null
+  return Array.isArray(v) ? v.join(', ').slice(0, 200) : String(v).slice(0, 200)
 }
 const sha = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest()
 const sameCredential = (a, digest) => Boolean(a) && crypto.timingSafeEqual(sha(a), digest)
@@ -145,7 +152,7 @@ export async function startHttp({ app }) {
     const gate = createConcurrencyGate({ max: h.session_concurrency, code: 'SESSION_CONCURRENCY_LIMIT', label: 'concurrent calls on this connection' })
     const digest = sha(credential)
     // the acting agent is read from EACH request's own headers (the SDK hands them to the tool handler)
-    const server = app.createServer({ transport: 'streamable-http', sessionGate: gate, processGate, credentialOf: () => credential, actingAgentOf: (extra) => actingAgentHeader(extra?.requestInfo?.headers) })
+    const server = app.createServer({ transport: 'streamable-http', sessionGate: gate, processGate, credentialOf: () => credential, actingAgentOf: (extra) => actingAgentHeader(extra?.requestInfo?.headers), actingAssertionOf: (extra) => actingAssertionHeader(extra?.requestInfo?.headers) })
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       enableJsonResponse: true,
