@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import pg from "pg";
+import { connectProdWrite } from "../lib/prod-db-credentials.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -39,11 +39,9 @@ function loadEnvFile(filePath) {
 
 for (const file of envFiles) loadEnvFile(file);
 
-const dbUrl = process.env.DATABASE_URL || process.env.SUPABASE_URL_NO_POOL || process.env.SUPABASE_DB_URL;
-if (!dbUrl) {
-  console.error("FAIL missing DATABASE_URL, SUPABASE_URL_NO_POOL, or SUPABASE_DB_URL");
-  process.exit(1);
-}
+// rc-8.5.21-c: the database URL is no longer derived from the environment or env files.
+// Writes go through the explicit production-write path (scripts/lib/prod-db-credentials.mjs):
+// --prod-write=<approval-ref>, LC_PROD_WRITE_DB_URL_FILE and an interactive TTY confirmation.
 
 const batchLimit = Math.max(1, Math.min(Number(process.env.CAMPAIGN_TARGET_GRAPH_BATCH_LIMIT || 1000), 5000));
 const maxBatches = Math.max(1, Number(process.env.CAMPAIGN_TARGET_GRAPH_MAX_BATCHES || 1));
@@ -113,8 +111,7 @@ function intCount(row, key = "count") {
 }
 
 async function main() {
-  const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const client = await connectProdWrite({ purpose: "staged campaign_target_graph refresh proof (runs refresh batches)", applicationName: "lc-ctg-staged-refresh-proof" });
 
   try {
     const { rows: startRows } = await client.query("select public.refresh_campaign_target_graph_stage_start() as run_id");

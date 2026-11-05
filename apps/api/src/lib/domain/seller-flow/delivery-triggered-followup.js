@@ -36,6 +36,8 @@ import {
   loadNoResponseThreadFacts,
   normalizeNoResponseMode,
   resolveNoResponseConfig,
+  detectOutboundOffer,
+  loadLatestOfferRecordAmount,
 } from "@/lib/domain/seller-flow/no-response-followup.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
@@ -169,7 +171,7 @@ export function resolveDeliveryFollowUpDecision({
 async function loadOutboundEvent(supabase, provider_message_sid) {
   const { data, error } = await supabase
     .from("message_events")
-    .select("id,thread_key,queue_id,sent_at,event_timestamp,master_owner_id,property_id,to_phone_number,metadata")
+    .select("id,thread_key,queue_id,sent_at,event_timestamp,master_owner_id,property_id,to_phone_number,metadata,message_body")
     .eq("provider_message_sid", provider_message_sid)
     .eq("direction", "outbound")
     .order("created_at", { ascending: false })
@@ -177,6 +179,31 @@ async function loadOutboundEvent(supabase, provider_message_sid) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
+}
+
+/**
+ * rc-8.5.21 v3 (RT-33 / RT-45 / RT-46): a follow-up the system SHOULD own but cannot plan is never
+ * silent. It is recorded as a HELD follow-up intent (the lifecycle's one record: state held + the reason,
+ * the originating delivered anchor as its cause, the review requirement) — the supervisor's
+ * follow-up check raises the operator item for every held intent. Idempotent per anchor (cause). Never
+ * throws; returns the record result (a lifecycle that is not installed ⇒ { ok: false }).
+ */
+export async function recordHeldFollowUp({ supabase, thread_key, property_id = null, master_owner_id = null, kind, reason, sid, anchor_at = null, due_hours = 24 } = {}) {
+  try {
+    const { planFollowUpIntent } = await import("@/lib/domain/followups/followup-lifecycle.js");
+    const base = Date.parse(clean(anchor_at)) || Date.now();
+    const r = await planFollowUpIntent({
+      thread_key, property_id, master_owner_id, kind, intent: kind, use_case: null,
+      due_at: new Date(base + due_hours * 3_600_000).toISOString(), writer: "delivery_triggered_followup",
+      cause: `held:${clean(sid)}`, state: "held", reason: clean(reason).slice(0, 200),
+      row_spec: { held_visibility: { originating_event: `delivered:${clean(sid)}`, resource: { thread_key, property_id }, review_required: true, next_action: "operator_declares_followup_plan" } },
+    }, { supabase });
+    if (!r?.ok) warn("delivery_followup.held_record_failed", { thread_key, kind, reason, error: r?.reason || null });
+    return r;
+  } catch (error) {
+    warn("delivery_followup.held_record_failed", { thread_key, kind, reason, error: error?.message || null });
+    return { ok: false, reason: "held_record_failed" };
+  }
 }
 
 async function threadHasEventAfter(supabase, { thread_key, direction, after_iso, exclude_event_id }) {
@@ -380,6 +407,10 @@ export async function countNoResponseFollowUpsToday(supabase, now = new Date()) 
  * disabled/missing/unreadable ⇒ { handled:false } and the generic path below
  * behaves exactly as before. Returns { handled, result }.
  */
+// the reasons an offer follow-up legitimately does not exist (the seller answered, we spoke again, the
+// contact may not be messaged, the thread is owned by another rule): everything else is a visible hold
+const OFFER_SILENCE_EXPLAINED_RE = /^(?:inbound_reply_received|newer_outbound_exists|phone_suppressed|precautionary_hold|thread_suppressed|legal_hold|seller_asked_not_to_be_contacted|contact_blocked:|identity_not_owner|disposition_rules_own_thread|terminal_stage|missing_thread_key)/;
+
 export async function maybeScheduleNoResponseFollowUp({
   supabase,
   outbound,
@@ -412,8 +443,12 @@ export async function maybeScheduleNoResponseFollowUp({
   }
   if (nr_mode === "disabled") return { handled: false };
 
-  const anchor = await loadAnchorQueueRow(supabase, outbound.queue_id);
-  if (!anchor) return { handled: false };
+  const loadedAnchor = await loadAnchorQueueRow(supabase, outbound.queue_id);
+  if (!loadedAnchor) return { handled: false };
+  // rc-8.5.21 v4 (offer silence): the latest outbound offer RECORD at this anchor decides which amount of a
+  // counter sequence is the live offer (and that a record-backed amount in our text IS an offer)
+  const offer_record_amount = await loadLatestOfferRecordAmount(supabase, { thread_key: outbound.thread_key, anchor_sent_at: sent_at });
+  const anchor = offer_record_amount ? { ...loadedAnchor, offer_record_amount } : loadedAnchor;
   const config = resolveNoResponseConfig(config_raw);
   if (!classifyNoResponseAnchor(anchor, config).kind) return { handled: false };
 
@@ -450,7 +485,20 @@ export async function maybeScheduleNoResponseFollowUp({
     { config, now }
   );
   const base = { ok: true, scheduled: false, mode, no_response_mode: nr_mode, thread_key };
-  if (!evaluation.eligible) return { handled: true, result: { ...base, reason: evaluation.reason } };
+  if (!evaluation.eligible) {
+    // RT-45 / RT-46: a follow-up held for its LANGUAGE (unknown, or not enabled: Spanish / Creole) is a
+    // recorded, operator-visible hold — never a silent skip
+    // rc-8.5.21 v4 (offer silence): a delivered OFFER that gets no follow-up for any reason other than the
+    // seller answering / a newer outbound / a suppression or opt-out state is a recorded, operator-visible
+    // hold too — an offer is never silently dropped
+    const anchorKind = classifyNoResponseAnchor(anchor, config).kind;
+    const offerHold = anchorKind === "offer" && !OFFER_SILENCE_EXPLAINED_RE.test(clean(evaluation.reason));
+    if ((/^language_/.test(clean(evaluation.reason)) || offerHold) && !inbound_after && !outbound_after) {
+      const held = await recordHeldFollowUp({ supabase, thread_key, property_id: outbound.property_id || null, master_owner_id: outbound.master_owner_id || null, kind: `no_response_${anchorKind}`, reason: evaluation.reason, sid, anchor_at: sent_at });
+      return { handled: true, result: { ...base, reason: evaluation.reason, held_recorded: held?.ok === true } };
+    }
+    return { handled: true, result: { ...base, reason: evaluation.reason } };
+  }
   if ((pending_rows || []).length > 0) {
     return { handled: true, result: { ...base, reason: "duplicate_pending_followup" } };
   }
@@ -744,6 +792,17 @@ async function scheduleFollowUpAfterDeliveryRun({
     });
 
     if (!decision.eligible) {
+      // RT-33: a delivered OFFER (an operator-typed one included) that no follow-up plan covers — no
+      // declared intent, no stage plan — is recorded as a HELD offer-silence follow-up for a person to
+      // declare (never a silent end, never an invented number)
+      if (!followup_intent && !inbound_after && !outbound_after && !pending) {
+        const offer = detectOutboundOffer({ message_body: outbound.message_body || "", use_case: outbound_use_case, offer_record_amount: await loadLatestOfferRecordAmount(supabase, { thread_key: outbound.thread_key, anchor_sent_at: sent_at }) });
+        if (offer?.is_offer) {
+          const reason = `offer_followup_plan_undeclared:${offer.mode === "number" ? "single_amount" : clean(offer.reason) || "no_number"}`;
+          const held = await recordHeldFollowUp({ supabase, thread_key: outbound.thread_key, property_id: outbound.property_id || null, master_owner_id: outbound.master_owner_id || null, kind: "offer_silence", reason, sid, anchor_at: sent_at });
+          return { ok: true, scheduled: false, reason, held_recorded: held?.ok === true, mode, thread_key: outbound.thread_key };
+        }
+      }
       return { ok: true, scheduled: false, reason: decision.reason, mode };
     }
 
@@ -801,6 +860,9 @@ async function scheduleFollowUpAfterDeliveryRun({
       {
         source: "delivery_triggered_followup",
         delivered_provider_message_sid: sid,
+        // rc-8.5.21 v3 (crash recovery C): ONE follow-up per delivered anchor — a replay of the same
+        // delivery (the recovery sweep after a crash, a duplicate webhook) is the same intent / row
+        followup_dedupe_scope: `delivered:${sid}`,
         outbound_message_event_id: outbound.id,
         master_owner_id: outbound.master_owner_id || null,
         property_id: outbound.property_id || null,

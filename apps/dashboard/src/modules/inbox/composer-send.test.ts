@@ -66,3 +66,47 @@ describe('one composer send path for every Inbox pane', () => {
     expect((schedule.mock.calls[0] as unknown[]).slice(0, 3)).toEqual([panes[2].thread, 'later', '2026-10-05T15:00:00Z'])
   })
 })
+
+describe('repeat asking-price guard — the audited override (rc-8.5.15.1)', () => {
+  const target: PaneSendTarget = { thread: thread('+16125550404', '+16125559004'), threadContext: ctx('seller-4') }
+  const blocked = () => ok({ ok: false, backendReason: 'repeat_asking_price_blocked', repeatAskOverrideAllowed: true, operatorOverrideAllowed: false, errorMessage: 'This seller was already asked for their asking price — the repeat was not sent.' })
+
+  it('a blocked repeat ask asks for a reason (checkbox + reason) and re-sends with the override only — never operatorOverride', async () => {
+    const send = vi.fn().mockResolvedValueOnce(blocked()).mockResolvedValueOnce(ok())
+    const prompt = vi.fn(async () => '  Seller asked what we meant by price  ')
+    const confirm = vi.fn(async () => true)
+    const toast = vi.fn()
+    const result = await sendComposerMessage({ ...paneSendArgs(target, 'What price would you be looking for?', null, 'cs-4'), deps: { send, prompt, confirm, toast } })
+    expect(result.ok).toBe(true)
+    expect(prompt).toHaveBeenCalledOnce()
+    const req = (prompt.mock.calls[0] as unknown[])[0] as { acknowledge?: string; minLength?: number }
+    expect(req.acknowledge).toMatch(/clarification/i)
+    expect(req.minLength).toBe(10)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(2)
+    const opts = (send.mock.calls[1] as unknown[])[2] as { repeatAskOverrideReason?: string; operatorOverride?: boolean; clientSendId?: string }
+    expect(opts.repeatAskOverrideReason).toBe('Seller asked what we meant by price')
+    expect(opts.operatorOverride).toBeUndefined()
+    expect(opts.clientSendId).toBe('cs-4')
+    expect((send.mock.calls[1] as unknown[])[0]).toBe(target.thread)
+  })
+
+  it('dismissing, or a reason under 10 characters, never re-sends; the failure is shown', async () => {
+    for (const answer of [null, 'short']) {
+      const send = vi.fn(async () => blocked())
+      const toast = vi.fn()
+      const result = await sendComposerMessage({ ...paneSendArgs(target, 'Any asking price in mind?', null, 'c'), deps: { send, prompt: vi.fn(async () => answer), toast } })
+      expect(result.ok).toBe(false)
+      expect(send).toHaveBeenCalledOnce()
+      expect(toast.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Send Failed', severity: 'critical' })
+    }
+  })
+
+  it('no override is offered when the server does not allow it (e.g. the seller replied to an S3 follow-up)', async () => {
+    const send = vi.fn(async () => ok({ ok: false, backendReason: 'repeat_asking_price_blocked', repeatAskOverrideAllowed: false, errorMessage: 'x' }))
+    const prompt = vi.fn()
+    await sendComposerMessage({ ...paneSendArgs(target, 'x', null, 'c'), deps: { send, prompt, toast: vi.fn() } })
+    expect(prompt).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledOnce()
+  })
+})

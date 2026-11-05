@@ -13,16 +13,17 @@
  *   Every non-GET and every other API / Supabase request is aborted; nothing
  *   that writes or sends is clicked.
  *
+ * Credential (rc-8.5.21-c): LC_RO_ENTITY_GRAPH_DB_URL_FILE — the role-enforced read-only
+ * diagnostics role, verified by scripts/lib/prod-db-credentials.mjs.
  * Run from apps/api (the service imports resolve through its alias loader):
  *   node --import ./tests/register-aliases.mjs ../dashboard/scripts/proof/desktop/eg-universe-composer-capture.mjs \
  *     --dist=/tmp/egu-dist --out=/tmp/overview-composer-shots --themes=dark,light --sizes=1440x900,1920x1080
  */
 import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import pg from 'pg'
+import { connectReadOnlyDiagnostics } from '../../../../../scripts/lib/prod-db-credentials.mjs'
 
 const arg = (n, f) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : f }
 const DIST = path.resolve(arg('dist', '/tmp/egu-dist'))
@@ -32,8 +33,7 @@ const SIZES = arg('sizes', '1440x900').split(',').filter(Boolean).map((s) => s.s
 const ONLY = arg('scenes', '')
 
 const { buildEntityGraphUniverse } = await import('@/lib/domain/entity-graph/entity-graph-universe-service.js')
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL || readFileSync('/tmp/.dburl', 'utf8').trim(), ssl: { rejectUnauthorized: false } })
-await client.connect()
+const client = await connectReadOnlyDiagnostics({ purpose: 'entity_graph', applicationName: 'lc-eg-universe-capture', statementTimeoutMs: 15_000 })
 await client.query('set default_transaction_read_only = on')
 let lock = Promise.resolve()
 const query = (sql, params = [], ms = 15_000) => {

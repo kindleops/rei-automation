@@ -47,10 +47,23 @@ export function createSpendTracker({ capUsd, spentUsd = 0, onSettle = null } = {
   }
 }
 
+/** Below this much remaining job time a call is not started (no reservation, no spend). */
+export const MIN_CALL_MS = 3_000
+
+/** A job-level stop for the runtime (retry later), never swallowed into a decision. */
+function jobDeadline() {
+  return Object.assign(new Error('JOB_DEADLINE'), { code: 'JOB_DEADLINE', abortJob: true })
+}
+
 /**
- * @param {{ provider: { listModels: Function, createMessage: Function }, tracker: ReturnType<typeof createSpendTracker>, env?: object, now?: () => number, timeoutMs?: number }} deps
+ * @param {{ provider: { listModels: Function, createMessage: Function }, tracker: ReturnType<typeof createSpendTracker>, env?: object, now?: () => number, timeoutMs?: number,
+ *           remainingMs?: (() => number)|null, signal?: AbortSignal|null }} deps
+ *   remainingMs / signal (8.5.15): the R2 job's wall-clock budget. Every call's timeout is
+ *   min(timeoutMs, remaining − 1 s); with < MIN_CALL_MS left, or once the job's signal has
+ *   fired, the call is NOT started (a JOB_DEADLINE job stop ⇒ the runtime retries the job);
+ *   the job's abort also aborts an in-flight call.
  */
-export function createConversationModelClient({ provider, tracker, env = {}, now = () => Date.now(), timeoutMs = 45_000 } = {}) {
+export function createConversationModelClient({ provider, tracker, env = {}, now = () => Date.now(), timeoutMs = 45_000, remainingMs = null, signal = null } = {}) {
   if (!provider || typeof provider.createMessage !== 'function') throw new Error('PROVIDER_REQUIRED')
   if (!tracker) throw new Error('TRACKER_REQUIRED')
   const resolver = createModelResolver({ provider, env })
@@ -87,11 +100,15 @@ export function createConversationModelClient({ provider, tracker, env = {}, now
     const promptBound = Buffer.byteLength(JSON.stringify({ s: params.system, t: params.tools, m: params.messages }), 'utf8')
     const worst = worstCaseUsd(model, { promptTokensBound: promptBound, maxTokens: max })
     if (worst == null) throw new ModelCallRefused('UNPRICED_MODEL', { model })
+    const callMs = Math.min(timeoutMs, typeof remainingMs === 'function' ? remainingMs() - 1_000 : timeoutMs)
+    if (signal?.aborted || callMs < MIN_CALL_MS) throw jobDeadline()
     // a tracker refusal propagates (the runtime adapter turns budget refusal into a job stop)
     const tok = await tracker.reserve(worst, model)
     const t0 = now()
     const ctl = new AbortController()
-    const timer = setTimeout(() => ctl.abort({ code: 'MODEL_TIMEOUT' }), timeoutMs)
+    const timer = setTimeout(() => ctl.abort({ code: 'MODEL_TIMEOUT' }), callMs)
+    const onJobAbort = () => ctl.abort({ code: 'JOB_ABORTED' })
+    signal?.addEventListener?.('abort', onJobAbort, { once: true })
     let msg
     try {
       msg = await provider.createMessage(params, { signal: ctl.signal })
@@ -99,9 +116,12 @@ export function createConversationModelClient({ provider, tracker, env = {}, now
       // the provider refused before any work (400/401/403/404/429): nothing was billed
       if (err?.billed === 'no' && typeof tracker.release === 'function') await tracker.release(tok)
       else await tracker.abandon(tok)
+      // the JOB was stopped (tick deadline / cancel): a job stop, never a recorded decision
+      if (signal?.aborted) throw jobDeadline()
       throw new ModelCallRefused(err?.code || 'PROVIDER_ERROR', { model, billed: err?.billed ?? 'unknown' })
     } finally {
       clearTimeout(timer)
+      signal?.removeEventListener?.('abort', onJobAbort)
     }
     const cost = actualUsd(model, msg?.usage || {})
     await tracker.settle(tok, cost ? cost.usd : null, msg?.usage || null)

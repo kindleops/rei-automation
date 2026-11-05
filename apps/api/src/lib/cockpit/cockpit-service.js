@@ -586,6 +586,9 @@ export async function runInboxAction({
         message_type: clean(payload.message_type) || (isMapOwnershipCheck ? 'ownership_check' : undefined),
         use_case_template: clean(payload.use_case_template) || (isMapOwnershipCheck ? 'ownership_check' : undefined),
         created_from: clean(payload.created_from) || (isMapOwnershipCheck ? 'leadcommand_map' : 'leadcommand_inbox'),
+        // Server-side identity only: a body-supplied actor is overwritten here.
+        // Reconciliation: the hotfix's operator principal (authenticated sessions only) is the actor.
+        repeat_ask_override_actor: operator?.authenticated === true ? (clean(operator.id) || null) : null,
       },
       // With a server-side principal the send runs under the manual-send
       // authority (manual_send_mode + global_send_shutdown_at). Without one
@@ -619,6 +622,7 @@ export async function runInboxAction({
         delivery_status_display: sendResult.delivery_status_display || null,
         hard_block: sendResult.hard_block === true,
         operator_override_allowed: sendResult.operator_override_allowed === true,
+        repeat_ask_override_allowed: sendResult.repeat_ask_override_allowed === true,
         diagnostics: {
           send_error: sendResult.error || null,
           detail_reason: sendResult.detail_reason || null,
@@ -693,6 +697,9 @@ export async function runInboxAction({
     const queueResult = await createInboxSendNowQueueRow(
       {
         ...payload,
+        // The repeat-asking-price override exists for send-now only.
+        repeat_ask_override: false,
+        repeat_ask_override_actor: null,
         thread_key: threadKey,
         source: clean(payload.source) || 'inbox',
         action: action === 'auto-reply' ? 'auto_reply' : (action === 'schedule-reply' ? 'schedule_reply' : 'queue_reply'),

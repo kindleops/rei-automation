@@ -237,5 +237,28 @@ export const inboxCapabilities = [
     },
     audit: (input) => ({ template_id: input.template_id }),
   },
+  {
+    id: 'inbox.draft_ai_reply',
+    version: 1,
+    domain: 'inbox',
+    title: 'Draft an AI reply (canonical runtime, never sent)',
+    description: 'What the canonical conversation runtime would decide and write for the latest inbound of a thread ref: the plan, the reply text (our own words, if any), its validation and every version. Never queues, reserves or sends; a human uses inbox.prepare_reply for anything that goes out.',
+    input_schema: obj({ thread_ref: THREAD_REF_SCHEMA }, ['thread_ref']),
+    output_schema: { type: 'object' },
+    side_effect: 'read',
+    tier: 'autonomous_internal',
+    cost_class: 'db_heavy',
+    limits: { per_min: 6, per_day: 200, timeout_ms: 45_000, rows_to_model: 5 },
+    wraps: { service: 'conversation-ai-draft-service#draftReplyForInbound → runtime/canonical#decideAndCompose' },
+    async execute(input, ctx) {
+      const key = openRef(ctx, input.thread_ref)
+      const inboundId = await ctx.services.conversation.latestInboundId(key)
+      if (!inboundId) return { thread_ref: input.thread_ref, ok: false, code: 'NO_INBOUND' }
+      const r = await ctx.services.conversation.draft({ inboundMessageId: inboundId, caller: 'capability' })
+      return { thread_ref: input.thread_ref, recipient_mask: mask(key), ok: r?.ok === true, code: r?.code || null, draft: r?.draft || null }
+    },
+    audit: (input, r) => ({ ok: r?.ok === true, code: r?.code || null, terminal: r?.draft?.terminal?.type || null }),
+  },
+
 ]
 

@@ -43,6 +43,17 @@ function makeSupabase({ opportunity = {} } = {}) {
       },
     ],
     closing_cases: [],
+    // The acceptance autonomy guard (P0 2026-10-16) needs the valuation authority:
+    // MAO / ceiling above every price these tests accept, valuation present.
+    scores: [
+      {
+        property_id: "prop-1",
+        minimum_acceptable_offer: 330000,
+        valuation_mid: 400000,
+        computed_at: 1,
+        evidence: { offer_calculation: { effective_authorized_ceiling: 330000 } },
+      },
+    ],
   };
 
   function tableFor(name) {
@@ -52,7 +63,9 @@ function makeSupabase({ opportunity = {} } = {}) {
         ? state.closing_cases
         : name === "acquisition_opportunities"
           ? state.opportunities
-          : null;
+          : name === "property_acquisition_scores"
+            ? state.scores
+            : null;
   }
 
   function from(name) {
@@ -232,7 +245,9 @@ test("a 'yes' with no active offer accepts nothing and creates no closing case",
 
 test("the accepted price comes from the offer, never invented", async () => {
   const supabase = makeSupabase();
-  const seeded = await seedActiveOffer(supabase, { purchase_price: 312500 });
+  // authorized_ceiling raised with the price: an offer above its own frozen
+  // ceiling is never auto-accepted (acceptance guard, P0 2026-10-16).
+  const seeded = await seedActiveOffer(supabase, { purchase_price: 312500, authorized_ceiling: 320000 });
   const r = await finalizeSellerAcceptance({
     opportunity_id: OPP, thread_key: THREAD, acceptance_event_id: "evt-p", supabase,
   });
@@ -328,7 +343,12 @@ test("an exception binding the offer is isolated, not thrown", async () => {
     opportunity_id: OPP, thread_key: THREAD, acceptance_event_id: "evt-throw", supabase: throwing,
   });
   assert.equal(r.ok, false);
-  assert.equal(r.reason, "accept_exception");
+  // Since the P0 acceptance guard (2026-10-16) the first read is the guard's;
+  // a dead database is a guard lookup failure -> routed to human review, never
+  // thrown, nothing accepted, nothing created (fail closed).
+  assert.equal(r.reason, "routed_to_human_review");
+  assert.ok(r.review_reasons.includes("acceptance_guard_lookup_failed"), JSON.stringify(r));
+  assert.equal(r.offer_accepted, false);
   assert.equal(r.closing_case_created, false);
 });
 

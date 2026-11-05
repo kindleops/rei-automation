@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import pg from "pg";
+import { connectProdWrite } from "../lib/prod-db-credentials.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -140,15 +140,9 @@ const config = {
   )),
 };
 
-const dbUrl =
-  process.env.DATABASE_URL ||
-  process.env.SUPABASE_URL_NO_POOL ||
-  process.env.SUPABASE_DB_URL;
-
-if (!dbUrl) {
-  console.error("FAIL missing DATABASE_URL, SUPABASE_URL_NO_POOL, or SUPABASE_DB_URL");
-  process.exit(1);
-}
+// rc-8.5.21-c: the database URL is no longer derived from the environment or env files.
+// Writes go through the explicit production-write path (scripts/lib/prod-db-credentials.mjs):
+// --prod-write=<approval-ref>, LC_PROD_WRITE_DB_URL_FILE and an interactive TTY confirmation.
 
 const targets = [];
 if (config.production) {
@@ -245,8 +239,7 @@ async function runTarget(client, target, budget) {
 }
 
 async function main() {
-  const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const client = await connectProdWrite({ purpose: "campaign_target_graph filter-column backfill (writes production + stage graph rows)", applicationName: "lc-ctg-filter-backfill" });
 
   try {
     console.log(

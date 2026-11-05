@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { enqueueSendQueueItem } from "@/lib/supabase/sms-engine.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { lifecycleLive as followUpLifecycleLive, planFollowUpFromScheduler, followUpKindFor, loadPropertyContactBlock, SELLING_NURTURE_KINDS } from "@/lib/domain/followups/followup-lifecycle.js";
 import {
   isNurtureIntent,
   loadNurtureRenderContext,
@@ -45,6 +46,9 @@ const SUPPRESSED_INTENTS = new Set([
 
 const NURTURE_DAYS = {
   not_interested: 30,
+  // rc-8.5.21: a seller who asked us to check back ("call me next month") — written only by the
+  // follow-up execution pipeline, which pins the seller's own date (scheduled_for_at)
+  seller_callback: 30,
   listed_or_unavailable: 45,
   tenant_or_occupancy: 21,
   condition_signal: 14,
@@ -369,7 +373,11 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
   const base_dedupe_key = dedupe_scope
     ? `${buildFollowupDedupeKey(normalized_thread_key, intent)}:${dedupe_scope}`
     : buildFollowupDedupeKey(normalized_thread_key, intent);
-  const scheduled_for = plan.scheduled_for;
+  // rc-8.5.21 follow-up execution pipeline (domain/followups/followup-execution.js): the pipeline
+  // dispatches a follow-up at its DUE time, so it pins the send instant it already re-checked
+  // (contact window included). Only a valid ISO instant is honoured; every other caller is unchanged.
+  const pinned_ms = Date.parse(clean(context.scheduled_for_at));
+  const scheduled_for = Number.isFinite(pinned_ms) ? new Date(pinned_ms).toISOString() : plan.scheduled_for;
 
   // RENDER CONTEXT (2026-10-08). A nurture row is rendered 30 days from now by
   // the deferred resolver from the row's own fields. Callers that only knew ids
@@ -424,7 +432,7 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     }
   }
   // Never persisted as metadata: the reply text and the loader hook.
-  const { reply_text: _reply_text, render_context_loader: _loader, inbound_to: _inbound_to, ...persisted_context } = context;
+  const { reply_text: _reply_text, render_context_loader: _loader, inbound_to: _inbound_to, lifecycle_read_switch: _lifecycle_rs, lifecycle_bypass: _lifecycle_bypass, ...persisted_context } = context;
 
   const use_case_template =
     intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
@@ -467,9 +475,9 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     }
   }
 
-  const enqueueWithKey = (dedupe_key) => {
+  const buildPayload = (dedupe_key) => {
     const queue_key = buildFollowupQueueKey(dedupe_key);
-    return enqueueSendQueueItem(
+    return (
     {
       queue_key,
       queue_id: queue_key,
@@ -511,10 +519,36 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
         days_until_followup: plan.days,
         ...persisted_context,
       },
-    },
-    { supabase }
+    }
     );
   };
+  const enqueueWithKey = (dedupe_key) => enqueueSendQueueItem(buildPayload(dedupe_key), { supabase });
+
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17, domain/followups/followup-lifecycle.js). While
+  // system_control.followup_execution_mode = live, a deferred follow-up is NEVER written as a body-less
+  // send_queue row (the loader pauses those before any claim: 0 delivered in 120 days). The row this
+  // writer would have inserted becomes the durable intent's row_spec; materialization renders,
+  // validates and re-checks it, then writes ONE nonempty send-ready row. Absent / off: unchanged.
+  if (context.lifecycle_bypass !== true && (await followUpLifecycleLive({ readSwitch: context.lifecycle_read_switch || null, supabase }))) {
+    return planFollowUpFromScheduler({ intent, plan, payload: buildPayload(base_dedupe_key), context: persisted_context, supabase });
+  }
+
+  // rc-8.5.21 P0 HARD INVARIANT (the legacy writer too): a SELLING nurture requires a selling-intent
+  // answer. When the seller's latest reply answered an ownership question (one or several, separate
+  // messages included) the nurture is never written: the same verdict the lifecycle planner and the
+  // materializer return (followup-lifecycle.js#propertyContactBlock). A failed read writes as before:
+  // the send-time contact guard re-reads the same evidence before anything can send.
+  if (SELLING_NURTURE_KINDS.has(followUpKindFor(intent, persisted_context))) {
+    let block = null;
+    try {
+      block = await loadPropertyContactBlock({ supabase, thread_key: normalized_thread_key, phone: to_phone_number, property_id: clean(context.property_id) || null, kind: followUpKindFor(intent, persisted_context) });
+    } catch {
+      block = null;
+    }
+    if (block?.blocked) {
+      return { ok: false, skipped: true, followup_created: false, reason: block.reason, thread_key: normalized_thread_key };
+    }
+  }
 
   let dedupe_key = base_dedupe_key;
   let queue_key = buildFollowupQueueKey(dedupe_key);
@@ -607,6 +641,7 @@ export async function cancelPendingFollowUpsForThread({
   reason = "cancelled_followup_on_inbound_reply",
   now = new Date().toISOString(),
   keep_nurture_follow_ups = false,
+  only_property_id = null,
   supabase = defaultSupabase,
 } = {}) {
   const normalized_thread_key = normalizePhone(thread_key) || clean(thread_key);
@@ -628,6 +663,7 @@ export async function cancelPendingFollowUpsForThread({
       cancelled_by: "inbound_takeover",
       now,
       keep_nurture_follow_ups: keep_nurture_follow_ups === true,
+      only_property_id: only_property_id || null,
     },
     { supabase }
   );

@@ -48,10 +48,18 @@ test('matrix: the first capabilities, typed + versioned, with tier, side effect 
     'inbox.find_conversations': ['read', 'autonomous_internal'],
     'inbox.read_thread': ['read', 'autonomous_internal'],
     'inbox.prepare_reply': ['outbound_prepare', 'requires_explicit_approval'],
+    // rc-8.5.21: the canonical runtime's review draft (read, never sends)
+    'inbox.draft_ai_reply': ['read', 'autonomous_internal'],
     'pipeline.inspect_stage_evidence': ['read', 'autonomous_internal'],
     'pipeline.propose_stage_change': ['internal_write', 'requires_explicit_approval'],
     'platform.health': ['read', 'autonomous_internal'],
     'missions.create': ['internal_write', 'autonomous_internal'],
+    // Action Gateway (D1 + the T2 human requests): filed only by the gateway, decided by a named operator
+    'agent_actions.authorize_action': ['internal_write', 'requires_explicit_approval'],
+    'inbox.prepare_disposition_change': ['internal_write', 'requires_explicit_approval'],
+    'holds.prepare_release_approval': ['internal_write', 'requires_explicit_approval'],
+    'campaigns.prepare_resume_approval': ['outbound_prepare', 'requires_explicit_approval'],
+    'campaigns.prepare_plan_adjustment_approval': ['internal_write', 'requires_explicit_approval'],
   }
   assert.deepEqual(Object.keys(m).sort(), Object.keys(expect).sort())
   for (const [id, [se, tier]] of Object.entries(expect)) {
@@ -267,7 +275,6 @@ test('platform.health: heartbeats from stored timestamps, modes, queue + feeder_
   const r = await inv(plane, 'platform.health')
   assert.equal(r.ok, true)
   // the event-driven follow-up heartbeat has no delivery reference in this fixture: unverified, never stale
-  // (Package A ships the rc-8.5.15 ops-health-check evaluator; same assertion as rc-8.5.21)
   assert.ok(r.result.heartbeats.every((h) => h.status === 'fresh' || (h.key === 'followup_no_response_heartbeat_at' && h.status === 'unverified')), JSON.stringify(r.result.heartbeats))
   assert.equal(r.result.modes.queue_processor_mode, 'off')
   assert.equal(r.result.feeder_last.inserted, 0)
@@ -534,7 +541,7 @@ test('routes: gate 404 → ops auth → verified named user → rate limit → m
   assert.equal((await handleActionsCatalog(req('/a', { headers: { authorization: 'Bearer bad' } }), opts)).status, 401)
   assert.equal((await handleActionsCatalog(req('/a'), { ...opts, limiter: { check: () => ({ ok: false, code: 'RATE_LIMITED', retry_after_s: 5 }) } })).status, 429)
   const cat = await (await handleActionsCatalog(req('/a'), opts)).json()
-  assert.equal(cat.capabilities.length, 12)
+  assert.equal(cat.capabilities.length, 18) // 13 + D1 + the four Action Gateway T2 human-request capabilities
   const inv1 = await handleActionsInvoke(req('/a/invoke', { method: 'POST', body: JSON.stringify({ capability_id: 'campaigns.prepare_launch_approval', input: { campaign_id: CAMPAIGN_ID, start: 'now' } }) }), opts)
   const out = await inv1.json()
   assert.equal(out.status, 'approval_pending')

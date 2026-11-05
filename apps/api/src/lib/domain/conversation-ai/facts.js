@@ -44,7 +44,7 @@ function push(ledger, key, entry) {
 }
 
 /**
- * @param {{ inbound: Array<{ id: string, body: string, at: string, intent?: string|null }>, recordFacts?: Record<string, any>, now?: string }} args
+ * @param {{ inbound: Array<{ id: string, body: string, at: string, intent?: string|null, answers_price_question?: boolean }>, recordFacts?: Record<string, any>, now?: string }} args
  *   inbound: the thread's SELLER messages, chronological (current inbound included).
  *   intent: the deterministic classifier's primary intent for that message.
  */
@@ -52,7 +52,9 @@ export function buildFactLedger({ inbound = [], recordFacts = {}, now = new Date
   const ledger = {}
   for (const [k, v] of Object.entries(recordFacts || {})) if (v != null) push(ledger, k, { value: v, origin: 'record_derived', source_message_id: null, at: null, confidence: 1 })
   for (const m of inbound) {
-    const ex = extractSellerFacts({ message: m.body, sourceMessageId: m.id, now })
+    // rc-8.5.21 v3 (remember supplied asking prices): a reply to OUR asking-price question is read with the
+    // v3 number rules (a bare "250" answering "what price?" is $250,000), never dropped as an ambiguous mention
+    const ex = extractSellerFacts({ message: m.body, sourceMessageId: m.id, now, ...(m.answers_price_question ? { priceSignalOptions: { numberRules: 'v3' } } : {}) })
     const f = ex.facts || {}
     const add = (key, value, confidence) => push(ledger, key, { value, origin: 'seller_stated', source_message_id: m.id, at: m.at, confidence: Number(confidence ?? 0.7) })
     if (f.asking_price?.value?.amount > 0) add('asking_price', { amount: f.asking_price.value.amount, price_type: f.asking_price.value.price_type, range: f.asking_price.value.range || null }, f.asking_price.confidence)

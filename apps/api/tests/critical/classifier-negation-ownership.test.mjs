@@ -29,56 +29,56 @@ import { classify } from "@/lib/domain/classification/classify.js";
  *  categorically forbidden for every case in NEGATION_CASES. */
 const NEGATION_CASES = [
   // ── Plain not-owner denials ────────────────────────────────────────────────
-  { text: "That's not my house.", any_of: ["wrong_number"] },
-  { text: "That is not my house!", any_of: ["wrong_number"] },
-  { text: "This isn't my property.", any_of: ["wrong_number"] },
-  { text: "It's not my house.", any_of: ["wrong_number"] },
-  { text: "Not my house.", any_of: ["wrong_number"] },
-  { text: "not my property, sorry", any_of: ["wrong_number"] },
-  { text: "not mine", any_of: ["wrong_number"] },
-  { text: "That's not mine.", any_of: ["wrong_number"] },
-  { text: "I do not own that house.", any_of: ["wrong_number"] },
-  { text: "I don't own it.", any_of: ["wrong_number"] },
-  { text: "we do not own that property", any_of: ["wrong_number"] },
-  { text: "I'm not the owner.", any_of: ["wrong_number"] },
-  { text: "Not the owner.", any_of: ["wrong_number"] },
-  { text: "im not the owner of that house", any_of: ["wrong_number"] },
-  { text: "It doesn't belong to me.", any_of: ["wrong_number"] },
-  { text: "does not belong to me", any_of: ["wrong_number"] },
+  { text: "That's not my house.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "That is not my house!", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "This isn't my property.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "It's not my house.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Not my house.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "not my property, sorry", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "not mine", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "That's not mine.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I do not own that house.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I don't own it.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "we do not own that property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I'm not the owner.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Not the owner.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "im not the owner of that house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "It doesn't belong to me.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "does not belong to me", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Contractions ───────────────────────────────────────────────────────────
-  { text: "thats not my house", any_of: ["wrong_number"] },
-  { text: "this isnt my property", any_of: ["wrong_number"] },
-  { text: "It isn't my house", any_of: ["wrong_number"] },
-  { text: "That isn't our property", any_of: ["wrong_number"] },
-  { text: "its not our property", any_of: ["wrong_number"] },
-  { text: "That ain't my house", any_of: ["wrong_number"] },
-  { text: "aint my property", any_of: ["wrong_number"] },
-  { text: "i dont own that house", any_of: ["wrong_number"] },
-  { text: "Dont own it", any_of: ["wrong_number"] },
+  { text: "thats not my house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "this isnt my property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "It isn't my house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "That isn't our property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "its not our property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "That ain't my house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "aint my property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "i dont own that house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Dont own it", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Punctuation / casing variants ──────────────────────────────────────────
-  { text: "That's not my house!!!", any_of: ["wrong_number"] },
-  { text: "NOT MY HOUSE", any_of: ["wrong_number"] },
-  { text: "that's NOT my property...", any_of: ["wrong_number"] },
-  { text: "no... that's not my house?", any_of: ["wrong_number"] },
+  { text: "That's not my house!!!", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "NOT MY HOUSE", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "that's NOT my property...", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no... that's not my house?", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Typos ──────────────────────────────────────────────────────────────────
-  { text: "thats not my hosue", any_of: ["wrong_number"] },
-  { text: "this isnt my propery", any_of: ["wrong_number"] },
-  { text: "not my huose", any_of: ["wrong_number"] },
+  { text: "thats not my hosue", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "this isnt my propery", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "not my huose", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Slang ──────────────────────────────────────────────────────────────────
-  { text: "nah not my crib", any_of: ["wrong_number", "not_interested"] },
-  { text: "bro that aint my crib", any_of: ["wrong_number"] },
-  { text: "that aint mine", any_of: ["wrong_number"] },
+  { text: "nah not my crib", any_of: ["wrong_number", "property_specific_non_owner", "not_interested"] },
+  { text: "bro that aint my crib", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "that aint mine", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Never owned ────────────────────────────────────────────────────────────
-  { text: "I never owned it.", any_of: ["wrong_number"] },
-  { text: "never owned that property", any_of: ["wrong_number"] },
-  { text: "I have never owned that house", any_of: ["wrong_number"] },
-  { text: "Nope. Never owned it. Stop guessing.", any_of: ["wrong_number"] },
-  { text: "i never owned anything there", any_of: ["wrong_number"] },
+  { text: "I never owned it.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "never owned that property", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I have never owned that house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Nope. Never owned it. Stop guessing.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "i never owned anything there", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Former owner / sold ────────────────────────────────────────────────────
   { text: "I sold that property.", any_of: ["sold_property"] },
@@ -89,28 +89,28 @@ const NEGATION_CASES = [
   { text: "That was sold in 2022", any_of: ["sold_property"] },
   { text: "sold my house in March", any_of: ["sold_property"] },
   { text: "It sold last month", any_of: ["sold_property"] },
-  { text: "no longer own that place", any_of: ["wrong_number"] },
-  { text: "I used to own it but not anymore", any_of: ["wrong_number"] },
-  { text: "was mine years ago", any_of: ["wrong_number"] },
+  { text: "no longer own that place", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I used to own it but not anymore", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "was mine years ago", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Spanish ────────────────────────────────────────────────────────────────
-  { text: "esa no es mi casa", any_of: ["wrong_number"] },
-  { text: "Esa no es mi casa.", any_of: ["wrong_number"] },
-  { text: "no es mi casa", any_of: ["wrong_number"] },
-  { text: "Esa casa no es mía", any_of: ["wrong_number"] },
-  { text: "no es mía", any_of: ["wrong_number"] },
-  { text: "No soy el dueño", any_of: ["wrong_number"] },
-  { text: "no soy el dueno", any_of: ["wrong_number"] },
-  { text: "no soy dueña", any_of: ["wrong_number"] },
-  { text: "No soy la propietaria", any_of: ["wrong_number"] },
-  { text: "no soy propietario", any_of: ["wrong_number"] },
+  { text: "esa no es mi casa", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Esa no es mi casa.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no es mi casa", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Esa casa no es mía", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no es mía", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "No soy el dueño", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no soy el dueno", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no soy dueña", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "No soy la propietaria", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "no soy propietario", any_of: ["wrong_number", "property_specific_non_owner"] },
   { text: "La vendí", any_of: ["sold_property"] },
   { text: "la vendi", any_of: ["sold_property"] },
   { text: "Ya la vendí", any_of: ["sold_property"] },
   { text: "ya lo vendi", any_of: ["sold_property"] },
   { text: "La vendimos el año pasado", any_of: ["sold_property"] },
   { text: "vendí esa casa", any_of: ["sold_property"] },
-  { text: "número equivocado", any_of: ["wrong_number"] },
+  { text: "número equivocado", any_of: ["wrong_number", "property_specific_non_owner"] },
 
   // ── Property mismatch (wrong property, not wrong person) ───────────────────
   { text: "Wrong house.", any_of: ["property_correction"] },
@@ -123,23 +123,26 @@ const NEGATION_CASES = [
 
   // ── Family decision-maker / referral ───────────────────────────────────────
   // Explicit "not me" is a personal ownership denial → wrong_number routing.
-  { text: "My mother owns it, not me.", any_of: ["wrong_number"] },
-  { text: "my brother owns it not me", any_of: ["wrong_number"] },
+  { text: "My mother owns it, not me.", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "my brother owns it not me", any_of: ["wrong_number", "property_specific_non_owner"] },
   // Family-only language without a personal denial stays deliberately unclear
   // (human lane) — never false ownership, never a forced decline.
   { text: "My mother owns it.", any_of: ["unclear"] },
   { text: "My wife owns the property, talk to her", any_of: ["unclear", "callback_requested"] },
 
   // ── Compound / contrast statements ─────────────────────────────────────────
-  { text: "Yes I got your text but that's not my house", any_of: ["wrong_number"] },
-  { text: "Yes, I know the house, but I do not own it", any_of: ["wrong_number"] },
-  { text: "I own the one next door, but that's not my property", any_of: ["wrong_number"] },
+  { text: "Yes I got your text but that's not my house", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "Yes, I know the house, but I do not own it", any_of: ["wrong_number", "property_specific_non_owner"] },
+  { text: "I own the one next door, but that's not my property", any_of: ["wrong_number", "property_specific_non_owner"] },
   { text: "no, sold that property already", any_of: ["sold_property"] },
 
   // ── Genuinely ambiguous — unclear, never a guessed ownership ───────────────
   { text: "It's complicated right now", any_of: ["unclear"] },
   { text: "The ownership situation is complicated", any_of: ["unclear"] },
 ];
+
+// RC 8.5.15 (owner 2026-10-14): a written ownership denial may now resolve to
+// property_specific_non_owner (property-scoped, never a wrong-number suppression).
 
 // Positive controls: real affirmations must STILL confirm ownership, proving
 // the negation scope does not overfire.

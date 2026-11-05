@@ -1,5 +1,6 @@
 -- Verification: Name guard health checks.
--- Run with: psql "$DATABASE_URL" -f scripts/verify-name-guards.sql
+-- Run with (from apps/api; the role-enforced read-only diagnostics credential, LC_RO_OPS_DIAG_DB_URL_FILE):
+--   node ../../scripts/lib/prod-db-credentials.mjs psql ops_diag -f scripts/verify-name-guards.sql
 -- All "must_be_zero" rows must return 0.
 
 -- 1. Sendable rows with blank greeting (must be 0).

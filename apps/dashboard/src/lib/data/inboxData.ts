@@ -296,6 +296,13 @@ export interface SendNowResult {
   backendReason?: string | null
   hardBlock?: boolean
   operatorOverrideAllowed?: boolean
+  /**
+   * rc-8.5.15.1: the seller was already asked for their asking price and the
+   * repeat-asking-price guard cancelled this send. The operator may send a price
+   * CLARIFICATION with an audited override (checkbox + reason); suppression /
+   * STOP / legal / contact-window guards still apply to that send.
+   */
+  repeatAskOverrideAllowed?: boolean
   insertPayloadKeys: string[]
   suppressionBlocked: boolean
   sendRouteUsed: 'provider_immediate' | 'send_queue_queued' | 'none'
@@ -320,6 +327,11 @@ interface InboxSendOptions extends InboxTemplateSendOptions {
   fromPhoneNumber?: string
   clientSendId?: string | null
   operatorOverride?: boolean
+  /**
+   * rc-8.5.15.1: audited override of the repeat-asking-price guard ONLY. The
+   * server records it with the verified operator (never a client-supplied actor).
+   */
+  repeatAskOverrideReason?: string | null
   /** Skip the inbox "Hi there" render guard — required for pre-rendered map ownership_check sends. */
   skipRenderGuard?: boolean
   messageType?: string
@@ -5148,6 +5160,9 @@ export const sendInboxMessageNow = async (
       send_failed: 'Provider send failed.',
       provider_configuration_missing: 'SMS provider is not configured. Contact ops.',
       queue_insert_failure: 'Queue insertion failed before provider send could start.',
+      repeat_asking_price_blocked: 'This seller was already asked for their asking price — the repeat was not sent.',
+      repeat_ask_override_actor_required: 'The override needs a signed-in operator.',
+      repeat_ask_override_reason_required: 'The override needs a reason (at least 10 characters).',
     }
     const sanitizedDetailReason = detailReason
       .replace(/\[textgrid\]\s*/gi, '')
@@ -5385,6 +5400,10 @@ export const sendInboxMessageNow = async (
     operator_override: options?.operatorOverride === true,
     force: options?.operatorOverride === true,
   }
+  if (options?.repeatAskOverrideReason && options.repeatAskOverrideReason.trim()) {
+    insertPayload.repeat_ask_override = true
+    insertPayload.override_reason = options.repeatAskOverrideReason.trim()
+  }
 
   if (options?.sellerFirstName) insertPayload.seller_first_name = options.sellerFirstName
   if (options?.sellerDisplayName) insertPayload.seller_display_name = options.sellerDisplayName
@@ -5527,6 +5546,7 @@ export const sendInboxMessageNow = async (
       backendReason: simplified.reason || null,
       hardBlock: upstream.hard_block === true,
       operatorOverrideAllowed: upstream.operator_override_allowed === true,
+      repeatAskOverrideAllowed: upstream.repeat_ask_override_allowed === true,
       insertPayloadKeys,
       suppressionBlocked: simplified.reason === 'compliance_blocked' || simplified.reason === 'hard_compliance_block',
       sendRouteUsed: 'provider_immediate',

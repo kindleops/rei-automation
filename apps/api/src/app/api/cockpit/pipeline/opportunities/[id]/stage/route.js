@@ -3,6 +3,9 @@ import { transitionOpportunityStage } from '@/lib/domain/opportunity/opportunity
 import { supabase } from '@/lib/supabase/client.js';
 import { beginCorrectionCapture } from '@/lib/domain/intelligence/runtime/observation.js';
 import { corsHeaders, ensureMutationAuth, unauthorizedJson } from '../../../_shared.js';
+// R1: source / actor / offer events / valuations are server-owned (lib/domain/opportunity/stage-route-input.js)
+import { stageTransitionInput } from '@/lib/domain/opportunity/stage-route-input.js';
+
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +31,9 @@ export async function PATCH(request, { params }) {
         return before ? [{ subject: { type: 'opportunity', id: params.id }, field: 'acquisition_stage', original: before.acquisition_stage ?? null, corrected: null }] : [];
       },
     });
-    const result = await transitionOpportunityStage(params.id, body);
+    const derived = stageTransitionInput(body, auth.auth);
+    if (!derived.ok) return NextResponse.json(derived, { status: 400, headers });
+    const result = await transitionOpportunityStage(params.id, derived.input);
     if (!result.ok) {
       return NextResponse.json(result, { status: 422, headers });
     }

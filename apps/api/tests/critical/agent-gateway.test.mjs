@@ -83,8 +83,11 @@ test('import graph: lib/agent imports no provider SDK / HTTP client and never ca
 test('the only dynamic imports in lib/agent are the lazy service resolvers (read adapters, capability domain services)', () => {
   const strip = (src) => src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
   const hits = agentFiles().filter((f) => f.endsWith('.js') && /(?<![\w.])import\s*\(/.test(strip(readFileSync(f, 'utf8'))))
-  assert.deepEqual(hits.map((f) => f.replace(AGENT_DIR, '')).sort(), ['capabilities/services.js', 'tools/adapters/_read-tool.js'])
-  // capability services: every specifier is a static string literal (no computed module paths)
-  const src = strip(readFileSync(`${AGENT_DIR}capabilities/services.js`, 'utf8'))
-  for (const m of src.matchAll(/(?<![\w.])import\s*\(([^)]*)\)/g)) assert.match(m[1].trim(), /^'[@./][^']+'$/, m[0])
+  // RC 8.5.15: review/conversation-ai-control.js lazily resolves the runtime store + agent pool
+  assert.deepEqual(hits.map((f) => f.replace(AGENT_DIR, '')).sort(), ['capabilities/services.js', 'review/conversation-ai-control.js', 'tools/adapters/_read-tool.js'])
+  // every specifier is a static string literal (no computed module paths)
+  for (const rel of ['capabilities/services.js', 'review/conversation-ai-control.js']) {
+    const src = strip(readFileSync(`${AGENT_DIR}${rel}`, 'utf8'))
+    for (const m of src.matchAll(/(?<![\w.])import\s*\(([^)]*)\)/g)) assert.match(m[1].trim(), /^'[@./][^']+'$/, `${rel}: ${m[0]}`)
+  }
 })

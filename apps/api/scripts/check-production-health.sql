@@ -1,5 +1,6 @@
 -- Production health checks for queue + messaging pipeline.
--- Run with: psql "$DATABASE_URL" -f scripts/check-production-health.sql
+-- Run with (from apps/api; the role-enforced read-only diagnostics credential, LC_RO_OPS_DIAG_DB_URL_FILE):
+--   node ../../scripts/lib/prod-db-credentials.mjs psql ops_diag -f scripts/check-production-health.sql
 
 -- 1) System control flags (stored as key/value text).
 select

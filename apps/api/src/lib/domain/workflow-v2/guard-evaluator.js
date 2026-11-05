@@ -2,7 +2,7 @@
 // Dispatches all guard.* node types against enrollment context.
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
-import { evaluateContactWindow } from '@/lib/supabase/sms-engine.js';
+import { evaluateRecipientWindowForEntry } from '@/lib/supabase/sms-engine.js';
 import { buildActionDedupeKey } from '@/lib/domain/workflow-v2/idempotency.js';
 import { isGuardNode } from '@/lib/domain/workflow-v2/node-registry.js';
 
@@ -128,9 +128,13 @@ async function evaluateDuplicateMessage(node, enrollment, deps) {
 
 function evaluateContactWindowGuard(enrollment) {
   const ctx = enrollment?.context ?? {};
-  const windowCheck = evaluateContactWindow({
-    timezone: ctx.timezone ?? ctx.market_timezone ?? 'America/Chicago',
-    contact_window: ctx.contact_window ?? null,
+  // rc-8.5.21 (criterion 14): the dispatcher's recipient-window functions, recipient phone first
+  const windowCheck = evaluateRecipientWindowForEntry({
+    entry: 'followup',
+    recipient_phone: ctx.to_phone_number ?? ctx.phone ?? ctx.to_phone ?? null,
+    timezone: ctx.timezone ?? ctx.market_timezone ?? null,
+    property_geography: ctx.property_address_state ?? ctx.property_state ? { state: ctx.property_address_state ?? ctx.property_state, zip: ctx.property_address_zip ?? ctx.property_zip ?? null } : null,
+    mailing_geography: ctx.owner_address_state ?? ctx.mailing_state ? { state: ctx.owner_address_state ?? ctx.mailing_state, zip: null } : null,
   });
   return windowCheck.allowed
     ? guardResult(true, 'inside_contact_window')

@@ -1,0 +1,47 @@
+{
+  "step": "guard",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_pi",
+  "admin_url": "postgresql://postgres@/postgres?host=/tmp/lc-mt-pi/pc&port=54398",
+  "started_at": "2026-10-30T15:33:52.665Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "/tmp/lc-mt-pi/pc"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "unix-socket",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": false,
+    "target": null
+  },
+  "status": "pass",
+  "results": {
+    "verdict": "pass",
+    "checks": [
+      "loopback / unix socket only (LC_DISPOSABLE_DB_HOST ignored)",
+      "no hosted / remote hint in the URL",
+      "database name lc_prodcopy_<tag>",
+      "server address loopback",
+      "no Supabase platform role on the server"
+    ],
+    "static": "pass",
+    "hosts": [
+      "/tmp/lc-mt-pi/pc"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "unix-socket",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": false,
+    "target": null
+  },
+  "finished_at": "2026-10-30T15:33:52.695Z",
+  "ms": 30
+}

@@ -256,7 +256,8 @@ test("inactive emoji-confirmation rows do not matter for a typed 👍 to the own
 
 test("🖕 is hostile: no reply and no DNC write", async () => {
   const { inserts, classification, suppressionWrites } = await runInbound({ message: "🖕", priorBody: OWNERSHIP_Q });
-  assert.equal(classification.primary_intent, "hostile_or_legal");
+  // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
+  assert.equal(classification.primary_intent, "hostile_or_troll");
   assert.equal(classification.automation_decision.suppression_action, "none");
   assert.equal(inserts.length, 0);
   assert.equal(suppressionWrites.length, 0, "hostility is never a global DNC");

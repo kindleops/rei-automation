@@ -58,6 +58,8 @@ const SOURCE_SURFACE_ALIASES = Object.freeze({
   followup: "follow_up_scheduler",
   auto_reply: "auto_reply",
   autoreply: "auto_reply",
+  // 8.5.16: the native AI conversation engine (origin ai_generated)
+  ai_conversation: "ai_conversation",
   inbound_autopilot: "auto_reply",
   seller_stage_reply: "auto_reply",
 });
@@ -196,6 +198,9 @@ export function buildOutboundProvenance(payload = {}) {
       null,
     next_action: clean(metadata.next_action) || clean(payload.next_action) || null,
     followup_intent: clean(metadata.followup_intent) || null,
+    // 8.5.16 unified origin: stamped ONLY when the row states one (the AI path), so every
+    // existing producer's provenance object is unchanged
+    ...(clean(payload.message_origin) || clean(metadata.message_origin) ? { message_origin: clean(payload.message_origin) || clean(metadata.message_origin) } : {}),
   };
 }
 

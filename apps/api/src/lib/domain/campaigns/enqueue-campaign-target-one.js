@@ -183,6 +183,7 @@ export const ENQUEUE_REASON = {
   DNC: 'recipient_on_suppression_list',
   AUTOMATION_SUPPRESSED: 'automation_suppression_active',
   THREAD_SUPPRESSED: 'recipient_thread_suppressed',
+  LEAD_ARCHIVED: 'recipient_lead_archived',
   PRIOR_CONTACT: 'prior_contact_exists',
   ALREADY_QUEUED: 'already_queued',
   INVALID_RECIPIENT: 'invalid_recipient_number',
@@ -395,7 +396,7 @@ async function neutralizeQueueRow(supabase, queueRowId, reason) {
  * Deliberately narrow: active, healthy, with remaining daily capacity, and
  * never equal to the recipient. Lowest usage first so canary traffic spreads.
  */
-async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
+export async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
   const { data, error } = await supabase
     .from('textgrid_numbers')
     .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score, health_state, cooling_until')
@@ -532,7 +533,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   // none). The thread key is the seller's E.164.
   const { data: threadRows, error: threadErr } = await supabase
     .from('inbox_thread_state')
-    .select('thread_key, is_suppressed, contactability_status')
+    .select('thread_key, is_suppressed, contactability_status, is_archived, archive_scope, disposition')
     .eq('thread_key', recipient)
     .range(0, 4)
   if (threadErr) throw threadErr
@@ -541,6 +542,14 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   )
   if (suppressedThread) {
     return fail(ENQUEUE_REASON.THREAD_SUPPRESSED, `${recipient.slice(-4)} ${suppressedThread.is_suppressed === true ? 'is_suppressed' : clean(suppressedThread.contactability_status)}`)
+  }
+  // link 10: an archived lead (sold, unavailable, duplicate, dead — archived in agntei or LeadCommand) or one whose
+  // property was sold / that duplicates another lead is out of active work: no campaign touches it
+  const archivedThread = (threadRows || []).find(
+    (row) => (row?.is_archived === true && clean(row?.archive_scope || 'lead') === 'lead') || ['sold', 'duplicate'].includes(clean(row?.disposition).toLowerCase())
+  )
+  if (archivedThread) {
+    return fail(ENQUEUE_REASON.LEAD_ARCHIVED, `${recipient.slice(-4)} ${archivedThread.is_archived === true ? 'archived' : clean(archivedThread.disposition)}`)
   }
 
   // ── 6. Prior contact and live rows ──────────────────────────────────────

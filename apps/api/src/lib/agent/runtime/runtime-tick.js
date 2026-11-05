@@ -150,12 +150,12 @@ async function runJob({ store, handler, claim, deadlineAt, now }) {
  *   number in flight is what the DB granted: ≤ tick_max_jobs, ≤ max_concurrency_global live leases,
  *   ≤ the kind's max_concurrency. Default false (sequential, the R2 behaviour).
  */
-export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEFAULT_TICK_BUDGET_MS, now = () => Date.now(), maxJobs = null, minClaimMs = MIN_CLAIM_MS, safetyMs = SAFETY_MS, concurrent = false }) {
+export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEFAULT_TICK_BUDGET_MS, now = () => Date.now(), maxJobs = null, minClaimMs = MIN_CLAIM_MS, safetyMs = SAFETY_MS, concurrent = false, maintenance = [] }) {
   if (!store) throw new AgentError('RUNTIME_STORE_REQUIRED', 'store required')
   if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(String(workerId || ''))) throw new AgentError('RUNTIME_WORKER_INVALID', 'workerId must match ^[A-Za-z0-9_.:-]{1,80}$')
   const started = now()
   let budget = Math.min(Math.max(Number(budgetMs) || DEFAULT_TICK_BUDGET_MS, 500), TICK_HARD_MAX_MS)
-  const summary = { worker_id: workerId, blocked: null, reaped: null, schedules: null, claimed: 0, jobs: [], errors: [] }
+  const summary = { worker_id: workerId, blocked: null, reaped: null, schedules: null, maintenance: null, claimed: 0, jobs: [], errors: [] }
   const phase = async (name, fn) => {
     try {
       return await fn()
@@ -173,6 +173,19 @@ export async function runRuntimeTick({ store, handlers, workerId, budgetMs = DEF
     summary.reaped = await phase('reap', () => store.reap({ limit: 20 }))
     if (lim.emergency_stop) { summary.blocked = 'emergency_stop'; return summary }
     summary.schedules = await phase('schedules', () => store.enqueueDueSchedules({ limit: 10 }))
+    // rc-8.5.21 v4 (rt-cr-01): durable-work RECOVERY that must not depend on an optional (born-disabled)
+    // schedule — e.g. an inbound persisted with no decide job. Each entry is registered only when its own
+    // pipeline is live (the caller's env gates), is idempotent (the runtime's unique event keys), self-
+    // throttled, and runs BEFORE the claim so a recovered job can be claimed in this same tick. Codes /
+    // counts only; a failing entry is a phase error, never a tick failure.
+    if (Array.isArray(maintenance) && maintenance.length) {
+      summary.maintenance = []
+      for (const m of maintenance) {
+        if (typeof m?.run !== 'function') continue
+        const r = await phase(`maintenance:${String(m.name || 'task').slice(0, 40)}`, () => m.run({ store, now: new Date(now()).toISOString() }))
+        summary.maintenance.push({ name: String(m.name || 'task').slice(0, 40), ...(r && typeof r === 'object' ? r : { ran: r != null }) })
+      }
+    }
     const kinds = Object.keys(handlers || {})
     if (!kinds.length) { summary.blocked = 'no_handlers'; return summary }
     if (deadlineAt - now() < minClaimMs) { summary.blocked = 'budget_exhausted_before_claim'; return summary }
@@ -211,6 +224,7 @@ function heartbeatSummary(s) {
     outcomes: s.jobs.reduce((a, j) => ({ ...a, [j.outcome]: (a[j.outcome] || 0) + 1 }), {}),
     reaped: s.reaped,
     schedules: s.schedules,
+    maintenance: Array.isArray(s.maintenance) ? s.maintenance.length : null,
     errors: s.errors.map((e) => `${e.phase}:${e.code}`).slice(0, 10),
     elapsed_ms: s.elapsed_ms ?? null,
     budget_ms: s.budget_ms ?? null,

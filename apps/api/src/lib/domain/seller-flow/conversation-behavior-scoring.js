@@ -186,6 +186,8 @@ function scoreSentiment(sig) {
   const entries = [];
   if (sig.intents.has("hostile_or_legal"))
     entries.push({ kind: "intent", detail: "hostile_or_legal", weight: -0.9 });
+  if (sig.intents.has("hostile_or_troll"))
+    entries.push({ kind: "intent", detail: "hostile_or_troll", weight: -0.9 });
   if (sig.intents.has("opt_out"))
     entries.push({ kind: "intent", detail: "opt_out", weight: -0.7 });
   if (sig.intents.has("not_interested"))
@@ -221,6 +223,8 @@ function scoreHostility(sig) {
   const entries = [];
   if (sig.intents.has("hostile_or_legal"))
     entries.push({ kind: "intent", detail: "hostile_or_legal", weight: 0.9 });
+  if (sig.intents.has("hostile_or_troll"))
+    entries.push({ kind: "intent", detail: "hostile_or_troll", weight: 0.9 });
   if (sig.emotion === "frustrated")
     entries.push({ kind: "emotion", detail: "frustrated", weight: 0.5 });
   return aggregate(entries, { base_confidence: 0.7 }) || unscored();

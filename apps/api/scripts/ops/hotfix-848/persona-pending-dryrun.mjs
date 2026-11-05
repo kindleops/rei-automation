@@ -3,7 +3,7 @@
 // unchanged_*), current vs proposed body (seller name + address masked),
 // established persona(s) on the thread, template, schedule, prior delivery and
 // retry history. Recipient = masked last-4 + salted thread hash only.
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-dryrun.mjs --out=/path/dir
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-dryrun.mjs --out=/path/dir
 import { connectReadOnly, arg, writeOut, csv } from "../r10-safety/_ro-db.mjs";
 import { CAMPAIGNS, last4, loadHistory, loadPendingRows, maskBody, planRow, summarize, threadHash } from "./persona-plan.mjs";
 

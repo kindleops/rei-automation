@@ -4,6 +4,7 @@
  * Invalid / missing / stale / conflicting context → status only; no override.
  */
 
+import { isDirectNo, isBareNotInterested } from './ownership-answer-forms.js';
 import { matchBareNegative, matchOfferDeflection } from "@/lib/domain/classification/seller-reply-families.js";
 
 /** Strict E.164 for conversation-context binding (matches Brain identity rules). */
@@ -32,6 +33,9 @@ export const APPROVED_OUTBOUND_USE_CASES = Object.freeze([
   // that produced it.
   'rent_check',
   'occupancy_check',
+  // RC 8.5.15: "Is it alright if I check back down the road?" (future_nurture /
+  // not_interested / not_ready templates) -- permission to contact again.
+  'contact_permission',
   'general_followup',
 ]);
 
@@ -45,6 +49,7 @@ export const APPROVED_QUESTION_TYPES = Object.freeze([
   'condition',
   'motivation',
   'timeline',
+  'contact_permission',
   'other',
 ]);
 
@@ -249,6 +254,7 @@ function inferQuestionType(useCase) {
     condition_check: 'condition',
     motivation_check: 'motivation',
     timeline_check: 'timeline',
+    contact_permission: 'contact_permission',
     general_followup: 'other',
   };
   return map[useCase] || 'other';
@@ -299,6 +305,7 @@ const EXPLICIT_DISOWN_RE =
   /^(?:wrong number|wrong house|wrong property|not mine|not my house|never owned(?: it)?|do not own it|sold it|i sold it|already sold|sold already)$/u;
 // round 9: "No I never did sorry" to "Are you still the owner?" -- they never
 // owned it: a non-owner, closed (owner rule). "Sold 💯" -- a former owner.
+export const NEVER_OWNED_LONG_RE = /^(?:no+[\s,.!]*)?(?:i\s+)?(?:have\s+)?never\s+(?:have|did|owned(?:\s+(?:it|that|this|that\s+(?:house|property|home|place)|the\s+(?:house|property|home|place)))?|have\s+owned(?:\s+(?:it|that|this))?)(?:\s+(?:sorry|lol|bro|sir|ma'?am))?[\s.!]*$/iu;
 const NEVER_OWNED_RE = /^(?:no i never did|i never did|never did|no never|no i never owned it|no i never have|never have)$/u;
 const BARE_SOLD_RE = /^(?:sold|it is sold|it sold)$/u;
 
@@ -341,29 +348,83 @@ const BARE_NO_RE = /^(?:no+|nope|nah|nel|no i do not|no i dont|i do not|no i am 
 export { BARE_NO_RE };
 const NO_LONGER_OWNER_RE = /^(?:not anymore|no longer|not any more|ya no|no ya no)$/u;
 
-// OWNER DECISION 2026-10-13 (supersedes 2026-10-06): a bare negative ("No",
-// "Nope", "No!!!!!", "Not really", "No gracias Carlos!") to the S1 ownership
-// question, with NO ownership-denial words, is a NOT INTERESTED: the same
-// 30-day nurture as an explicit "not interested" -- never wrong_number, never
-// suppressed (rule ctx_bare_no_after_ownership_check_not_interested; the
-// family is seller-reply-families.js matchBareNegative). That is the default
-// 'not_interested' mode. Ownership answers with denial words ("No I don't",
-// "No I'm not", "Not anymore") keep the clarify hold below.
-// LC_BARE_NO_OWNERSHIP_MODE=clarify restores the 2026-10-06 behaviour (bare
-// "No" held `unclear` for the ownership_connection_clarifier), and
-// LC_BARE_NO_OWNERSHIP_MODE=non_owner binds it straight to wrong_number.
-export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['not_interested', 'clarify', 'non_owner']);
+// OWNER DECISION 2026-10-14 (RC 8.5.15; supersedes 2026-10-13 and 2026-10-06).
+// A bare "No" means what it answers:
+//  - to the S1 OWNERSHIP question ("Do you still own 1 Main St?") it DENIES
+//    ownership. Ownership is now unverified for this recipient x property:
+//    record it, stop property-specific outreach to this recipient for this
+//    property pending verification, schedule NO nurture, ask NO further
+//    ownership question, and never treat them as a qualified seller. The phone
+//    is never suppressed globally (their other properties stay contactable);
+//    only an explicit stop/opt-out suppresses.
+//    (rule ctx_bare_no_after_ownership_check_ownership_unverified ->
+//    primary_intent property_specific_non_owner, labels ownership_denied +
+//    ownership_unverified; the existing property-scoped non-owner lane.)
+//  - to the S2 "would you consider selling" question it is disinterest: the
+//    EXISTING 30-day nurture (owner decision 2026-10-14, locked).
+//  - to the condition question it reports no repairs (ctx_no_after_condition_no_repairs).
+//  - to "can we check back / contact you again" it ends outreach in that scope
+//    (ctx_no_after_contact_permission).
+// 8.5.13 had made the S1 bare "No" a not_interested 30-day nurture (rule
+// ctx_bare_no_after_ownership_check_not_interested); that is now the explicit
+// 'not_interested' mode only. A polite decline ("No thanks", "No gracias
+// Carlos!") to the ownership question still reads as a decline (not a denial)
+// in every mode: it answers a sales approach, not the ownership fact.
+// LC_BARE_NO_OWNERSHIP_MODE: ownership_unverified (default) | not_interested |
+// clarify | non_owner (wrong_number lane, owner-scoped).
+export const BARE_NO_OWNERSHIP_MODES = Object.freeze(['ownership_unverified', 'not_interested', 'clarify', 'non_owner']);
+export const DEFAULT_BARE_NO_OWNERSHIP_MODE = 'ownership_unverified';
 export function bareNoOwnershipMode() {
   const raw = String(process.env.LC_BARE_NO_OWNERSHIP_MODE ?? '').trim().toLowerCase();
   if (raw === 'non_owner') return 'non_owner';
   if (raw === 'clarify') return 'clarify';
-  return 'not_interested';
+  if (raw === 'not_interested') return 'not_interested';
+  return DEFAULT_BARE_NO_OWNERSHIP_MODE;
 }
+
+const POLITE_DECLINE_TAIL_RE = /(?:^|\s)(?:thanks|thank\s+you|thank\s+u|thx|ty|gracias)$/u;
+const EMOJI_SENTIMENT_RE = /\p{Extended_Pictographic}/u;
+const MARKET_VALUE_ANSWER_RE = /^(?:(?:no+|nope|not\s+really|not\s+yet)[\s,.!]+(?:but\s+|just\s+)?)?(?:(?:the\s+|fair\s+|current\s+)?market\s+(?:value|price|rate)|fmv|whatever\s+(?:it'?s|its|it\s+is)\s+worth|what(?:ever)?\s+it'?s\s+worth|(?:el\s+)?valor\s+(?:de\s+|del\s+)?mercado|precio\s+de\s+mercado)[\s.!]*$/iu;
+const NO_SOMEONE_ELSE_OWNS_RE = /^\s*(?:no+|nope|nah)\b[\s,.!-]+(?:it\s+|that\s+)?(?:should\s+be|belongs\s+to|is\s+owned\s+by|owned\s+by|is\s+the\s+city|is\s+the\s+county)\b[^?]{0,80}$/iu;
 
 // "Possibly" / "Maybe" (2026-10-06): to OUR proposal question it is an open
 // door on price (latent_interest -> the price question); to anything else it
 // binds nothing.
 const MAYBE_TOKENS = '(?:possibly|maybe|perhaps|potentially|could be|might be|maybe so|tal vez|talvez|quizas|quizás|puede ser|a lo mejor)';
+
+/** The S1 ownership-denied / unverified result (RC 8.5.15; see bareNoOwnershipMode). */
+function ownershipUnverifiedResult(messageText, validated, rule_id) {
+  return {
+    applied: true,
+    primary_intent: 'property_specific_non_owner',
+    labels: ['ownership_denied', 'ownership_unverified', 'bare_negative_to_ownership_question'],
+    rule_id,
+    confidence: 0.86,
+    rationale: 'bare_no_to_ownership_question_denies_ownership_unverified_for_this_property',
+    evidence_span: String(messageText).trim(),
+    context_message_id: validated.context.last_outbound_message_id,
+    context_use_case: validated.context.last_outbound_use_case,
+    context_age_ms: validated.context.context_age_ms,
+  };
+}
+
+
+// rc-8.5.21: engaged replies to the proposal question, and a greeting in front of a short answer
+const LISTENING_RE = /^(?:(?:ok(?:ay)?|sure|yes|yeah|go\s+ahead)[\s,.!]+)?(?:i'?m\s+(?:listening|all\s+ears)|im\s+(?:listening|all\s+ears)|listening|all\s+ears|go\s+ahead|tell\s+me\s+more|let'?s\s+hear\s+it|i'?m\s+open|im\s+open|open\s+to\s+it)[\s.!?]*$/iu;
+const AMOUNT_QUESTION_RE = /^(?:(?:ok(?:ay)?|sure|yes|yeah|maybe|well)[\s,.!]+)?(?:what\s+(?:amount|number|figure|price|offer)(?:\s+(?:are\s+you|r\s+u|would\s+you|you)\s+(?:thinking|offering|willing\s+to\s+pay))?|what'?s\s+(?:the|your)\s+(?:amount|number|figure|offer)|what\s+(?:are|r)\s+(?:you|u)\s+(?:offering|thinking)|how\s+much\s+(?:are\s+you|r\s+u|would\s+you)\s+(?:offering|thinking|pay|give))[\s.!?]*$/iu;
+const GREETING_PREFIX_RE = /^\s*(?:hi|hey|hello|hiya|howdy|good\s+(?:morning|afternoon|evening)|hola|buenos\s+d[ií]as|buenas(?:\s+tardes)?)\b[\s,.!-]*/iu;
+export function stripGreetingPrefix(text, names = []) {
+  let t = String(text ?? '').trim();
+  if (!GREETING_PREFIX_RE.test(t)) return t;
+  t = t.replace(GREETING_PREFIX_RE, '');
+  for (const n of names) {
+    const first = String(n || '').trim().split(/\s+/)[0];
+    if (first && first.length >= 2) t = t.replace(new RegExp(`^${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[\\s,.!-]*`, 'iu'), '');
+  }
+  // any single capitalised token right after the greeting is an addressee ("Hi Jake. Yes")
+  t = t.replace(/^(?!(?:Yes|Yeah|Yep|Yup|No|Nope|Nah|Not|Never|Sure|Si|Correct|Ok|Okay|I|Im|It|Its|That|This|We|Maybe)\b)[A-Z][a-z]{1,15}\b[\s,.!-]+(?=\S)/u, '');
+  return t.trim();
+}
 
 export function isShortContextualReply(text) {
   const t = normalizeShortReply(text);
@@ -384,23 +445,76 @@ export function applyContextualShortReply(messageText, validated) {
   if (!validated || validated.context_status !== 'valid' || !validated.context) {
     return { applied: false };
   }
-  // 2026-10-13: a bare negative to the S1 ownership question (no ownership-
-  // denial words; see bareNoOwnershipMode) is a decline -> 30-day nurture.
+  // A bare negative to the S1 ownership question (see bareNoOwnershipMode).
   // Checked before the short-reply gate so a sign-off name ("No gracias
   // Carlos!") cannot hide it.
   {
     const uc = validated.context.last_outbound_use_case;
     const qt = validated.context.last_outbound_question_type;
-    if ((uc === 'ownership_check' || qt === 'ownership') && bareNoOwnershipMode() === 'not_interested') {
+    const mode = bareNoOwnershipMode();
+    if ((uc === 'ownership_check' || qt === 'ownership') && (mode === 'not_interested' || mode === 'ownership_unverified')) {
       const bare = matchBareNegative(messageText, {
         names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
       });
+      // OWNER DECISION 2026-10-17 (supersedes 831df6cd / RC 8.5.15): a polite tail ("No thanks",
+      // "No gracias Carlos!") to OUR ownership question is DECLINED ENGAGEMENT with ownership
+      // UNVERIFIED (ownership_declined_unverified): a property × contact no-recontact hold — never the
+      // 30-day selling nurture, never verified non-ownership.
+      const polite = Boolean(bare && POLITE_DECLINE_TAIL_RE.test(bare.canonical));
+      // rc-8.5.21 (owner P0 2026-10-16, investigator spec d): a bare negative to OUR ownership
+      // question — with or without an emoji ("No 👎" is in the 103-thread denial cohort) — is the
+      // PROPERTY-SCOPED ownership denial; not_interested only after S2 or later.
+      const emoji = Boolean(bare && EMOJI_SENTIMENT_RE.test(String(messageText)));
+      // OWNER DECISIONS LOCKED 2026-10-17: "Answer is no" / "No it is not" to OUR ownership question is
+      // the property-scoped denial; a bare "Not interested" (no yes, no sale words) is declined
+      // engagement with ownership UNVERIFIED (no nurture; property × contact hold).
+      if (mode === 'ownership_unverified' && isDirectNo(messageText)) {
+        return ownershipUnverifiedResult(messageText, validated, 'ctx_direct_no_after_ownership_check_ownership_unverified');
+      }
+      if (mode === 'ownership_unverified' && isBareNotInterested(messageText)) {
+        return {
+          applied: true,
+          primary_intent: 'ownership_declined_unverified',
+          labels: ['ownership_declined_unverified', 'ownership_unverified', 'not_interested_to_ownership_question'],
+          rule_id: 'ctx_not_interested_after_ownership_check_declined_unverified',
+          confidence: 0.86,
+          rationale: 'bare_not_interested_to_ownership_question_declines_engagement_ownership_unverified',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
+      if (bare && mode === 'ownership_unverified' && polite) {
+        return {
+          applied: true,
+          primary_intent: 'ownership_declined_unverified',
+          labels: ['ownership_declined_unverified', 'ownership_unverified', 'polite_decline_to_ownership_question'],
+          rule_id: 'ctx_polite_no_after_ownership_check_declined_unverified',
+          confidence: 0.86,
+          rationale: 'polite_negative_to_ownership_question_declines_engagement_ownership_unverified',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
+      if (bare && mode === 'ownership_unverified' && !polite) {
+        return ownershipUnverifiedResult(messageText, validated, emoji ? 'ctx_emoji_no_after_ownership_check_ownership_unverified' : 'ctx_bare_no_after_ownership_check_ownership_unverified');
+      }
+      // "Nope should be the city of Jennings" (eval #131): a "No" that names
+      // someone else as the owner. A phone number in it is a referral -- not here.
+      if (!bare && mode === 'ownership_unverified' && NO_SOMEONE_ELSE_OWNS_RE.test(String(messageText)) && !/\d{3}/.test(String(messageText))) {
+        return ownershipUnverifiedResult(messageText, validated, 'ctx_no_someone_else_owns_after_ownership_check');
+      }
       if (bare) {
         return {
           applied: true,
           primary_intent: 'not_interested',
           labels: ['not_interested', 'bare_negative_to_ownership_question'],
-          rule_id: 'ctx_bare_no_after_ownership_check_not_interested',
+          rule_id: polite && mode === 'ownership_unverified'
+            ? 'ctx_polite_no_after_ownership_check_not_interested'
+            : 'ctx_bare_no_after_ownership_check_not_interested',
           confidence: 0.88,
           rationale: 'bare_negative_without_ownership_denial_to_ownership_question_is_a_decline',
           evidence_span: String(messageText).trim(),
@@ -409,6 +523,53 @@ export function applyContextualShortReply(messageText, validated) {
           context_age_ms: validated.context.context_age_ms,
         };
       }
+    }
+  }
+  // RC 8.5.15: a bare / polite negative ("No", "No. Thank you", "Nope thanks")
+  // to the S2 interest question is a decline of THAT question -- the same rule
+  // as a short "No" (ctx_no_after_proposal_interest): the 30-day nurture.
+  // A "Sold" stays with the sold detector.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    if (uc === 'proposal_interest' || uc === 'proposal_request') {
+      const bare = matchBareNegative(messageText, {
+        names: [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean),
+      });
+      if (bare) {
+        return {
+          applied: true,
+          primary_intent: 'not_interested',
+          labels: ['not_interested', 'declined_s2_interest_question'],
+          rule_id: 'ctx_no_after_proposal_interest',
+          confidence: 0.88,
+          rationale: 'bare_negative_bound_to_proposal_interest_question',
+          evidence_span: String(messageText).trim(),
+          context_message_id: validated.context.last_outbound_message_id,
+          context_use_case: uc,
+          context_age_ms: validated.context.context_age_ms,
+        };
+      }
+    }
+  }
+  // RC 8.5.15 (eval #20): "market value" / "No but market value" / "whatever
+  // it's worth" to OUR asking-price question names no number: an absent value
+  // (the flow advances to condition), never latent interest that re-asks price.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'asking_price' || qt === 'asking_price') && MARKET_VALUE_ANSWER_RE.test(String(messageText).trim())) {
+      return {
+        applied: true,
+        primary_intent: 'asking_price_absent',
+        labels: ['asking_price_absent', 'asking_price_market_value'],
+        rule_id: 'ctx_market_value_after_asking_price',
+        confidence: 0.86,
+        rationale: 'market_value_names_no_number_after_asking_price_question',
+        evidence_span: String(messageText).trim(),
+        context_message_id: validated.context.last_outbound_message_id,
+        context_use_case: uc,
+        context_age_ms: validated.context.context_age_ms,
+      };
     }
   }
   // 2026-10-13: "You tell me" to OUR asking-price question turns it back on
@@ -429,6 +590,42 @@ export function applyContextualShortReply(messageText, validated) {
         context_use_case: uc,
         context_age_ms: validated.context.context_age_ms,
       };
+    }
+  }
+  // rc-8.5.21 (opportunity desk 2026-10-16): engaged replies to OUR interest question were tagged
+  // `unclear` ("I'm listening", "What amount ?"): read against the question they answer.
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if (uc === 'proposal_interest' || uc === 'proposal_request' || qt === 'proposal_interest') {
+      const body = String(messageText).trim()
+      const ctxBase = { evidence_span: body, context_message_id: validated.context.last_outbound_message_id, context_use_case: uc, context_age_ms: validated.context.context_age_ms }
+      if (AMOUNT_QUESTION_RE.test(body)) {
+        return { applied: true, primary_intent: 'asks_offer', labels: ['asks_offer', 'amount_question_after_proposal_interest'], rule_id: 'ctx_amount_question_after_proposal_interest', confidence: 0.86, rationale: 'seller_asks_our_number_in_answer_to_the_proposal_question', ...ctxBase }
+      }
+      if (LISTENING_RE.test(body)) {
+        return { applied: true, primary_intent: 'interested', labels: ['interested', 'listening_after_proposal_interest'], rule_id: 'ctx_listening_after_proposal_interest', confidence: 0.86, rationale: 'seller_invites_the_proposal_in_answer_to_the_proposal_question', ...ctxBase }
+      }
+    }
+  }
+  // rc-8.5.21: "No never have" / "never owned it" / "I have never owned that" to OUR ownership
+  // question: never owned — the property-scoped denial (never `unclear`, never a phone suppression)
+  {
+    const uc = validated.context.last_outbound_use_case;
+    const qt = validated.context.last_outbound_question_type;
+    if ((uc === 'ownership_check' || qt === 'ownership') && NEVER_OWNED_LONG_RE.test(String(messageText).trim())) {
+      const r = ownershipUnverifiedResult(messageText, validated, 'ctx_never_owned_after_ownership_check');
+      return { ...r, labels: [...r.labels, 'never_owned'], confidence: 0.9 };
+    }
+  }
+  // rc-8.5.21: a greeting / our persona's name in front of a short answer ("Hi Jake. Yes",
+  // "Hello, no") answers the same question as the bare answer: strip it and read the rest.
+  {
+    const names = [validated.context.last_outbound_agent, validated.context.last_outbound_addressee].filter(Boolean)
+    const stripped = stripGreetingPrefix(messageText, names)
+    if (stripped && stripped !== String(messageText).trim()) {
+      const r = applyContextualShortReply(stripped, validated)
+      if (r?.applied) return { ...r, rule_id: `${r.rule_id}_after_greeting`, evidence_span: String(messageText).trim() }
     }
   }
   if (!isShortContextualReply(messageText)) {
@@ -507,6 +704,23 @@ export function applyContextualShortReply(messageText, validated) {
         ...base,
       };
     }
+    if (useCase === 'contact_permission' || qType === 'contact_permission') {
+      // RC 8.5.15: "Yes" to "is it alright if I check back?" grants a later
+      // check-in; it never confirms ownership or interest. A person decides
+      // (the same review outcome as before this question had a context).
+      return {
+        applied: true,
+        primary_intent: 'unclear',
+        labels: ['contact_permission_granted'],
+        rule_id: 'ctx_yes_after_contact_permission',
+        force_unclear: true,
+        confidence: 0.6,
+        rationale: 'short_yes_to_permission_to_contact_again_is_not_ownership_or_interest',
+        evidence_span: String(messageText).trim(),
+        human_review: true,
+        ...base,
+      };
+    }
     if (useCase === 'condition_check' || qType === 'condition') {
       return {
         applied: true,
@@ -525,16 +739,10 @@ export function applyContextualShortReply(messageText, validated) {
 
   if (isNo) {
     if ((useCase === 'ownership_check' || qType === 'ownership') && NEVER_OWNED_RE.test(t)) {
-      return {
-        applied: true,
-        primary_intent: 'wrong_number',
-        labels: ['ownership_denied', 'never_owned'],
-        rule_id: 'ctx_never_owned_after_ownership_check',
-        confidence: 0.9,
-        rationale: 'never_owned_bound_to_validated_ownership_question',
-        evidence_span: String(messageText).trim(),
-        ...base,
-      };
+      // RC 8.5.15 (owner 2026-10-14): "No I never did" is a written ownership
+      // denial -- property-scoped, never a wrong-number suppression.
+      const r = ownershipUnverifiedResult(messageText, validated, 'ctx_never_owned_after_ownership_check');
+      return { ...r, labels: [...r.labels, 'never_owned'], confidence: 0.9 };
     }
     if ((useCase === 'ownership_check' || qType === 'ownership') && BARE_SOLD_RE.test(t)) {
       return {
@@ -556,7 +764,7 @@ export function applyContextualShortReply(messageText, validated) {
       // classifier's own wrong-number / sold detectors decide.
       return { applied: false };
     }
-    if ((useCase === 'ownership_check' || qType === 'ownership') && bareNoOwnershipMode() === 'non_owner' && NO_LONGER_OWNER_RE.test(t)) {
+    if ((useCase === 'ownership_check' || qType === 'ownership') && ['non_owner', 'ownership_unverified'].includes(bareNoOwnershipMode()) && NO_LONGER_OWNER_RE.test(t)) {
       // "Not anymore" / "No longer" / "Ya no" answer "do you STILL own it?":
       // they owned it and do not now. Sold, not a wrong person.
       return {
@@ -569,6 +777,11 @@ export function applyContextualShortReply(messageText, validated) {
         evidence_span: String(messageText).trim(),
         ...base,
       };
+    }
+    if ((useCase === 'ownership_check' || qType === 'ownership') && bareNoOwnershipMode() === 'ownership_unverified' && BARE_NO_RE.test(t)) {
+      // "No I don't" / "No I'm not" / "Of course not": an ownership denial
+      // with denial words -- the same unverified-ownership lane as a bare "No".
+      return ownershipUnverifiedResult(messageText, validated, 'ctx_no_after_ownership_check_ownership_unverified');
     }
     if ((useCase === 'ownership_check' || qType === 'ownership') && bareNoOwnershipMode() === 'non_owner' && BARE_NO_RE.test(t)) {
       // 2026-10-05 (+18328600523 "Is 2114 Mulberry Ln yours?" -> "No";
@@ -610,10 +823,27 @@ export function applyContextualShortReply(messageText, validated) {
       return {
         applied: true,
         primary_intent: 'not_interested',
-        labels: ['not_interested'],
+        // A "No" to S2 is disinterest: the existing 30-day nurture (owner
+        // decision 2026-10-14, locked).
+        labels: ['not_interested', 'declined_s2_interest_question'],
         rule_id: 'ctx_no_after_proposal_interest',
         confidence: 0.88,
         rationale: 'short_no_bound_to_proposal_interest_question',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    if (useCase === 'contact_permission' || qType === 'contact_permission') {
+      // RC 8.5.15: "No" to "is it alright if I check back down the road?" ends
+      // outreach in that scope (this recipient x property): never another
+      // automatic check-in. Not an opt-out -- the phone is not suppressed.
+      return {
+        applied: true,
+        primary_intent: 'not_interested',
+        labels: ['not_interested', 'contact_permission_declined'],
+        rule_id: 'ctx_no_after_contact_permission',
+        confidence: 0.88,
+        rationale: 'no_to_permission_to_contact_again_ends_outreach_in_scope',
         evidence_span: String(messageText).trim(),
         ...base,
       };
@@ -665,20 +895,20 @@ export function applyContextualShortReply(messageText, validated) {
       };
     }
     if (useCase === 'condition_check' || qType === 'condition') {
-      // "No" answering "does it need repairs?" is CONDITION information
-      // (nothing needs fixing), never disinterest. Without this branch the
-      // bare-no fallback classified it not_interested@0.92 and shelved a
-      // good-condition seller for 30 days. Bind fail-closed to clarification.
+      // "No" answering "does it need repairs? / anything major it needs?" is
+      // CONDITION information: no repairs reported -- never disinterest
+      // (the old bare-no fallback shelved good-condition sellers for 30 days).
+      // RC 8.5.15: it is the same fact as "No repairs needed"
+      // (condition_disclosed), so the workflow continues exactly as it does
+      // for that reply -- only if the workflow calls for a next step.
       return {
         applied: true,
-        primary_intent: 'unclear',
-        labels: ['unclear_condition_acknowledgement'],
-        rule_id: 'ctx_no_after_condition',
-        force_unclear: true,
-        confidence: 0.6,
-        rationale: 'short_no_after_condition_question_is_condition_info_not_disinterest',
+        primary_intent: 'condition_disclosed',
+        labels: ['condition_disclosed', 'no_repairs_reported'],
+        rule_id: 'ctx_no_after_condition_no_repairs',
+        confidence: 0.86,
+        rationale: 'short_no_after_condition_question_reports_no_repairs',
         evidence_span: String(messageText).trim(),
-        human_review: true,
         ...base,
       };
     }

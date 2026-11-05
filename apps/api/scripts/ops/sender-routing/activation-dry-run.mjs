@@ -161,3 +161,4 @@ for (const u of UNMAPPED_MARKETS) {
 console.log(md.join("\n"));
 writeOut(outDir ? `${outDir}/activation-dry-run.md` : null, md.join("\n"));
 writeOut(outDir ? `${outDir}/activation-dry-run.json` : null, { generated_at: now.toISOString(), blocked: [...blocked], backfill, A, B });
+await sb.close();

@@ -516,7 +516,8 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "hostile",
     message_body: "f*** off with these texts man, you vultures are buying up the whole damn neighborhood",
     expected: {
-      intent_any_of: ["hostile_or_legal", "not_interested", "unclear"],
+      // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
+      intent_any_of: ["hostile_or_legal", "hostile_or_troll", "not_interested", "unclear"],
       must_not_auto_reply: true,
       disposition_any_of: ["human_review_required", "suppressed_policy", "no_reply_required"],
     },
@@ -527,7 +528,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "hostile",
     message_body: "\u{1F595}",
     expected: {
-      intent_any_of: ["hostile_or_legal", "reaction_only", "unclear"],
+      intent_any_of: ["hostile_or_legal", "hostile_or_troll", "reaction_only", "unclear"],
       must_not_auto_reply: true,
       disposition_any_of: ["no_reply_required", "human_review_required", "suppressed_policy"],
     },
@@ -608,9 +609,11 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "wrong_number",
     message_body: "who dis? I never owned that",
     expected: {
-      intent_any_of: ["wrong_number", "who_is_this"],
+      // RC 8.5.15 (owner 2026-10-14): a written ownership denial is the
+      // property-scoped denial (no reply, no suppression).
+      intent_any_of: ["wrong_number", "who_is_this", "property_specific_non_owner"],
       must_not_auto_reply: true,
-      disposition_any_of: ["suppressed_wrong_number", "human_review_required"],
+      disposition_any_of: ["suppressed_wrong_number", "human_review_required", "no_reply_required"],
     },
     notes: "Slang identity question plus never-owned denial; ownership disconnect outranks the identity question.",
   }),

@@ -6,7 +6,10 @@
 // live in the in-memory store twin, which mirrors the DB cap rules).
 //
 //   AGENT_E2E_KEY_ENV_FILE=apps/api/.env.local      (holds ANTHROPIC_API_KEY=…; read, never printed)
-//   AGENT_E2E_DB_URL_FILE=/tmp/.dburl.ro            (a postgres URL; every query runs in BEGIN READ ONLY)
+//   LC_RO_RESEARCH_AGENT_DB_URL_FILE=<0600 file>             (the role-enforced read-only diagnostics credential —
+//                                                    scripts/lib/prod-db-credentials.mjs verifies the role
+//                                                    cannot write before the first query; every query also
+//                                                    runs in BEGIN READ ONLY)
 //   AGENT_E2E_SPEND_USD=0.10                        (the day cap the budget engine enforces; default 0.10)
 //   node --import ./tests/register-aliases.mjs scripts/agent/research-local-e2e.mjs
 //
@@ -20,7 +23,7 @@
 // tool calls, latency and whether the wire was a stream. Never prints the key, the
 // DB URL, phone numbers or names; the answer is printed only as a short excerpt.
 import fs from 'node:fs'
-import pg from 'pg'
+import { openReadOnlyPool } from '../../../../scripts/lib/prod-db-credentials.mjs'
 import { createAnthropicProvider } from '../../src/lib/ai/anthropic-provider.js'
 import { createModelResolver, actualUsd } from '../../src/lib/agent/research/models.js'
 import { createResearchMemoryStore } from '../../src/lib/agent/research/research-store.js'
@@ -28,13 +31,12 @@ import { createResearchToolRegistry } from '../../src/lib/agent/research/researc
 import { createAskService } from '../../src/lib/agent/research/ask-service.js'
 
 const keyFile = process.env.AGENT_E2E_KEY_ENV_FILE
-const dbFile = process.env.AGENT_E2E_DB_URL_FILE
-if (!keyFile || !dbFile) { console.error('set AGENT_E2E_KEY_ENV_FILE and AGENT_E2E_DB_URL_FILE'); process.exit(2) }
+if (!keyFile || !process.env.LC_RO_RESEARCH_AGENT_DB_URL_FILE) { console.error('set AGENT_E2E_KEY_ENV_FILE and LC_RO_RESEARCH_AGENT_DB_URL_FILE'); process.exit(2) }
 const key = (/^ANTHROPIC_API_KEY=(.*)$/m.exec(fs.readFileSync(keyFile, 'utf8'))?.[1] || '').trim().replace(/^["']|["']$/g, '')
 if (!key) { console.error('no ANTHROPIC_API_KEY in the key file'); process.exit(2) }
 const spend = String(Math.min(Number(process.env.AGENT_E2E_SPEND_USD || 0.1), 0.25))
 
-const pool = new pg.Pool({ connectionString: fs.readFileSync(dbFile, 'utf8').trim(), max: 2, ssl: { rejectUnauthorized: false } })
+const pool = await openReadOnlyPool({ purpose: 'research_agent', applicationName: 'lc-research-local-e2e', max: 2 })
 const TABLES = new Set(['properties', 'campaign_target_graph', 'probate_status', 'preforeclosure_status_v2', 'eg_property_facts', 'campaigns', 'campaign_targets'])
 const IDENT = /^[a-z_][a-z0-9_]{0,62}$/
 const reads = []

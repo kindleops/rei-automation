@@ -125,8 +125,15 @@ async function findRecentReferralContact({ supabase, phoneNumber, propertyId }) 
   return { blocked: true, reason: "recently_contacted", row_id: data.id };
 }
 
-async function selectReferralOwnershipTemplate({ supabase, context, language = "English" }) {
-  const languages = language === "English" ? ["English"] : [language, "English"];
+// OWNER RULE (P0 2026-10-19): never fall back to English for a non-English contact. The
+// template is in the contact's language or there is no automated send: the caller routes a
+// missing / unknown language to a person (review, no send).
+async function selectReferralOwnershipTemplate({ supabase, context, language = null }) {
+  void context;
+  const wanted = clean(language);
+  if (!wanted) return { ok: false, reason: "referral_language_unknown", template: null };
+  const title = wanted.charAt(0).toUpperCase() + wanted.slice(1).toLowerCase();
+  const languages = [...new Set([wanted, title])];
   const { data, error } = await supabase
     .from("sms_templates")
     .select("*")
@@ -139,12 +146,8 @@ async function selectReferralOwnershipTemplate({ supabase, context, language = "
 
   if (error) throw error;
   const rows = Array.isArray(data) ? data : [];
-  const selected =
-    rows.find((row) => lower(row.language) === lower(language)) ||
-    rows.find((row) => lower(row.language) === "english") ||
-    rows[0] ||
-    null;
-  if (!selected) return { ok: false, reason: "no_referral_ownership_template", template: null };
+  const selected = rows.find((row) => lower(row.language) === lower(wanted)) || null;
+  if (!selected) return { ok: false, reason: "no_referral_ownership_template_in_contact_language", template: null, language: wanted };
   return { ok: true, template: selected, reason: "referral_ownership_template_selected" };
 }
 
@@ -310,7 +313,7 @@ export async function executeReferralAutomation({
   const template_result = await selectReferralOwnershipTemplate({
     supabase,
     context,
-    language: clean(context?.summary?.language_preference) || "English",
+    language: clean(context?.summary?.language_preference) || null,
   });
   if (!template_result.ok || !template_result.template) {
     return {

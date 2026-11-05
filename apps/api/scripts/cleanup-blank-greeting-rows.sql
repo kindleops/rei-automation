@@ -1,5 +1,6 @@
 -- Cleanup: Move unsent rows with blank greeting to paused_name_missing.
--- Run with: psql "$DATABASE_URL" -f scripts/cleanup-blank-greeting-rows.sql
+-- WRITES PRODUCTION. Run with (from apps/api; explicit production-write path, interactive TTY):
+--   node ../../scripts/lib/prod-db-credentials.mjs psql-write --prod-write=<approval-ref> -f scripts/cleanup-blank-greeting-rows.sql
 --
 -- A "blank greeting" row has a message_body that begins with a greeting word
 -- followed immediately by a comma with no name between them:

@@ -35,6 +35,10 @@ function makeSupabase({ phones = [], seed = [] } = {}) {
           }),
         }
       }
+      // blind-eval S1: the property attribution reads the thread (none seeded ⇒ the inbound row's property)
+      if (table === 'message_events') {
+        return { select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: api._messages || [], error: null }) }) }) }) }
+      }
       if (table === 'contact_property_resolution') {
         return {
           select: () => ({
@@ -255,7 +259,7 @@ test('V2-1B: a persist failure yields review and NO next contact', async () => {
       upsert: () => ({ select: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'boom' } }) }) }),
     }),
   }
-  const r = await CALL(broken)
+  const r = await CALL(broken, { loadThreadMessages: async () => [] })
   assert.equal(r.reason, 'persist_failed')
   assert.equal(r.requires_review, true)
   assert.equal(r.next_contact, undefined)
@@ -268,4 +272,39 @@ test('V2-1B: events emitted are the canonical contact-resolution vocabulary', as
   const types = r.events.map((e) => e.type)
   assert.ok(types.includes(EV.OWNERSHIP_CONTACT_REJECTED))
   assert.ok(types.includes(EV.NEXT_PHONE_SELECTED))
+})
+
+// ── blind-eval S1 (rc-8.5.21): WHICH property an ownership answer is about ──
+test('S1 attribution: a denial that NAMES property A is recorded on A, never on the inbound row\'s property B', async () => {
+  const supabase = makeSupabase({ phones: [phoneRow(B)] })
+  supabase._messages = [
+    { id: 'o1', direction: 'outbound', message_body: 'Hi, do you still own 5787 Elm St?', property_id: 'prop-A', created_at: '2026-10-17T15:00:00Z' },
+    { id: 'o2', direction: 'outbound', message_body: 'And would you consider selling 912 Oak Ave?', property_id: 'prop-B', created_at: '2026-10-17T15:05:00Z' },
+    { id: 'msg-1', direction: 'inbound', message_body: 'I dont own 5787 Elm St', property_id: 'prop-B', created_at: '2026-10-17T15:10:00Z' },
+  ].reverse()
+  const r = await CALL(supabase, { property_id: 'prop-B' })
+  assert.equal(r.property_id, 'prop-A', JSON.stringify(r))
+  assert.equal(r.attribution.basis, 'named_in_reply')
+  assert.ok(supabase._rows.has(`prop-A|${A}`), 'the denial is on A')
+  assert.ok(!supabase._rows.has(`prop-B|${A}`), 'nothing is written to B')
+})
+
+test('S1 attribution: ONE bare "No" to ownership questions about TWO properties is a thread HOLD — no property is denied', async () => {
+  const supabase = makeSupabase({ phones: [phoneRow(B)] })
+  supabase._messages = [
+    { id: 'o1', direction: 'outbound', message_body: 'Are you still the owner of 100 Maple Dr?', property_id: 'prop-A', created_at: '2026-10-17T15:00:00Z' },
+    { id: 'o2', direction: 'outbound', message_body: 'Just checking, do you own 200 Birch Ln?', property_id: 'prop-B', created_at: '2026-10-17T15:05:00Z' },
+    { id: 'msg-1', direction: 'inbound', message_body: 'No', property_id: 'prop-B', created_at: '2026-10-17T15:10:00Z' },
+  ]
+  const r = await CALL(supabase, { property_id: 'prop-B', relationship: { relationship_outcome: 'property_specific_non_owner' } })
+  assert.deepEqual([r.hold, r.persisted, r.attribution.ambiguous], ['ownership_denial_property_unresolved', false, true], JSON.stringify(r))
+  assert.equal(supabase._rows.size, 0, 'no denial on ANY property')
+  assert.equal(r.sends, 0)
+})
+
+test('S1 attribution: an unreadable thread never guesses a property for a denial (review hold, nothing written)', async () => {
+  const supabase = makeSupabase({ phones: [phoneRow(B)] })
+  const r = await CALL(supabase, { loadThreadMessages: async () => { throw new Error('down') } })
+  assert.equal(r.reason, 'thread_unreadable_for_attribution')
+  assert.equal(supabase._rows.size, 0)
 })

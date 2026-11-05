@@ -35,8 +35,10 @@
  *
  * DRY RUN BY DEFAULT. Usage (from apps/api, RC_SHA checkout, after deploy):
  *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs
- *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs --apply
- * --apply needs SUPABASE_DB_URL / DATABASE_URL (atomic write) and the service key.
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs --apply --prod-write=<approval-ref>
+ * --apply needs the explicit production-write path for the atomic write (rc-8.5.21-c:
+ * --prod-write=<approval-ref>, LC_PROD_WRITE_DB_URL_FILE, interactive TTY confirmation,
+ * via openRepairPgClient) and the service key.
  */
 
 import { createClient } from "@supabase/supabase-js";

@@ -1,7 +1,14 @@
 #!/usr/bin/env node
-// Production REHEARSAL for the read-only agent migrations — ALWAYS ROLLBACK.
+// Release REHEARSAL for the read-only agent migrations — DISPOSABLE DATABASE ONLY, ALWAYS ROLLBACK.
 //
-//   node apps/api/scripts/agent/agent-release-rehearsal.mjs --db-url-file /tmp/.dburl [--owner <uuid>]
+//   node apps/api/scripts/agent/agent-release-rehearsal.mjs --db-url <loopback url> [--owner <uuid>]
+//   (or LC_TEST_DB_URL=<loopback url>)
+//
+// Owner boundary 2026-10-15 (after the 2026-10-14 incident): migration / pretest /
+// rollback SQL never runs against production, not even inside BEGIN … ROLLBACK.
+// This script used to take a production URL file and rehearse ON PRODUCTION;
+// it now refuses every production-like target (scripts/db/db-target-guard.mjs) and
+// reads its URL only from --db-url / LC_TEST_DB_URL.
 //
 // Runs, in ONE transaction on ONE connection, then rolls back unconditionally:
 //   S3 pretest → S3 migration → research pretest → research migration →
@@ -21,6 +28,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { assertDisposableTarget } from '../../../../scripts/db/db-target-guard.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(here, '../../../..')
@@ -55,6 +63,7 @@ function arg(name) {
 }
 
 export async function rehearse({ url, owner = null, log = console.log, ssl = undefined } = {}) {
+  assertDisposableTarget(url) // throws before any connection on a production-like target
   const client = new pg.Client({ connectionString: url, ssl, application_name: 'lc-agent-release-rehearsal', statement_timeout: 120_000, query_timeout: 180_000, connectionTimeoutMillis: 15_000 })
   await client.connect()
   const out = { ok: false, checks: [], after: null }
@@ -91,12 +100,11 @@ export async function rehearse({ url, owner = null, log = console.log, ssl = und
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const file = arg('--db-url-file')
-  if (!file) { console.error('usage: --db-url-file <path> [--owner <uuid>]'); process.exit(2) }
-  const url = fs.readFileSync(file, 'utf8').trim()
-  const host = new URL(url).hostname
-  const loopback = ['localhost', '127.0.0.1', '::1'].includes(host)
-  rehearse({ url, owner: arg('--owner'), ssl: loopback ? false : { rejectUnauthorized: false } })
+  if (arg('--db-url-file')) { console.error('--db-url-file was removed (owner boundary 2026-10-15): pass a DISPOSABLE --db-url / LC_TEST_DB_URL'); process.exit(2) }
+  const url = arg('--db-url') || process.env.LC_TEST_DB_URL || ''
+  if (!url) { console.error('usage: --db-url <loopback url of a disposable database> [--owner <uuid>]  (or LC_TEST_DB_URL)'); process.exit(2) }
+  try { assertDisposableTarget(url) } catch (e) { console.error(`REHEARSAL REFUSED: ${e.message}`); process.exit(3) }
+  rehearse({ url, owner: arg('--owner'), ssl: false })
     .then((r) => process.exit(r.ok ? 0 : 1))
     .catch((e) => { console.error(`REHEARSAL ERROR: ${String(e.message).slice(0, 400)}`); process.exit(1) })
 }

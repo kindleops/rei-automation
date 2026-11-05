@@ -10,6 +10,7 @@ import {
   evaluateQueueSendRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { SENDER_CONTINUITY_RELEASE_MODE_KEY, resolveSenderContinuityReleaseMode } from "@/lib/domain/queue/release-sender-continuity-holds.js";
 import { 
   processSendQueueItem as defaultProcessSendQueueItem,
   loadQueueRowById
@@ -215,6 +216,25 @@ export async function runSendQueue(
     };
   }
 
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17): materialize due follow-ups (rendered from the approved
+  // template, validated, eligibility re-checked) into NONEMPTY send-ready rows BEFORE this run selects
+  // claimable rows. Only while system_control.followup_execution_mode = live (absent = off); bounded
+  // (one pass, ≤ 25 intents); every intent is claimed under its own lease, so a concurrent runtime pass is
+  // exactly-once too (no global lock needed: materialization never sends). Never blocks or fails the run.
+  if (!dry_run && deps.followUpMaterialization !== false) {
+    try {
+      const lifecycle = await import("@/lib/domain/followups/followup-lifecycle.js");
+      if (await lifecycle.lifecycleLive({ readSwitch: deps.readFollowUpLifecycleSwitch || null, supabase })) {
+        const pass = await (deps.runFollowUpMaterialization || lifecycle.runFollowUpMaterialization)(
+          await lifecycle.withLifecycleHelpers(lifecycle.createFollowUpLifecycleDeps({ supabase, worker: `queue_runner:${processing_run_id}` }))
+        );
+        log_info("followup_lifecycle.materialization_pass", { code: pass?.code || null, ...(pass?.counts || {}) });
+      }
+    } catch (materialize_error) {
+      log_warn("followup_lifecycle.materialization_pass_failed", { message: materialize_error?.message || "unknown" });
+    }
+  }
+
   const lock = await acquireGlobalExecutionLock(supabase, {
     owner_type: GLOBAL_LOCK_OWNER.UNRESTRICTED,
   });
@@ -316,6 +336,43 @@ export async function runSendQueue(
     }
   }
 
+  // 0c. SENDER-CONTINUITY holds (owner P0, rc-8.5.21): a conversation row held because its thread's
+  // sender could not send is released ONLY after the conversation is revalidated (newer seller
+  // activity ⇒ superseded, never sent; suppression / holds / eligibility / duplicates re-checked).
+  // BORN OFF: system_control sender_continuity_release_mode must be 'live' to write; anything else
+  // is a dry run (decisions logged, nothing changes). Never throws into the run.
+  if (!dry_run && (deps.releaseSenderContinuityHolds || (!deps.supabaseClient && hasSupabaseConfig()))) {
+    try {
+      const mode = String((await Promise.resolve().then(() => get_system_value(SENDER_CONTINUITY_RELEASE_MODE_KEY)).catch(() => null)) ?? "").trim().toLowerCase();
+      const release = deps.releaseSenderContinuityHolds
+        || (await import("@/lib/domain/queue/release-sender-continuity-holds.js")).releaseSenderContinuityHolds;
+      // rc-8.5.21 v4 (rt-sc-02): AI conversation rows are armed by the AI send kill switch (senderHoldReleaseArming)
+      let ai_kill_switch_on = false;
+      try {
+        const { AI_SEND_KILL_SWITCH_KEY, parseKillSwitch } = await import("@/lib/domain/conversation-ai/send-policy.js");
+        ai_kill_switch_on = parseKillSwitch(await Promise.resolve().then(() => get_system_value(AI_SEND_KILL_SWITCH_KEY)).catch(() => null));
+      } catch { ai_kill_switch_on = false; }
+      const { senderHoldReleaseArming } = await import("@/lib/domain/queue/release-sender-continuity-holds.js");
+      const arming = senderHoldReleaseArming({ mode, aiKillSwitchOn: ai_kill_switch_on });
+      const ai_rows_only = arming.ai_rows_only;
+      const released = await release({ dry_run: arming.dry_run, ai_rows_only }, { supabase, now, getSystemValue: get_system_value });
+      if (released?.examined) {
+        log_info("queue.sender_continuity_release", {
+          mode: mode || "off",
+          ai_rows_only,
+          examined: released.examined,
+          released: released.released,
+          superseded: released.superseded,
+          blocked: released.blocked,
+          review: released.review,
+          still_held: released.still_held,
+        });
+      }
+    } catch (release_error) {
+      log_warn("queue.sender_continuity_release_failed", { error: release_error?.message || "unknown_error" });
+    }
+  }
+
   // 1. Stale-lock recovery for stuck "processing" rows.
   //
   // LEASE EXPIRY DOES NOT PROVE THE PROVIDER REQUEST NEVER STARTED.
@@ -337,25 +394,58 @@ export async function runSendQueue(
   // (queued/scheduled/pending/approved/ready), keeps every piece of provider
   // evidence, and stays recognisable to the coming §11 attempt ledger. A false
   // hold is acceptable; a duplicate seller message is not.
+  //
+  // rc-8.5.21 RUN-09: a row whose durable evidence PROVES no provider call happened (no provider evidence
+  // on the row, a readable §11 attempt ledger with no attempt for it, never re-dispatched before) is
+  // returned to `queued` EXACTLY ONCE instead (processing-lease-recovery.js); everything else is held
+  // exactly as before. If the stuck rows cannot be read row by row, the old bulk hold runs unchanged.
+  const lease_cutoff = new Date(Date.now() - 10 * 60000).toISOString();
+  let lease_rows = null;
   try {
-    const { data: recycled, error: recycle_error } = await supabase
+    const { data: stuck, error: stuck_error } = await supabase
         .from('send_queue')
-        .update({
-            queue_status: 'expired',
-            failed_reason: 'processing_lease_expired_manual_review',
-            is_locked: false,
-            locked_at: null,
-            processing_run_id: null,
-        })
+        .select('id,queue_status,lock_token,locked_at,provider_message_id,textgrid_message_id,sent_at,delivered_at,metadata')
         .eq('queue_status', 'processing')
-        .lt('locked_at', new Date(Date.now() - 10 * 60000).toISOString())
-        .select('id');
-    
-    if (recycled?.length) {
-        log_info("queue_stuck_rows_recycled", { count: recycled.length });
+        .lt('locked_at', lease_cutoff)
+        .limit(200);
+    if (!stuck_error && Array.isArray(stuck)) {
+      const cutoff_ms = Date.parse(lease_cutoff);
+      lease_rows = stuck.filter((r) => String(r?.queue_status || '').toLowerCase() === 'processing' && Date.parse(r?.locked_at || '') < cutoff_ms);
     }
-  } catch (err) {
-    log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+  } catch {
+    lease_rows = null;
+  }
+  if (lease_rows) {
+    if (lease_rows.length) {
+      try {
+        const { recoverExpiredProcessingLeases } = await import('@/lib/domain/queue/processing-lease-recovery.js');
+        const recovered = await recoverExpiredProcessingLeases(supabase, lease_rows, { now: new Date().toISOString(), log: log_info });
+        log_info("queue_stuck_rows_recycled", { count: recovered.manual_review.length + recovered.redispatched.length, redispatched: recovered.redispatched.length, manual_review: recovered.manual_review.length, evidence_readable: recovered.evidence_readable });
+      } catch (err) {
+        log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+      }
+    }
+  } else {
+    try {
+      const { data: recycled } = await supabase
+          .from('send_queue')
+          .update({
+              queue_status: 'expired',
+              failed_reason: 'processing_lease_expired_manual_review',
+              is_locked: false,
+              locked_at: null,
+              processing_run_id: null,
+          })
+          .eq('queue_status', 'processing')
+          .lt('locked_at', lease_cutoff)
+          .select('id');
+
+      if (recycled?.length) {
+          log_info("queue_stuck_rows_recycled", { count: recycled.length });
+      }
+    } catch (err) {
+      log_warn("queue.stuck_row_recovery_failed", { error: err.message });
+    }
   }
 
   // 1c. Resume drain (P0 2026-10-08): overdue rows are re-planned into the

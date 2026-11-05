@@ -28,6 +28,7 @@
 // changes nothing until the owner sets the key.
 
 import { extractMonetaryMentions } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import { classifyAskingPriceQuestion } from "@/lib/domain/seller-flow/asking-price-question.js";
 import { identifyReplyLanguage } from "@/lib/domain/classification/seller-reply-language.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { prepareRenderedSmsForQueue } from "@/lib/sms/sanitize.js";
@@ -78,7 +79,8 @@ export function threadAdvancedPastKind(kind, lifecycle_stage) {
   return anchor >= 0 && current >= 0 && current > anchor;
 }
 /** Identity: dispositions that mean this phone is not (or no longer) the owner. */
-const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "not_owner", "non_owner", "former_owner", "sold", "suppressed", "unqualified"]);
+// owner 2026-10-17: declined_unverified (ownership UNVERIFIED) is never nudged either
+const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "not_owner", "non_owner", "former_owner", "sold", "suppressed", "unqualified", "declined_unverified"]);
 
 // S3_ASKING_PRICE (owner, 2026-10-10): silence after our "do you have an
 // asking price in mind?" question re-asks the price at 24h, same chain shape.
@@ -146,7 +148,7 @@ export const OFFER_USE_CASES = Object.freeze(
 const DISQUALIFYING_INTENTS = new Set([
   "opt_out", "wrong_number", "wrong_person", "hostile_or_legal", "timing_complaint",
   "not_interested", "need_time", "listed_or_unavailable", "property_specific_non_owner",
-  "former_owner_respondent", "non_owner_referral",
+  "former_owner_respondent", "non_owner_referral", "ownership_declined_unverified",
 ]);
 /** "please don't call", "stop texting me", "no me escriba" — never nudge them. */
 const NO_CONTACT_REQUEST_RE =
@@ -212,17 +214,15 @@ const S2_EN_OBJECT = /\b(proposal|offer|sale|selling|sell|numbers)\b/i;
 const S2_ES_VERB = /(abiert[oa]s?|considerar[ií]a|interesad[oa]|interesa|vistazo|soltar[ií]a)/i;
 const S2_ES_OBJECT = /(propuesta|oferta|vender|venta|n[uú]meros|opciones|vistazo|soltar[ií]a)/i;
 const PRICE_QUESTION = /(asking price|price in mind|precio)/i;
-// Our S3 question in free text (owner-typed or templated): their number.
-const S3_PRICE_QUESTION =
-  /(asking price|price in mind|number in mind|what price|price (?:would|that would) work|what would you (?:take|want|need)|how much (?:would|do) you (?:want|need)|precio|cu[aá]nto (?:pide|quiere|pedir[ií]a))/i;
-
-/** Is this outbound our S3 asking-price question (templated or typed)? Pure. */
+/**
+ * Is this outbound our S3 asking-price question (templated or typed)? Pure.
+ * rc-8.5.15.1: the free-text half is the ONE shared classifier
+ * (asking-price-question.js) — the same truth the send-queue writers stamp as
+ * metadata.question_kind and the repeat-asking-price guard keys on.
+ */
 export function isS3AskingPriceQuestion({ use_case = null, message_body = "" } = {}) {
   if (S3_QUESTION_USE_CASES.has(lower(use_case))) return true;
-  const body = clean(message_body);
-  if (!body || !body.includes("?")) return false;
-  if (/\$\s?\d|\d{2,3}\s?k\b|\d{1,3}(?:,\d{3})+/i.test(body)) return false; // quotes a number → offer / clarifier
-  return S3_PRICE_QUESTION.test(body);
+  return classifyAskingPriceQuestion(message_body).asking_price;
 }
 
 /** Is this outbound our S2 interest question (templated or typed)? Pure. */
@@ -236,13 +236,27 @@ export function isS2InterestQuestion({ use_case = null, message_body = "" } = {}
 }
 
 const OFFER_CUE = /\b(offer|move forward at|good to go at|i'?d be at|i’d be at|i can do|i could do|we can do|we could do|we could offer|i can offer|i could offer|my number|cash|pay you|close in|oferta|ofrecer|ofrezco|puedo pagar|en efectivo)\b/i;
+// rc-8.5.21 v4 (offer silence): the COUNTER / revised-offer vocabulary of a negotiation turn ("we can come
+// up to $97,500", "best we can do is", "I can meet you at", "bump it to", "final number") is our offer too
+const COUNTER_OFFER_CUE = /\b(?:(?:come|go|move|get|stretch|bump(?:\s+it)?|raise\s+(?:it|that|our\s+(?:offer|number)))\s+(?:up\s+)?(?:to|at)|meet\s+(?:you\s+)?(?:at|in\s+the\s+middle\s+at)|best\s+(?:i|we)\s+(?:can|could)\s+do|(?:our|my)\s+(?:final|best|revised|new)\s+(?:number|price|offer)|(?:we|i)(?:'d|\s+would)\s+be\s+(?:at|around|in)|we\s+(?:can|could)\s+(?:pay|go|stretch)|subir\s+a|llegar\s+a|lo\s+m[aá]ximo\s+(?:que\s+)?(?:podemos|puedo))\b/i;
+// An APPROXIMATE amount ("somewhere in the 90s", "high 80s", "90ish", "around 95 grand", "low six figures"):
+// an offer whose number is not fixed — the no-number follow-up, never a guessed amount
+const APPROX_AMOUNT_RE = /\b(?:(?:low|mid|high|upper|lower)[\s-]+)?\$?\d0'?s\b|\b\d{2,3}\s*-?\s*ish\b|\b(?:around|about|roughly|approximately|approx\.?|somewhere\s+(?:around|near|in))\s+\$?\d{2,3}(?:,\d{3})?\s*(?:k|grand|thousand)?\b|\b(?:low|mid|high)\s+(?:five|six|5|6)\s+figures\b|\b(?:los|unos)\s+\d0(?:\s+mil)?\b/i;
 // Price-shaped tokens: $X, 3,3-grouped, NNNk. A bare 3-digit number is only a
 // price through the canonical parser's v3 rule (and only beside an offer cue).
 const PRICE_TOKEN_RE = /\$\s?\d[\d,.]*\s*(?:k|m|mil)?\b|\b\d{1,3}(?:,\d{3})+\b|\b\d{2,4}(?:\.\d)?\s?k\b/gi;
 const PER_QUALIFIER_AFTER_RE = /^\s*(?:cash\s*)?(?:per|a|\/|each|por)\s*(?:unit|door|month|mo\b|year|sq|unidad|puerta|mes)|^\s*(?:each|monthly|in repairs|of repairs|repairs|en reparaciones|al mes|mensual)/i;
 const QUALIFIER_BEFORE_RE = /(repairs?|reparaci[oó]n(?:es)?|arv|assessed|taxes|rent|renta|payoff|owe|debe)[^$\d]{0,14}$/i;
+const RANGE_OFFER_RE = /\b(?:somewhere\s+)?(?:between|around|about|roughly|in\s+the\s+(?:range|ballpark)\s+of|anywhere\s+from|from)\s+\$?\s?\d{2,3}(?:[.,]\d{1,3})?\s?(?:k|thousand|grand)?\s*(?:and|to|-|–)\s*\$?\s?\d{2,3}(?:[.,]\d{1,3})?\s?(?:k|thousand|grand)?\b(?=[^?]*(?:depend|inspect|condition|repair|walk|offer|pay|cash|close|price|range|ballpark|$))/i
 const RANGE_RE = /\b(between|to|or|entre|y|o)\b|[-–]/i;
 const MIN_OFFER_AMOUNT = 10_000;
+
+/** Does our text carry this exact amount as a price ($97,500 / 97,500 / 97.5k)? Pure. */
+function bodyCarriesAmount(body, amount) {
+  let mentions = [];
+  try { mentions = extractMonetaryMentions(body, { numberRules: "v3" }); } catch { mentions = []; }
+  return mentions.some((m) => Math.round(Number(m.value)) === amount);
+}
 
 /**
  * Detect an offer in one of OUR outbound messages. Pure.
@@ -252,12 +266,17 @@ const MIN_OFFER_AMOUNT = 10_000;
  *   { is_offer: true, mode: "number", amount, raw, confidence }
  *   { is_offer: true, mode: "no_number", reason }   ambiguous → never quote a number
  */
-export function detectOutboundOffer({ message_body = "", use_case = null } = {}) {
+export function detectOutboundOffer({ message_body = "", use_case = null, offer_record_amount = null } = {}) {
   const body = clean(message_body);
   if (!body) return { is_offer: false };
   const templated_offer = OFFER_USE_CASES.has(lower(use_case));
-  const cue = OFFER_CUE.test(body);
-  if (!templated_offer && !cue) return { is_offer: false };
+  // blind-eval SYN-37: a typed RANGE ("Somewhere between 80 and 90 depending on the inspection") is an
+  // offer whose number is not fixed: the NO-NUMBER offer follow-up (it never picks 80 or 90)
+  if (RANGE_OFFER_RE.test(body) && !(/\?/.test(body) && PRICE_QUESTION.test(body))) return { is_offer: true, mode: "no_number", reason: "offer_range_or_multiple_numbers" };
+  const cue = OFFER_CUE.test(body) || COUNTER_OFFER_CUE.test(body);
+  const record_amount = Number(offer_record_amount) > 0 ? Math.round(Number(offer_record_amount)) : null;
+  // the authoritative offer record says WE offered at this anchor: an amount in the text equal to it is the offer
+  if (!templated_offer && !cue && !(record_amount && bodyCarriesAmount(body, record_amount))) return { is_offer: false };
   // A question about THEIR price is not our offer.
   if (!templated_offer && /\?/.test(body) && PRICE_QUESTION.test(body) && !/\$/.test(body)) return { is_offer: false };
 
@@ -290,9 +309,15 @@ export function detectOutboundOffer({ message_body = "", use_case = null } = {})
   ];
 
   if (distinct.length === 0) {
+    if (APPROX_AMOUNT_RE.test(body) && !(/\?/.test(body) && PRICE_QUESTION.test(body))) return { is_offer: true, mode: "no_number", reason: "offer_amount_approximate" };
     return templated_offer || raw_tokens.length > 0
       ? { is_offer: true, mode: "no_number", reason: "offer_amount_not_extracted" }
       : { is_offer: false };
+  }
+  // several amounts (a counter sequence: "up from $95,000 to $97,500"): the LATEST offer record names the
+  // one we stand on — quoted only when the text carries exactly that amount
+  if ((distinct.length > 1 || raw_tokens.length > 1) && record_amount && distinct.includes(record_amount)) {
+    return { is_offer: true, mode: "number", amount: record_amount, raw: String(record_amount), confidence: "high", source: "offer_record" };
   }
   if (distinct.length > 1 || raw_tokens.length > 1) {
     return {
@@ -302,6 +327,10 @@ export function detectOutboundOffer({ message_body = "", use_case = null } = {})
       candidates: distinct,
     };
   }
+  // a hedged amount WITHOUT an explicit price form ("around 90 grand", "90ish", "the high 80s") is not a fixed
+  // number: never quoted. An explicit amount stays quotable ("I'd be at around $315K" is $315,000).
+  const approx = APPROX_AMOUNT_RE.exec(body);
+  if (approx && !/\$|,\d{3}|\dk\b/i.test(approx[0])) return { is_offer: true, mode: "no_number", reason: "offer_amount_approximate" };
   const m = prices[0];
   const explicit = /\$|,\d{3}|k\b/i.test(clean(m.raw));
   return {
@@ -354,7 +383,7 @@ export function classifyNoResponseAnchor(anchor = {}, config = resolveNoResponse
     return { kind: null, reason: "no_response_chain_metadata_missing" };
   }
 
-  const offer = detectOutboundOffer({ message_body: anchor.message_body, use_case });
+  const offer = detectOutboundOffer({ message_body: anchor.message_body, use_case, offer_record_amount: anchor.offer_record_amount ?? null });
   if (offer.is_offer) {
     if (!config[NO_RESPONSE_KINDS.OFFER].enabled) return { kind: null, reason: "no_response_kind_disabled:offer" };
     return { kind: NO_RESPONSE_KINDS.OFFER, step: 0, offer };
@@ -591,6 +620,31 @@ export async function loadAnchorQueueRow(supabase, queue_id) {
   if (error) throw error;
   if (!data) return null;
   return { ...data, use_case: data.use_case_template };
+}
+
+/**
+ * rc-8.5.21 v4 (offer silence): the amount of OUR latest outbound offer RECORD for the thread at the anchor
+ * (seller_offers: created / sent no later than the anchor + 10 min, newest first). The record — never a
+ * guess from the text — decides which of several amounts in a counter sequence is the live offer. null
+ * when there is none or the table cannot be read (detection then works on the text alone).
+ */
+export async function loadLatestOfferRecordAmount(supabase, { thread_key, anchor_sent_at = null } = {}) {
+  if (!supabase?.from || !clean(thread_key)) return null;
+  try {
+    const until = new Date((Date.parse(clean(anchor_sent_at)) || Date.now()) + 10 * 60_000).toISOString();
+    const { data, error } = await supabase
+      .from("seller_offers")
+      .select("*")
+      .eq("thread_key", clean(thread_key))
+      .lte("created_at", until)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (error) return null;
+    const row = (data || []).find((r) => lower(r.direction || "outbound") === "outbound" && ["active", "superseded"].includes(lower(r.status)) && Number(r.purchase_price) > 0);
+    return row ? Math.round(Number(row.purchase_price)) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function loadNoResponseThreadFacts(supabase, { thread_key, anchor_sent_at, anchor_message_event_id = null }) {

@@ -72,7 +72,8 @@ const POSITIVE_INTENTS = Object.freeze(
 const HOT_INTENTS = Object.freeze(new Set(["asks_offer", "asking_price_provided"]));
 
 const NEGATIVE_PRIOR_DISPOSITIONS = Object.freeze(
-  new Set(["not_interested", "no_response", "unqualified"])
+  // owner 2026-10-17 (rule 3): a later genuine seller engagement supersedes a declined-unverified hold
+  new Set(["not_interested", "no_response", "unqualified", "declined_unverified"])
 );
 
 // Explicit re-engagement phrasings — English and Spanish. These are the

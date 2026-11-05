@@ -29,7 +29,7 @@ const row = (use_case, template_id, language, template_body, source) => ({
 });
 
 function parseRealityCheck() {
-  const sql = read("PROPOSED_20261006150000_price_reality_check_templates.sql");
+  const sql = read("PROPOSED_20261006150200_price_reality_check_templates.sql");
   const re = /\('(lc-price-reality-check-[a-z]+-\d)',\s*'(?:[^']|'')*',\s*'([^']+)',\s*\d+,\s*'((?:[^']|'')*)'/g;
   const out = [];
   let m;

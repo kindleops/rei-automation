@@ -1,5 +1,5 @@
 -- PROPOSED rollback for 02: restores the empty value ONLY where the prospect still holds what the fill wrote.
---   psql "$DATABASE_URL" -v field=gender -f 03_PROPOSED_person_fill_rollback.sql
+--   node ../../../../../scripts/lib/prod-db-credentials.mjs psql-write --prod-write=<approval-ref> -v field=gender -f 03_PROPOSED_person_fill_rollback.sql
 \set ON_ERROR_STOP on
 begin;
 set local statement_timeout = '60s';

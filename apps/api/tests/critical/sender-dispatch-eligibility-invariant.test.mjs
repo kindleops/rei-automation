@@ -139,20 +139,26 @@ for (const [label, extra] of [
   ["late reply (repair-queued)", { metadata: { source: "classifier_cleanup_20261001" } }],
   ["queued inbox reply", { metadata: { source: "inbox" } }],
 ]) {
-  test(`runner, ${label}: never sends from the blocked number; sticky fallback is persisted with a reason`, async () => {
+  test(`runner, ${label}: never sends from the blocked number and NEVER moves the thread to another number (owner P0 sender continuity) — held sender_unavailable`, async () => {
     const { deps, persisted } = runnerDeps();
     const r = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), deps);
-    assert.equal(r.ok, true);
-    assert.equal(r.from_phone_number, FALLBACK);
-    assert.notEqual(r.from_phone_number, BLOCKED);
-    assert.deepEqual(persisted.map((c) => [c.from, c.to, c.reason]), [[BLOCKED, FALLBACK, "thread_sender_blocked_by_operator"]]);
-    const none = runnerDeps({ routeThreadFallback: async () => null });
-    const parked = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), none.deps);
-    assert.equal(parked.ok, false);
-    assert.equal(parked.ineligible_sender, true);
-    assert.equal(parked.reason, "no_eligible_sender_for_thread");
+    assert.equal(r.ok, false);
+    assert.equal(r.ineligible_sender, true);
+    assert.equal(r.reason, "sender_unavailable", "a visible hold, never the routing fallback");
+    assert.equal(r.from_phone_number, BLOCKED, "the row stays bound to the thread's sender");
+    assert.deepEqual(persisted, [], "no automatic thread reroute is ever persisted");
+    // the established-thread authority (sender-continuity.js) decides first when the thread is known
+    const est = runnerDeps({ loadEstablishedSender: async () => ({ sender: BLOCKED, source: "thread_sticky" }) });
+    const held = await selectAvailableTextgridNumber(pinnedRow(BLOCKED, extra), est.deps);
+    assert.deepEqual([held.ok, held.reason, held.sender_reason, held.from_phone_number], [false, "sender_unavailable", SENDER_BLOCKED_REASON, BLOCKED]);
+    assert.deepEqual(est.persisted, [])
+    // a row naming another number on an established thread (forged / stale) is refused, never "corrected"
+    const forged = await selectAvailableTextgridNumber(pinnedRow(FALLBACK, extra), runnerDeps({ loadEstablishedSender: async () => ({ sender: CLEAN }) }).deps);
+    assert.deepEqual([forged.ok, forged.reason, forged.from_phone_number], [false, "sender_continuity_mismatch", FALLBACK]);
     const kept = await selectAvailableTextgridNumber(pinnedRow(CLEAN, extra), deps);
     assert.equal(kept.reason, "queue_row_from_phone_number_revalidated");
+    const keptEst = await selectAvailableTextgridNumber(pinnedRow(CLEAN, extra), runnerDeps({ loadEstablishedSender: async () => ({ sender: CLEAN }) }).deps);
+    assert.deepEqual([keptEst.ok, keptEst.from_phone_number, keptEst.reason], [true, CLEAN, "sender_continuity_thread_sender_revalidated"]);
   });
 }
 
@@ -169,10 +175,14 @@ test("runner, follow-up with no sender on a thread: the thread's own sender, nev
   const r = await selectAvailableTextgridNumber(pinnedRow(null), deps);
   assert.equal(r.from_phone_number, CLEAN);
   assert.equal(r.reason, "sticky_thread_sender:thread_continuity");
+  // owner P0 (sender continuity): the thread's sender cannot send ⇒ held sender_unavailable, never moved
   const blockedThread = runnerDeps({ loadThreadSender: async () => BLOCKED });
-  const moved = await selectAvailableTextgridNumber(pinnedRow(null), blockedThread.deps);
-  assert.equal(moved.from_phone_number, FALLBACK);
-  assert.equal(blockedThread.persisted.length, 1);
+  const held = await selectAvailableTextgridNumber(pinnedRow(null), blockedThread.deps);
+  assert.deepEqual([held.ok, held.reason, held.from_phone_number], [false, "sender_unavailable", BLOCKED]);
+  assert.equal(blockedThread.persisted.length, 0);
+  // the established-thread authority binds a sender-less row to the thread's own sender
+  const bound = await selectAvailableTextgridNumber(pinnedRow(null), runnerDeps({ loadEstablishedSender: async () => ({ sender: CLEAN }) }).deps);
+  assert.deepEqual([bound.ok, bound.from_phone_number, bound.reason], [true, CLEAN, "sender_continuity_thread_sender_bound"]);
 });
 
 test("runner, unassigned row with no thread: the rotation skips the least-used blocked number", async () => {

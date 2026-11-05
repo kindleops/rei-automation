@@ -11,13 +11,18 @@
 // is skipped (counted), never forced. Never touched: scheduled_for*, template,
 // sender, queue_status, holds, retry metadata. No row is cancelled or rebuilt.
 //
-// --apply requires the OWNER: --apply --owner-approved=YES and a writable
-// DATABASE_URL. Run only with outbound paused (queue_processor_mode=off) and
-// AFTER 8.4.8 is deployed (so nothing new renders "Alex" behind the repair).
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-repair.mjs            # dry run
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-repair.mjs --apply --owner-approved=YES
-import { createRequire } from "node:module";
+// --apply requires the OWNER: --apply --owner-approved=YES and, since rc-8.5.21-c, the
+// explicit production-write path of scripts/lib/prod-db-credentials.mjs:
+// --prod-write=<approval-ref>, LC_PROD_WRITE_DB_URL_FILE and an interactive TTY
+// confirmation (DATABASE_URL is no longer read). The plan is read as the role-enforced
+// read-only diagnostics credential (LC_RO_OPS_DIAG_DB_URL_FILE). Run only with outbound
+// paused (queue_processor_mode=off) and AFTER 8.4.8 is deployed (so nothing new
+// renders "Alex" behind the repair).
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-repair.mjs            # dry run
+//   LC_RO_OPS_DIAG_DB_URL_FILE=… LC_PROD_WRITE_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs scripts/ops/hotfix-848/persona-pending-repair.mjs \
+//     --apply --owner-approved=YES --prod-write=<approval-ref>
 import { connectReadOnly, arg } from "../r10-safety/_ro-db.mjs";
+import { connectProdWrite } from "../../../../../scripts/lib/prod-db-credentials.mjs";
 import { loadHistory, loadPendingRows, planRow, summarize } from "./persona-plan.mjs";
 
 const apply = process.argv.includes("--apply");
@@ -37,10 +42,7 @@ const writes = plans.filter((p) => p.decision === "corrected" && !p.held);
 const result = { mode: apply ? "apply" : "dry_run", planned: summarize(plans), would_update: writes.length, conflict_flagged: plans.filter((p) => p.decision === "conflict_flagged").length };
 
 if (apply) {
-  const require = createRequire(import.meta.url);
-  const pg = require("pg");
-  const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
-  await db.connect();
+  const db = await connectProdWrite({ purpose: `hotfix 8.4.8 persona repair: update ${writes.length} pending send_queue row(s)`, applicationName: "lc-hotfix-848-persona-repair" });
   await db.query("set statement_timeout='30s'");
   let updated = 0, skipped_guard = 0;
   try {

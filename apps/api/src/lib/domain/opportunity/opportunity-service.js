@@ -28,6 +28,7 @@ import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/oppor
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
 import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
 import { patchUniversalLeadState } from '@/lib/domain/lead-state/patch-universal-lead-state.js';
+import { HOLD_CAPABILITIES, isStageAdvance, resolveAutomationHold } from '@/lib/domain/holds/automation-hold.js';
 import {
   normalizeLifecycleStage,
   normalizeLeadTemperature,
@@ -583,6 +584,27 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
    * enforce_closed_won_authority backs this up for every other writer.
    */
   const requestedStage = normalizeAcquisitionStageCode(input.to_stage ?? input.stage);
+
+  // AUTOMATION HOLD (P0 2026-10-16): a held deal's stage never advances, from
+  // any writer (seller flow, recovery, workflow, lead-state sync, pipeline UI).
+  // Releasing the hold is the audited way to move it. Fail closed. The DB
+  // trigger on acquisition_opportunities backs this up.
+  if (isStageAdvance(current?.acquisition_stage, requestedStage)) {
+    const stage_hold = await resolveAutomationHold(
+      { opportunity_id: current?.id || id, thread_key: current?.primary_thread_key, property_id: current?.primary_property_id, master_owner_id: current?.master_owner_id },
+      { capability: HOLD_CAPABILITIES.STAGE_ADVANCE, supabase: client }
+    );
+    if (stage_hold.held) {
+      return {
+        ok: false,
+        error: 'automation_hold',
+        code: stage_hold.fail_closed ? 'AUTOMATION_HOLD_LOOKUP_FAILED' : 'AUTOMATION_HOLD',
+        message: 'This deal is under an automation hold; its stage cannot advance until the hold is released.',
+        hold_ids: stage_hold.hold_ids,
+      };
+    }
+  }
+
   const closingAsLost = String(input.outcome || '').toLowerCase() === 'lost';
   if (requestedStage === 'closed' && !closingAsLost && !CLOSED_LOST_STATUSES.has(String(current.opportunity_status || '').toLowerCase())) {
     const { finalizeClosing } = await import('@/lib/domain/closings/closing-authority.js');

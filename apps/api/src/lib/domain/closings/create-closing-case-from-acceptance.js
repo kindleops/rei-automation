@@ -32,6 +32,7 @@ import crypto from "node:crypto";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { assertContractComplete } from "@/lib/domain/seller-flow/seller-offer-policy.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { HOLD_CAPABILITIES, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -239,6 +240,17 @@ export async function createClosingCaseFromAcceptance({
 } = {}) {
   const supabase = injected || getDefaultSupabaseClient();
   if (!supabase) return { ok: false, created: false, reason: "missing_supabase" };
+
+  // AUTOMATION HOLD (P0 2026-10-16): no closing case on a held deal, from any
+  // caller. Fail closed. (DB trigger on closing_cases INSERT backs this up.)
+  const closing_hold = await resolveAutomationHold(
+    { opportunity_id, thread_key },
+    { capability: HOLD_CAPABILITIES.CLOSING_CASE_CREATE, supabase }
+  );
+  if (closing_hold.held) {
+    warn("[CLOSING_CASE_BLOCKED_BY_AUTOMATION_HOLD]", { opportunity_id, hold_ids: closing_hold.hold_ids, fail_closed: closing_hold.fail_closed });
+    return { ok: false, created: false, reason: closing_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold", automation_hold: closing_hold };
+  }
 
   let authorities;
   try {

@@ -2,15 +2,14 @@
 /**
  * Snapshot the column types eg_property_facts copies (read-only information_schema).
  * Writes apps/api/src/lib/domain/entity-graph/eg-property-facts-types.js.
- * Usage: DATABASE_URL=… node scripts/entity-graph/snapshot-eg-property-facts-types.mjs
+ * Usage: LC_RO_ENTITY_GRAPH_DB_URL_FILE=<0600 file> node scripts/entity-graph/snapshot-eg-property-facts-types.mjs
+ * Credential: LC_RO_ENTITY_GRAPH_DB_URL_FILE (the role-enforced read-only diagnostics credential; scripts/lib/prod-db-credentials.mjs).
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import pg from 'pg'
+import { connectReadOnlyDiagnostics } from '../lib/prod-db-credentials.mjs'
 
-const url = process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim()
-const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } })
-await client.connect()
+const client = await connectReadOnlyDiagnostics({ purpose: 'entity_graph', applicationName: 'lc-eg-facts-types' })
 await client.query("set statement_timeout = '30s'; set default_transaction_read_only = on")
 const { rows } = await client.query(`
   select table_name, column_name, data_type, udt_name

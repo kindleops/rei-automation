@@ -131,3 +131,45 @@ export async function loadPropertyGeography(supabase, propertyIds = []) {
   }
   return out;
 }
+
+/**
+ * rc-8.5.21 RUN-06: the owner's MAILING state carried on a queue row (recipient evidence: where the seller
+ * lives, not where the property is), from the row, its metadata or its candidate snapshot. Null when absent.
+ * @returns {{state: string, zip: string|null}|null}
+ */
+export function rowMailingGeography(row = {}) {
+  const metadata = metadataOf(row);
+  const snapshot = metadata.candidate_snapshot && typeof metadata.candidate_snapshot === "object" ? metadata.candidate_snapshot : {};
+  const first = (...values) => values.map(clean).find(Boolean) || null;
+  const state = first(
+    row.owner_address_state, row.mailing_state, row.mailing_address_state,
+    metadata.owner_address_state, metadata.mailing_state, metadata.mailing_address_state,
+    snapshot.owner_address_state, snapshot.mailing_state, snapshot.mailing_address_state
+  );
+  return state ? { state, zip: null } : null;
+}
+
+/**
+ * rc-8.5.21 RUN-06: the owners' mailing states for a set of property ids (one read of
+ * properties.owner_address_state — the same evidence the follow-up lifecycle schedules with). Its own
+ * query, so a failure never takes the property geography down with it; the caller treats a failed read
+ * as absent evidence (exactly what the scheduler does).
+ * @returns {Promise<Map<string, {state: string, zip: null}>>}
+ */
+export async function loadMailingGeography(supabase, propertyIds = []) {
+  const ids = [...new Set(propertyIds.map(clean).filter(Boolean))];
+  const out = new Map();
+  if (!ids.length || !supabase) return out;
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from("properties")
+      .select("property_id,owner_address_state")
+      .in("property_id", ids.slice(i, i + 200));
+    if (error) throw error;
+    for (const p of data || []) {
+      const state = clean(p.owner_address_state);
+      if (state) out.set(clean(p.property_id), { state, zip: null });
+    }
+  }
+  return out;
+}

@@ -23,7 +23,7 @@
 //             Replays of a decided approval return the recorded result and never
 //             execute twice.
 import { canonicalJson, hashCanonical, newId, timingSafeEqualHex } from '../runtime/canonical.js'
-import { isConsequentialIdentity } from '../security/identity.js'
+import { isConsequentialIdentity, isAgentIdentity } from '../security/identity.js'
 import { APPROVAL_TTL_MS } from './contracts.js'
 
 export const DECISIONS = Object.freeze(['approve', 'deny'])
@@ -102,6 +102,8 @@ export function createCapabilityApprovals({ store, registry, services, now = () 
   async function decide({ org_id, identity, approval_id, decision, payload_hash, note = null }) {
     if (!DECISIONS.includes(decision)) return { ok: false, code: 'DECISION_INVALID' }
     if (!isConsequentialIdentity(identity)) return { ok: false, code: 'IDENTITY_REQUIRED' }
+    // D6: a decision is a HUMAN act — an agent / service / model identity never decides (approve or deny)
+    if (isAgentIdentity(identity)) return { ok: false, code: 'HUMAN_DECISION_REQUIRED' }
     const member = await store.membership(org_id, identity.user_id)
     if (!member) return { ok: false, code: 'NOT_A_MEMBER' }
     const a = await store.getApproval(org_id, String(approval_id || ''))

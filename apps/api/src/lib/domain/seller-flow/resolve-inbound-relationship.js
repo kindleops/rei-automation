@@ -1,3 +1,4 @@
+import { isOwnershipUnverified } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import {
   extractReferralCandidates,
@@ -10,6 +11,9 @@ export const RELATIONSHIP_CLAIMS = Object.freeze([
   "actual_wrong_number",
   "never_been_owner",
   "not_owner",
+  // RC 8.5.15: a bare "No" to the S1 ownership question -- ownership denied,
+  // unverified for this recipient x property (decline-followup-policy.js).
+  "ownership_unverified",
   "former_owner",
   "tenant",
   "property_manager",
@@ -24,6 +28,9 @@ export const RELATIONSHIP_CLAIMS = Object.freeze([
 export const PROPERTY_SCOPED_CLAIMS = new Set([
   "never_been_owner",
   "not_owner",
+  // RC 8.5.15: a bare "No" to the S1 ownership question -- ownership denied,
+  // unverified for this recipient x property (decline-followup-policy.js).
+  "ownership_unverified",
   "former_owner",
   "tenant",
   "property_manager",
@@ -322,8 +329,15 @@ function detectOwnershipConfirmation(message = "", classifier_intent = null) {
 // they answer our number); only the classifier's context-bound verdict is.
 const NOT_RIGHT_NUMBER_RULE_ID = "wrong_number_not_right_number_to_ownership_question";
 
+// blind-eval v2 IDN-04: "Are you a realtor? I'm not paying commission" is a QUESTION about us, not a
+// statement of the respondent's role — a question sentence aimed at us is never a role claim.
+const QUESTION_ABOUT_US_RE = /[^.!?]*\b(?:are|r)\s+(?:you|u|y'?all)\b[^.!?]*\?|[^.!?]*\b(?:is\s+this|you\s+(?:a|an)|is\s+that\s+you)\b[^.!?]*\?/g;
+function withoutQuestionsAboutUs(text = "") {
+  return String(text || "").replace(QUESTION_ABOUT_US_RE, " ").replace(/\s+/g, " ").trim();
+}
+
 function detectRelationshipClaim(message = "", classification = null) {
-  const text = lower(message);
+  const text = withoutQuestionsAboutUs(lower(message));
   if (includesAny(text, ACTUAL_WRONG_NUMBER_PHRASES) && !includesAny(text, NEVER_OWNER_PHRASES)) {
     return "actual_wrong_number";
   }
@@ -528,6 +542,14 @@ export function resolveInboundRelationship({
   let relationship_claim = ownership_confirmed
     ? "ownership_confirmed"
     : detectRelationshipClaim(text, classification);
+  // RC 8.5.15: the context-bound bare "No" carries no denial words for the
+  // text detectors; the classification names it.
+  if (
+    (!relationship_claim || relationship_claim === "not_owner" || relationship_claim === "never_been_owner") &&
+    isOwnershipUnverified(classification)
+  ) {
+    relationship_claim = "ownership_unverified";
+  }
 
   const referral_candidates = extractReferralCandidates(text, known_phones);
   const referral_detected =
@@ -581,7 +603,11 @@ export function resolveInboundRelationship({
       referral_candidates.ambiguous ||
       referrals.length > 1 ||
       relationship_claim === "spouse_co_owner" ||
-      (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) && relationship_claim !== "ownership_confirmed") ||
+      // An unverified-ownership "No" is a deterministic property-scoped hold,
+      // not a review item (RC 8.5.15).
+      (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) &&
+        relationship_claim !== "ownership_confirmed" &&
+        relationship_claim !== "ownership_unverified") ||
       canonical_intent === "unclear"
     );
 

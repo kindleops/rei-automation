@@ -8,16 +8,17 @@
  * file (apps/api/scripts/entity-graph-fixtures.mjs). Every non-GET and every
  * other API / Supabase request is aborted. Misses → <out>/misses.json.
  *
+ * Credential (rc-8.5.21-c): LC_RO_ENTITY_GRAPH_DB_URL_FILE — the role-enforced read-only
+ * diagnostics role, verified by scripts/lib/prod-db-credentials.mjs.
  * Run from apps/api (the service imports resolve through its alias loader):
  *   node --import ./tests/register-aliases.mjs ../dashboard/scripts/proof/desktop/eg-overview-capture.mjs \
  *     --dist=/tmp/egov-dist --fixtures=<fx.json> --out=<dir> --themes=dark,light --sizes=1440x900,1920x1080
  */
 import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import pg from 'pg'
+import { openReadOnlyPool } from '../../../../../scripts/lib/prod-db-credentials.mjs'
 
 const arg = (n, f) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : f }
 const DIST = path.resolve(arg('dist', '/tmp/egov-dist'))
@@ -37,8 +38,7 @@ const SCENES = [
 ].filter(([n]) => !ONLY || ONLY.split(',').some((o) => n.startsWith(o)))
 
 const { buildEntityGraphOverview } = await import('@/lib/domain/entity-graph/entity-graph-overview-service.js')
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL || readFileSync('/tmp/.dburl', 'utf8').trim(), ssl: { rejectUnauthorized: false }, max: 4 })
-pool.on('connect', (c) => c.query('set default_transaction_read_only = on'))
+const pool = await openReadOnlyPool({ purpose: 'entity_graph', applicationName: 'lc-eg-overview-capture', max: 4 })
 const query = async (sql, params, ms) => { const c = await pool.connect(); try { await c.query(`set statement_timeout = ${Math.min(30_000, Math.trunc(ms || 8000))}`); return await c.query(sql, params) } finally { c.release() } }
 const overviewDeps = { query, skipSnapshot: true, timeoutMs: 30_000, fetchEntityContactReviewBlocks: async () => ({ ok: true, blocked: new Set() }) }
 

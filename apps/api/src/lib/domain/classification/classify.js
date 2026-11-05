@@ -1,4 +1,6 @@
 // ─── classify.js ──────────────────────────────────────────────────────────
+import { isDirectNo } from "./ownership-answer-forms.js";
+import { acceptsOurProposal } from "@/lib/domain/conversation-ai/acceptance.js";
 import { ai } from "@/lib/providers/ai.js";
 import {
   getCategoryValue,
@@ -26,6 +28,8 @@ import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multi
 import { assessAskingPricePlausibility } from "@/lib/domain/classification/price-plausibility.js";
 import { assessDealEconomics, isPriceFarAboveValue, PRICE_GAP_REASON_CODE } from "@/lib/domain/inbox/deal-economics-gate.js";
 import { matchMultilingualOptOut } from "@/lib/domain/classification/multilingual-opt-out.js";
+import { analyzeContactRevocation, isChannelPreferenceOnly } from "@/lib/domain/classification/multilingual-contact-revocation.js";
+import { stopWordTargetsUs, FIRST_PERSON_STOP_RE, NEGATED_CONTINUATION_RE, COMM_OBJECT_RE } from "@/lib/domain/classification/revocation-morphology.js";
 import { applyRound11CounterpartyRule, applyRound11UnclearRules, matchRound11OptOut } from "@/lib/domain/classification/round11-unclear-rules.js";
 import { classifyStopScope, matchesOutreachStop, STOP_SCOPE } from "@/lib/domain/classification/stop-scope.js";
 import {
@@ -439,7 +443,7 @@ const POSITIVE_SENTIMENT_INTENTS = new Set([
 ]);
 const NEGATIVE_SENTIMENT_INTENTS = new Set([
   "opt_out", "wrong_number", "not_interested", "hostile_or_legal", "sold_property", "need_time",
-  "property_specific_non_owner", "former_owner_respondent",
+  "property_specific_non_owner", "former_owner_respondent", "ownership_declined_unverified",
 ]);
 const SARCASM_RULE_RE = /^(?:sarcasm_not_interest|non_literal_laughter|asking_price_implausible_|troll_after_implausible_ask|profanity_in_reply)/;
 
@@ -468,6 +472,8 @@ export function deriveReplySentiment(intents = {}) {
 const KEY_WORDS = [
   "interested", "interesting", "property", "properties", "proposal", "selling", "number", "owner", "offer",
   "price", "house", "wrong", "realtor", "investor", "wholesaler", "message", "texting",
+  // the opt-out keyword itself, one letter off ("unsubscibe pls"): blind evaluation v7, Z05
+  "unsubscribe",
 ];
 const COMMON_WORDS = new Set([
   "power", "other", "offers", "offered", "offset", "prices", "priced", "pricey", "prize", "pride", "owned", "owners",
@@ -495,9 +501,18 @@ function oneEditApart(a, b) {
   }
   return true;
 }
+// SMS shorthand read as the words it stands for ("pls dont txt this # agian" is "don't text this number again"):
+// an opt-out written in shorthand is still an opt-out
+const SMS_SHORTHAND = [
+  [/\btxt(s|ing|ed)?\b/gi, "text$1"],
+  [/\btxtin\b/gi, "texting"],
+  [/\b(this|that|my|the|ur|your)\s+#(?!\s*\d)/gi, "$1 number"],
+  [/\bag(?:ian|ain?n|n)\b/gi, "again"],
+]
 export function correctKeyMisspellings(message) {
-  const text = String(message ?? "");
+  let text = String(message ?? "");
   if (!/[a-z]/i.test(text)) return text;
+  for (const [re, to] of SMS_SHORTHAND) text = text.replace(re, to);
   return text.replace(/[A-Za-z]{5,}/g, (word) => {
     const w = word.toLowerCase();
     if (COMMON_WORDS.has(w) || KEY_WORDS.includes(w)) return word;
@@ -871,6 +886,8 @@ const TEXT_OR_CONTACT_PROHIBITIONS = [
   "don't call or text", "dont call or text", "do not call or text",
   "don't text or call", "dont text or call", "do not text or call",
   "no calls or texts", "no texts or calls",
+  // P0 2026-10-19: "Don't call me or text me" prohibits both channels — never a channel preference
+  "call me or text", "call or text me", "call me nor text", "call or message", "call me or message",
 ];
 const CALL_ONLY_PROHIBITIONS = [
   "do not call", "do not call me", "don't call me", "dont call me",
@@ -878,11 +895,47 @@ const CALL_ONLY_PROHIBITIONS = [
   "quit calling me", "quit calling", "never call me", "never call",
   "no calls", "no phone calls",
 ];
+// blind-eval v2 IDN-10: "Yes. I don't text much, can someone call me?" describes the SELLER's habit
+// and asks for a call — a channel preference (a human callback), never an opt-out. Only a statement
+// about the seller ("I don't text (much)") WITH a call request and NO directive at us ("don't text
+// me", stop, remove, don't contact) qualifies; STOP stays absolute.
+export function matchesVoiceChannelPreference(text) {
+  const t = String(text || "").toLowerCase();
+  const habit = /\b(?:i|we)\s+(?:don'?t|dont|do\s+not)\s+(?:really\s+|usually\s+)?text(?:\s+(?:much|often|a\s+lot|very\s+much|well|that\s+much))?\b(?!\s+(?:me|us)\b)|\bnot\s+(?:much\s+of\s+)?a\s+texter\b/.test(t);
+  const call = /\b(?:call\s+me|give\s+me\s+a\s+(?:call|ring)|can\s+(?:someone|somebody|you|u|anyone)\s+(?:please\s+)?call|please\s+call|rather\s+(?:talk|speak)|prefer\s+(?:a\s+)?(?:call|phone)|phone\s+call)\b/.test(t);
+  const directive = /\b(?:stop|unsubscribe|remove|take\s+me\s+off|opt[\s-]?out|don'?t\s+(?:text|contact|message)\s+(?:me|us)|dont\s+(?:text|contact|message)\s+(?:me|us)|leave\s+me\s+alone|no\s+more\s+(?:texts|messages))\b/.test(t);
+  return habit && call && !directive;
+}
+
 function matchesTextChannelPreference(text) {
   return (
     includesAny(text, TEXT_CHANNEL_AFFIRMATIVES) &&
     !includesAny(text, TEXT_OR_CONTACT_PROHIBITIONS)
   );
+}
+
+// rc-8.5.21 v4: the carrier keywords keep their absolute leading-word reading; every other stop WORD
+// ("para", "basta", "alto", "arrêt", "cancela", "suficiente") is read with its target (revocation-morphology.js).
+const CARRIER_STOP_KEYWORDS = new Set(["stop", "stopall", "unsubscribe", "opt out", "optout", "opt-out", "quit"]);
+const TARGETED_STOP_WORD_PHRASES = new Set(["párate", "parate", "ya basta", "basta", "suficiente", "detente", "deténgase", "detengase", "alto", "cancela", "ya párale", "ya parale"]);
+// a NEGATED stop ("no dejen de llamarme si suben la oferta" = keep calling) and a LANGUAGE preference ("no me
+// escriba en inglés") are not revocations
+const NEGATABLE_STOP_PHRASE_RE = /^(?:dej|par|deten|cancel)/;
+const LANGUAGE_PREFERENCE_SPAN_RE = /(?<![\p{L}])no\s+(?:me\s+|nos\s+)?(?:escrib\w*|mand\w*|envi\w*|habl\w*|contest\w*|textee\w*)\s+(?:(?:los\s+)?mensajes\s+)?(?:en|in)\s+(?:ingl[eé]s|english|espa[nñ]ol|spanish|otro\s+idioma)(?![\p{L}])/giu;
+/** Every matched phrase is a bare stop WORD whose target is not us ("Basta ya con ese inquilino", "No es suficiente"), a negated stop, or a language preference. */
+function onlyUntargetedStopWords(text, phrases) {
+  const t = String(text || "").replace(LANGUAGE_PREFERENCE_SPAN_RE, " ");
+  const hits = phrases.filter((p) => includesAny(t, [p]));
+  if (!hits.length) return true;
+  return hits.every((p) => (TARGETED_STOP_WORD_PHRASES.has(p) && !stopWordTargetsUs(t, p.split(" ").pop()))
+    || (NEGATABLE_STOP_PHRASE_RE.test(p) && new RegExp(`(?<![\\p{L}])(?:no|nunca|jam[aá]s)\\s+${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "iu").test(t) && !includesAny(t.replace(new RegExp(`(?<![\\p{L}])(?:no|nunca|jam[aá]s)\\s+${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "giu"), " "), [p])));
+}
+/** "I need to stop the foreclosure" / "can't stop thinking about it": a stop not addressed to us (no communication object). */
+function stopNotAddressedToUs(text) {
+  const t = String(text || "");
+  if (NEGATED_CONTINUATION_RE.test(t)) return true;
+  const m = FIRST_PERSON_STOP_RE.exec(t);
+  return Boolean(m && !COMM_OBJECT_RE.test(String(m.groups?.obj || "")));
 }
 
 function detectComplianceFlag(message) {
@@ -923,6 +976,11 @@ function detectComplianceFlag(message) {
       )
     ) {
       if (matchesTextChannelPreference(text)) break;
+      // rc-8.5.21 v4 OBJECT / TARGET analysis: a leading stop WORD other than the carrier STOP keywords
+      // stops something only when it stands alone or names communication / us ("Basta.", "Para ya",
+      // "Basta de mensajes"); "Para mí está bien", "Basta ya con ese inquilino", "End of the month works",
+      // "Cancela la cita" are not revocations.
+      if (!CARRIER_STOP_KEYWORDS.has(kw) && !stopWordTargetsUs(bare, kw)) continue;
       return "stop_texting";
     }
   }
@@ -952,7 +1010,7 @@ function detectComplianceFlag(message) {
   // Phrase-intent match. Channel-preference carve: when the seller explicitly
   // affirms the text channel and prohibits only CALLS, the call-only phrases
   // must not read as a texting opt-out.
-  if (includesAny(text, COMPLIANCE_PHRASES)) {
+  if (includesAny(text, COMPLIANCE_PHRASES) && !onlyUntargetedStopWords(text, COMPLIANCE_PHRASES)) {
     if (matchesTextChannelPreference(text)) {
       const non_call_only_hit = COMPLIANCE_PHRASES.some(
         (p) => !CALL_ONLY_PROHIBITIONS.includes(p) && includesAny(text, [p])
@@ -4233,6 +4291,25 @@ function notRightNumberBindsToContext(conversation_context = null) {
 }
 
 /** True wrong-number / wrong-person at this phone (not sold/never-owned identity). */
+/** Phone-IDENTITY statements (the number / the person is wrong): contact-wide wrong_number. */
+const PHONE_IDENTITY_PHRASES = Object.freeze([
+  "wrong number", "wrong #", "wrng number", "rong number", "incorrect number", "wrong nbr", "error number",
+  "no longer my number", "not my number", "new number", "don't know this person", "dont know this person",
+  "not associated with", "not this person", "wrong person",
+  "número equivocado", "numero equivocado", "numero incorrecto", "número incorrecto",
+]);
+
+// rc-8.5.21 v3: a wrong-person statement SCOPED to one property ("wrong person for Garnet St") and a
+// claim of owning another ("I own Opal", "but I do own the one on Opal")
+const WRONG_FOR_PROPERTY_RE = /\bwrong\s+(?:person|guy|owner|one|house|home|property|address)\s+(?:for|on|about|regarding|with)\s+(?:the\s+)?(?:\d{1,6}\s+)?[a-z][\w.]*(?:\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place)\b\.?)?/i;
+const OWNS_ANOTHER_RE = /\b(?:i|we)\s+(?:do\s+|still\s+|actually\s+|only\s+)?(?:own|have|got)\s+(?!no\b|nothing\b|none\b)(?:the\s+(?:one|house|property)\s+(?:on|at)\s+)?\S|\bmine\s+is\b|\bi'?m\s+the\s+owner\s+of\b|\b(?:this|it)\s+is\s+(?:my|the\s+right)\s+number\s+for\b|\bthis'?s\s+my\s+number\s+for\b|\b(?:is|'s)\s+(?:mine|ours)\b|\bi'?m\s+(?:the\s+)?(?:owner|one)\s+(?:for|on)\b/i;
+// rc-8.5.21 v4 (owner rule 10-17, "a property denial is never global"): a wrong-person statement whose
+// target is a PROPERTY (a street suffix, a house number, or a property noun: "wrong guy for the main st
+// house", "wrong person on 412 Oak", "wrong owner for that property") is scoped to that property on its
+// own — with or without a same-message claim of another property. "Wrong person for this number" names
+// the PHONE and stays a phone-identity wrong number.
+const WRONG_FOR_PROPERTY_SCOPED_RE = /\bwrong\s+(?:person|guy|gal|lady|man|owner|one|people|folks)\s+(?:for|on|about|regarding|with)\s+(?:the\s+|that\s+|this\s+)?(?!(?:number|phone|cell|line|#)\b)(?:\d{1,6}\s+[a-z][\w.]*|[a-z][\w.]*(?:\s+[a-z][\w.]*)?\s+(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|ct|court|blvd|way|pl|place|cir|circle|ter|terrace|pkwy|hwy)\b\.?|(?:[a-z][\w.]*\s+)?(?:house|home|property|place|lot|land|duplex|condo|building|rental|address)\b)/i;
+
 function matchesTrueWrongNumber(text = "", { notRightNumber = true } = {}) {
   const normalized = lower(text);
   if (notRightNumber && matchesNotTheRightNumber(normalized)) return true;
@@ -4380,10 +4457,14 @@ function matchesOwnershipDisconnect(text = "") {
   }
 
   // Spanish "esa casa" only with explicit disown / garble (not "propietario de esa casa")
+  // rc-8.5.21 v4: the negation must scope the OWNERSHIP ("esa casa no es mía", "nunca fue mía", "la
+  // vendí") — never any "no" in the message ("Ya no aguanto, quiero salir de esa casa" is a seller who
+  // wants OUT of the house) and never a bare "mía" ("esa casa es mía" confirms ownership)
   if (
     /\besa\s+casa\b/i.test(normalized) &&
-    /\b(no|llano|equivoc|vend|mía|mia)\b/i.test(normalized) &&
-    !/\b(soy|propietario|dueño|dueno|owner)\b/i.test(normalized)
+    ESA_CASA_DISOWN_RE.test(normalized) &&
+    !/\b(soy|propietario|dueño|dueno|owner)\b/i.test(normalized) &&
+    !expressesDesireToDispose(normalized)
   ) {
     return true;
   }
@@ -4397,6 +4478,21 @@ function matchesOwnershipDisconnect(text = "") {
   }
 
   return false;
+}
+
+// rc-8.5.21 v4 (ownership-ambiguity): the disown forms of the "esa casa" heuristic — a negation bound to
+// the ownership verb (es / era / fue / ha sido / tuve), a sale, a garble or a "wrong" — never a bare "no".
+const ESA_CASA_DISOWN_RE = /(?<![\p{L}])(?:no\s+(?:es|era|fue|ha\s+sido|son|me\s+pertenece|tengo)|nunca\s+(?:fue|ha\s+sido|tuve|he\s+tenido)|ya\s+no\s+es)(?![\p{L}])|llano|equivoc|(?<![\p{L}])(?:la|lo)?\s*vend(?:[íi]|imos|ieron|i[óo])(?![\p{L}])/iu;
+
+// rc-8.5.21 v4: a seller who wants OUT of a property ("quiero salir de esa casa", "I need to get rid of
+// it", "I'm done with this house") is announcing a reason to SELL — interest, never an ownership denial.
+// Generative: a desire / need / obligation frame + a leave / dispose / sell verb (+ clitic), English and
+// Spanish, negation-guarded ("I don't want to get rid of it" is not interest).
+const DISPOSE_DESIRE_ES_RE = /(?<![\p{L}])(?<!no\s)(?:quiero|queremos|quisiera|quisieramos|quisiéramos|necesito|necesitamos|me\s+urge|nos\s+urge|tengo\s+que|tenemos\s+que|deseo|deseamos|me\s+gustar[ií]a|ojal[aá]\s+(?:pudiera|pueda))\s+(?:ya\s+|pronto\s+|r[aá]pido\s+)?(?:salir(?:me|nos)?\s+de|deshacer(?:me|nos)\s+de|irme\s+de|irnos\s+de|mudarme\s+de|mudarnos\s+de|librarme\s+de|librarnos\s+de|quitarme\s+de\s+encima|vender(?:la|lo|las|los)?(?![\p{L}]))/iu;
+const DISPOSE_DESIRE_EN_RE = /\b(?<!(?:not|don'?t|dont|do\s+not|never|doesn'?t|didn'?t|wouldn'?t|won'?t)\s)(?:want|wanna|need|have|got|gotta|would\s+like|'d\s+like|trying|looking|ready|dying)\s+(?:to\s+)?(?:just\s+)?(?:get\s+out\s+of|get\s+rid\s+of|move\s+out\s+of|unload|offload|dump|be\s+done\s+with|be\s+rid\s+of|walk\s+away\s+from)\b|\b(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:so\s+|just\s+|really\s+)?(?:done|finished|over\s+it|sick\s+of\s+it|tired)\s+(?:with|of)\s+(?:this|that|the|my)\s+(?:house|home|place|property|rental|duplex|building|lot)\b/i;
+export function expressesDesireToDispose(text = "") {
+  const t = String(text || "");
+  return DISPOSE_DESIRE_ES_RE.test(t) || DISPOSE_DESIRE_EN_RE.test(t);
 }
 
 function matchesWrongNumberDisconnect(text = "") {
@@ -4987,7 +5083,7 @@ function resolveIntents(
     const signal = emoji_interpretation.semantic_signal;
     const emoji_primary =
       signal === "hostile"
-        ? "hostile_or_legal"
+        ? "hostile_or_troll" // owner 2026-10-06: an insult (incl. a hostile emoji) never suppresses
         : signal === "acknowledgement" && !emoji_interpretation.needs_review
           ? "acknowledgement"
           : "unclear";
@@ -5174,9 +5270,10 @@ function resolveIntents(
   // (e.g. "wrong number stop calling") over generic opt_out from "stop".
   const is_true_wrong = matchesTrueWrongNumber(text, { notRightNumber: not_right_number_allowed });
   const is_ownership_disconnect = matchesOwnershipDisconnect(text);
-  const is_opt_out =
+  // IDN-10: a voice-channel preference ("I don't text much, call me") is never an opt-out
+  const is_opt_out = !matchesVoiceChannelPreference(text) && (
     compliance_flag === "stop_texting" ||
-    (!stop_other_action && includesAny(text, [
+    (!stop_other_action && includesAny(String(text).replace(LANGUAGE_PREFERENCE_SPAN_RE, " "), [
       "unsubscribe",
       "opt out",
       "opt-out",
@@ -5203,10 +5300,8 @@ function resolveIntents(
       "spam",
       "harassing",
       "harassment",
-      // Spanish opt-out (avoid bare "para" which is common in other phrases)
-      "detente",
-      "basta",
-      "cancela",
+      // Spanish opt-out (avoid bare "para" which is common in other phrases); the bare stop WORDS
+      // ("detente", "basta", "cancela", "alto") are read with their target below (rc-8.5.21 v4)
       "elimíname",
       "eliminame",
       "no me escribas",
@@ -5214,7 +5309,6 @@ function resolveIntents(
       "no más mensajes",
       "no mas mensajes",
       "dejen de enviarme",
-      "alto",
       "no me escriba más",
       "no me escriba mas",
       "no me escribas más",
@@ -5225,12 +5319,13 @@ function resolveIntents(
       "dejen de escribirme",
     ]) ||
     /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim())) ||
-    (/\bstop\b/i.test(text) &&
+    (!stop_other_action && ["detente", "basta", "cancela", "alto"].some((w) => includesAny(text, [w]) && stopWordTargetsUs(text, w))) ||
+    (/\bstop\b/i.test(text) && !stopNotAddressedToUs(text) &&
       includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]) &&
       // "Stop calling me, text me instead" is a channel preference, not an
       // opt-out (see matchesTextChannelPreference — text prohibitions never
       // pass the guard, so real opt-outs are unaffected).
-      !matchesTextChannelPreference(text));
+      !matchesTextChannelPreference(text)));
 
   if (is_opt_out && !is_true_wrong && !is_ownership_disconnect) {
     matched_rule_ids.push("opt_out_terminal");
@@ -5299,11 +5394,48 @@ function resolveIntents(
   const is_sold_transfer = legacy_sold_transfer || reply_signals?.sold === true;
   if (!legacy_sold_transfer && reply_signals?.sold === true) reply_rule_ids.push("sold_short_multilingual");
   const is_wrong_person_claim = reply_signals?.wrong_person?.matched === true;
+  // OWNER RULE 2026-10-17 (rc-8.5.21): a PROPERTY-specific ownership denial ("never owned it", "not
+  // the owner", "I don't own that", "Never have" to our ownership question, "you're misinformed")
+  // must NEVER become a phone-level wrong-number suppression (archive_wrong_number marks the phone
+  // wrong for the owner's EVERY property). Only a PHONE-IDENTITY statement (wrong number, wrong
+  // person / a named non-addressee, "no longer my number", "don't know this person") is a
+  // contact-wide wrong_number; an ownership denial is the property-scoped property_specific_non_owner
+  // lane (no phone suppression; the contact x property pair is recorded by contact resolution).
+  const wrong_person_rule = is_wrong_person_claim ? reply_signals?.wrong_person?.rule_id || null : null;
+  // "Never have" to our ownership question = never the owner (property-scoped). A denied PREMISE
+  // ("you're misinformed") keeps its wrong_number + human-review route (no suppression is written).
+  const wrong_person_is_ownership_denial = wrong_person_rule === "wrong_person_never_owned";
+  // rc-8.5.21 v3 (owner rule 10-17, "a property denial is never global"): "Wrong person for <A>, I own
+  // <B>" scopes the wrong-person statement to property A and claims ownership of another property: it
+  // is a PROPERTY denial for A (B is confirmed by the clause-level reading), never a phone-identity
+  // wrong number. Only when nothing ELSE in the message is a phone-identity statement.
+  const property_scoped_wrong_person = (() => {
+    const scopedToAProperty = WRONG_FOR_PROPERTY_SCOPED_RE.test(text);
+    if (!scopedToAProperty && !(WRONG_FOR_PROPERTY_RE.test(text) && OWNS_ANOTHER_RE.test(text))) return false;
+    const rest = lower(text).replace(new RegExp(WRONG_FOR_PROPERTY_SCOPED_RE.source, "gi"), " ").replace(new RegExp(WRONG_FOR_PROPERTY_RE.source, "gi"), " ")
+      // "this is my number for the elm one" CLAIMS the phone for another property: never a phone-identity denial
+      .replace(/\b(?:this|it)\s+is\s+(?:my|the\s+right)\s+number\s+for\b|\bthis'?s\s+my\s+number\s+for\b/gi, " ");
+    // reconciliation: "not the right number" binds only where production's context rule allows it
+    return !matchesTrueWrongNumber(rest, { notRightNumber: not_right_number_allowed }) && !PHONE_IDENTITY_PHRASES.some((p) => rest.includes(p));
+  })();
+  if (property_scoped_wrong_person) matched_rule_ids.push("wrong_person_scoped_to_property");
+  const is_phone_identity_claim = !property_scoped_wrong_person && (
+    is_true_wrong ||
+    (is_wrong_person_claim && !wrong_person_is_ownership_denial) ||
+    PHONE_IDENTITY_PHRASES.some((p) => text.includes(p)));
+  const is_property_ownership_denial =
+    !is_phone_identity_claim && (property_scoped_wrong_person || is_ownership_disconnect || wrong_person_is_ownership_denial || normalized_objection === "wrong_number");
   if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
+  } else if (is_property_ownership_denial) {
+    // pushed as wrong_number so intent PRECEDENCE is unchanged (it outranks a bare "Nope" decline and a
+    // trust frame); the marker makes rescopeWrittenOwnershipDenial re-scope the final result to the
+    // property-scoped property_specific_non_owner lane — never archive_wrong_number
+    intents.push("wrong_number");
+    matched_rule_ids.push("ownership_denial_property_scoped");
+    if (wrong_person_rule) reply_rule_ids.push(wrong_person_rule);
   } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect || is_wrong_person_claim) {
-    // WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
-    // (never-owned / not-owner identity disconnects stay phone-scoped).
+    // WRONG NUMBER / WRONG PERSON / DISCONNECTED CONTACT (phone identity: contact-wide).
     intents.push("wrong_number");
     if (is_wrong_person_claim && !(normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect)) {
       reply_rule_ids.push(reply_signals.wrong_person.rule_id);
@@ -5403,15 +5535,26 @@ function resolveIntents(
     intents.push("condition_disclosed");
     reply_rule_ids.push("condition_gross_disclosure");
   }
-  if (hostile_legal_threat || hostile_profanity || hostile_bare_fu || hostile_insult || hostile_emoji) {
+  // OWNER RULE (2026-10-06, locked): an insult NEVER suppresses — no reply plus a quiet archive,
+  // nurture eligibility unchanged. Only a genuine legal threat or a stop-type demand ("stop
+  // harassing me", "don't ever text me") is hostile_or_legal (suppression + review, as today); an
+  // insult, profanity, a bare "FU" or a hostile emoji WITHOUT one is hostile_or_troll (blind-eval
+  // REAL-117 / SCONV-27 / SYN-48: they were labelled hostile_or_legal and the phone suppressed).
+  if (hostile_legal_threat) {
     intents.push("hostile_or_legal");
-    if (hostile_legal_threat) rule_tags.push("hostile_legal_threat");
-    else if (hostile_profanity || hostile_bare_fu) rule_tags.push("hostile_profanity");
-    else reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : "emoji_hostile_with_text");
+    rule_tags.push("hostile_legal_threat");
+  } else if (hostile_profanity || hostile_bare_fu || hostile_insult || hostile_emoji) {
+    if (!intents.includes("hostile_or_troll")) intents.push("hostile_or_troll");
+    if (hostile_profanity || hostile_bare_fu) rule_tags.push("hostile_profanity");
+    reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : hostile_emoji && !(hostile_profanity || hostile_bare_fu) ? "emoji_hostile_with_text" : "insult_quiet_archive");
   }
 
   // 4. NOT INTERESTED / SOFT OBJECTIONS (Capture negations before positive keywords)
+  // blind-eval v2 RUN-18: "My husband wants to keep it" is selling disinterest (the 30-day nurture);
+  // WHO decides is never a pricing input (marital / family status is never priced)
+  const keep_it_disinterest = /\b(?:my|our)\s+(?:husband|wife|spouse|partner|family|kids|children|son|daughter|mom|mother|dad|father|parents)\s+(?:wants?|would\s+(?:like|rather)|prefers?|decided|wishes)(?:\s+to)?\s+(?:keep|hold\s+on\s+to|hang\s+on\s+to)\s+(?:it|the\s+(?:house|home|property|place))\b|\b(?:we|i)(?:'?re|\s+are|\s+am|'?m)?\s+(?:going\s+to\s+|gonna\s+)?(?:want\s+to\s+)?keep(?:ing)?\s+(?:it|the\s+(?:house|home|property|place))\b/i.test(text);
   const legacy_not_interested_match =
+    keep_it_disinterest ||
     normalized_objection === "not_interested" ||
     includesAny(text, [
       "not interested", "no interest", "no thanks", "no thank you",
@@ -5601,6 +5744,11 @@ function resolveIntents(
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("seller_interested");
     }
+  }
+  // rc-8.5.21 v4: wanting OUT of the property is a reason to sell (interest), never a denial
+  if (expressesDesireToDispose(text) && !intents.includes("not_interested") && !intents.includes("need_time") && !intents.includes("seller_interested")) {
+    intents.push("seller_interested");
+    matched_rule_ids.push("wants_out_of_property");
   }
   // 7.2: "It's for sale right now" is the seller announcing it is for sale.
   if (
@@ -6047,9 +6195,10 @@ function resolveIntents(
       OWNERSHIP_TRANSFER_YEARS_AGO_RE.test(text)) &&
     !/\bstill\b/i.test(text)
   ) {
-    // A SOLD transfer is the property-scoped sold_property lane; other
-    // disconnects (moved out, lost it, was mine) keep the wrong_number fold.
-    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "wrong_number";
+    // A SOLD transfer is the property-scoped sold_property lane. OWNER RULE 2026-10-17: the other
+    // former-owner disconnects (moved out, lost it, was mine, used to own) are ALSO about THIS
+    // property: property_specific_non_owner (property-scoped), never the phone-level wrong_number fold.
+    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "property_specific_non_owner";
     if (!intents.includes(former_owner_intent)) intents.push(former_owner_intent);
     matched_rule_ids.push("former_owner_disconnect");
   }
@@ -7041,7 +7190,12 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // "Хватит", "रुको" stop something other than communication — never an opt-out,
   // and never canonicalized to a bare "stop".
   const stop_other_action = classifyStopScope(original_message) === STOP_SCOPE.OTHER_ACTION;
-  let message = multilingual && !(stop_other_action && /^stop\b/i.test(String(multilingual.canonical_text || "")))
+  // P0 2026-10-19: a call-only prohibition with a text affirmative ("Don't call, text is fine",
+  // "No me llames, mándame un mensaje", "لا تتصل بي، راسلني") is a CHANNEL PREFERENCE in every
+  // language — never an SMS opt-out, never canonicalized to "stop"; any text / contact
+  // prohibition keeps the opt-out (isChannelPreferenceOnly).
+  const channel_preference_only = !matchRound11OptOut(original_message).matched && isChannelPreferenceOnly(original_message);
+  let message = multilingual && !(channel_preference_only && multilingual.category === "opt_out") && !(stop_other_action && /^stop\b/i.test(String(multilingual.canonical_text || "")))
     ? multilingual.canonical_text
     : correctKeyMisspellings(original_message);
   // A bare "?" / "???" to our message is the who-are-you question (round 8).
@@ -7053,7 +7207,7 @@ function classifyHeuristic(original_message, brain_item = null, options = {}) {
   // AGAIN", "I'm blocking you", "sued ... if you ask again" are opt-outs and
   // override every ordinary intent -- read from the ORIGINAL words.
   const round11_opt_out = matchRound11OptOut(original_message);
-  const compliance_flag  = (stop_other_action
+  const compliance_flag  = channel_preference_only ? null : (stop_other_action
     ? (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
     : detectComplianceFlag(message) || (matchMultilingualOptOut(original_message) ? "stop_texting" : null)
       // round 9: a stop aimed at our outreach ("Stop looking up properties to buy").
@@ -7757,6 +7911,32 @@ function deriveAutomationDecision({
     };
   }
 
+  // RC 8.5.15 (owner 2026-10-14): ownership denied / unverified for THIS
+  // property -- a deterministic property-scoped stop: no reply, no suppression,
+  // no review item.
+  if (intent === "property_specific_non_owner") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
+  // OWNER DECISION 2026-10-17: a polite decline to the ownership question — declined engagement,
+  // ownership UNVERIFIED. No reply, no suppression, no nurture; a property × contact hold (recorded by
+  // contact resolution as role ownership_declined_unverified, never not_owner).
+  if (intent === "ownership_declined_unverified") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
+    };
+  }
+
   // A denied premise ("you're misinformed") is a LIKELY wrong person: a person
   // confirms before any wrong-number mark is written.
   if (
@@ -7918,6 +8098,11 @@ function sanitizeAiResult(raw, heuristic) {
   return { language, objection, emotion, stage_hint, compliance_flag, positive_signals, confidence, notes };
 }
 
+// rc-8.5.21 v3: test seam for the legacy OpenAI assist (a stub model proves the deterministic opt-out
+// precedence on the AI path without a network call). null = the real provider.
+let AI_ASSIST_IMPL = null;
+export function __setClassifierAiForTests(fn = null) { AI_ASSIST_IMPL = typeof fn === "function" ? fn : null; }
+
 async function aiAssistClassification({ message, heuristic_result }) {
   const safe_message = sanitizeForPrompt(message);
 
@@ -7953,7 +8138,7 @@ Rules:
 6. Never invent fields.`;
 
   try {
-    const response = await ai({
+    const response = await (AI_ASSIST_IMPL || ai)({
       model:       "gpt-4o-mini",
       temperature: 0,
       max_tokens:  400,
@@ -7992,7 +8177,211 @@ Rules:
 
 const AI_CONFIDENCE_THRESHOLD = 0.82;
 
+/**
+ * RC 8.5.15 (owner rule 2026-10-14): a WRITTEN ownership denial ("not mine",
+ * "I don't own it", "never owned it", "no soy el dueño") says this person is
+ * not the owner of THIS property. It is not a wrong number: the phone stays
+ * contactable for every other property and nothing is suppressed (suppression
+ * is a permission state; only an explicit stop/opt-out sets it). It joins the
+ * S1 ownership-denied / unverified lane (decline-followup-policy.js). An
+ * explicit "wrong number" / "wrong person" / "this is not <name>", a sale, and
+ * any compliance signal keep their own classification.
+ */
+/**
+ * RC 8.5.15 (eval #55, owner rule "not selling" = the 30-day follow-up): "Si
+ * pero no estoy vendiéndola" / "Yes but I'm not selling" confirms ownership AND
+ * declines. The decline decides the turn (never the S2 interest question again).
+ */
+const OWNER_BUT_NOT_SELLING_RE = /\b(?:pero|but)\s+(?:no\s+(?:estoy|esta|está|la\s+estoy|lo\s+estoy)\s+(?:vendi\w*|a\s+la\s+venta|en\s+venta)|no\s+(?:la|lo)\s+(?:vendo|voy\s+a\s+vender)|no\s+(?:quiero|pienso|planeo)\s+vender\w*|no\s+(?:est[aá]|es)\s+(?:a\s+la|en)\s+venta|(?:i'?m|i\s+am|we'?re|we\s+are|im)\s+not\s+(?:selling|interested|looking\s+to\s+sell)|not\s+(?:selling|for\s+sale|interested)|(?:i|we)\s+(?:do\s*n[o']?t|dont)\s+(?:want|plan|intend)\s+to\s+sell)/i;
+export function rescopeOwnerButNotSelling(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (result.primary_intent !== "ownership_confirmed") return result;
+  if (!OWNER_BUT_NOT_SELLING_RE.test(String(text ?? ""))) return result;
+  return {
+    ...result,
+    primary_intent: "not_interested",
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_confirmed"])],
+    matched_intents: [...new Set(["not_interested", ...(Array.isArray(result.matched_intents) ? result.matched_intents : [])])],
+    matched_rule_ids: [...(Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : []), "owner_but_not_selling"],
+  };
+}
+
+/**
+ * OWNER DECISION LOCKED 2026-10-17: a direct no ("Answer is no") answers a QUESTION. With no validated
+ * question context it answers nothing we know: never invent certainty (no nurture, no denial) — a
+ * contextual-review hold (unclear ⇒ human review).
+ */
+export function rescopeDirectNoWithoutContext(text, result, conversation_context = null) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  if (!isDirectNo(text)) return result;
+  if (result.precedence_result === "contextual_short_reply_override" || result.contextual_override) return result;
+  // an ESTABLISHED question (a valid context: e.g. "Answer is no" to the selling question = that decline)
+  let established = false;
+  try { established = validateConversationContext(conversation_context)?.context_status === "valid"; } catch { established = false; }
+  if (established) return result;
+  return {
+    ...result,
+    primary_intent: "unclear",
+    matched_intents: ["unclear"],
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "question_context_unknown"])],
+    matched_rule_ids: [...(Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : []), "direct_no_without_question_context"],
+    ambiguity_flags: [...new Set([...(Array.isArray(result.ambiguity_flags) ? result.ambiguity_flags : []), "needs_question_context"])],
+    automation_decision: { auto_reply_allowed: false, queue_action: "none", suppression_action: "none", human_review_required: true, risk_level: "medium" },
+  };
+}
+
+export function rescopeWrittenOwnershipDenial(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting") return result;
+  const ids = Array.isArray(result.matched_rule_ids) ? result.matched_rule_ids : [];
+  // owner rule 2026-10-17: resolveIntents marks a PROPERTY ownership denial (never a phone-identity
+  // statement) with ownership_denial_property_scoped; that result is always the property-scoped lane
+  if ((result.primary_intent === "property_specific_non_owner" || result.primary_intent === "wrong_number") && ids.includes("ownership_denial_property_scoped") && !ids.includes("wrong_person_premise_denied")) {
+    const matched = (Array.isArray(result.matched_intents) ? result.matched_intents : []).map((i) => (i === "wrong_number" ? "property_specific_non_owner" : i));
+    return {
+      ...result,
+      primary_intent: "property_specific_non_owner",
+      objection: result.objection === "wrong_number" ? null : result.objection,
+      matched_intents: matched.length ? [...new Set(matched)] : ["property_specific_non_owner"],
+      secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_denied", "ownership_unverified", "written_ownership_denial"])],
+      matched_rule_ids: ids.includes("written_ownership_denial_property_scoped") ? ids : [...ids, "written_ownership_denial_property_scoped"],
+    };
+  }
+  if (result.primary_intent !== "wrong_number") return result;
+  if (ids.includes("wrong_person_premise_denied")) return result;
+  const t = String(text ?? "");
+  if (matchesTrueWrongNumber(t) || matchesSoldTransfer(t)) return result;
+  if (!matchesOwnershipDisconnect(t)) return result;
+  if (/\b(?:sold|vend[ií]|vendimos|vendid[ao])\b/i.test(t)) return result;
+  const matched = (Array.isArray(result.matched_intents) ? result.matched_intents : []).map((i) => (i === "wrong_number" ? "property_specific_non_owner" : i));
+  return {
+    ...result,
+    primary_intent: "property_specific_non_owner",
+    objection: result.objection === "wrong_number" ? null : result.objection,
+    matched_intents: matched.length ? [...new Set(matched)] : ["property_specific_non_owner"],
+    secondary_intents: [...new Set([...(Array.isArray(result.secondary_intents) ? result.secondary_intents : []), "ownership_denied", "ownership_unverified", "written_ownership_denial"])],
+    matched_rule_ids: [...ids, "written_ownership_denial_property_scoped"],
+  };
+}
+
+// ── MULTILINGUAL CONTACT-REVOCATION SAFETY (P0 2026-10-19) ──────────────────
+// Applied to EVERY classify() result (heuristic, high-confidence, AI-merged):
+//   • an explicit revocation in any language is an opt-out (it already reaches
+//     compliance_flag through matchMultilingualOptOut; re-asserted here so the
+//     AI-merge path can never lose it);
+//   • a phone-IDENTITY wrong number in another language ("número equivocado",
+//     "move nimewo", "打错了") takes the EXISTING wrong-number route when the
+//     classifier had nothing stronger (never an opt-out, never global);
+//   • FAIL-SAFE: a stop / remove / contact-negation family token in a
+//     non-English message with no confident family is a PRECAUTIONARY HOLD —
+//     no reply, every pending send held, a contact-wide
+//     automation_suppressions precautionary_no_contact row written by the
+//     inbound path, and the operator lane (suppression candidate) until a
+//     person decides. Never "unclear and contactable".
+// A stop of something that is not communication ("pare de llorar") vetoes the
+// fail-safe; insults stay insults (only revocation language is read here).
+const WRONG_NUMBER_OVERRIDABLE_INTENTS = new Set(["unclear", "not_interested", "acknowledgement", "reaction_only", "who_is_this"]);
+const PRECAUTION_EXEMPT_INTENTS = new Set(["opt_out", "wrong_number"]);
+
+export const PRECAUTIONARY_HOLD_DECISION = Object.freeze({
+  auto_reply_allowed: false,
+  queue_action: "hold_pending_sends",
+  suppression_action: "suppression_candidate",
+  suppression_candidate: true,
+  precautionary_hold: true,
+  precautionary_hold_type: "precautionary_no_contact",
+  human_review_required: true,
+  operator_escalation: true,
+  escalation_policy: "operator_exception",
+  review_reason: "possible_opt_out_unconfirmed",
+  risk_level: "high",
+});
+
+const uniqStrings = (values = []) => [...new Set(values.filter(Boolean))];
+
+export function applyContactRevocationSafety(result, text) {
+  if (!result || typeof result !== "object") return result;
+  const body = cleanMessage(text);
+  if (!body) return result;
+  if (result.compliance_flag === "stop_texting" || result.primary_intent === "opt_out") return result;
+  const analysis = analyzeContactRevocation(body);
+  const other_action = classifyStopScope(body) === STOP_SCOPE.OTHER_ACTION;
+  const audit = (hit) => ({ family: hit.family, language: hit.language, rule_id: hit.rule_id, version: hit.version });
+
+  if (analysis.opt_out) {
+    const next = {
+      ...result,
+      primary_intent: "opt_out",
+      detected_intent: "opt_out",
+      compliance_flag: "stop_texting",
+      objection: null,
+      confidence: 0.99,
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.opt_out.rule_id]),
+      multilingual_contact_revocation: audit(analysis.opt_out),
+    };
+    next.automation_decision = deriveAutomationDecision(next);
+    if (next.seller_state) next.seller_state = { ...next.seller_state, next_best_action: "stop_all_outreach" };
+    return next;
+  }
+
+  if (analysis.wrong_number && WRONG_NUMBER_OVERRIDABLE_INTENTS.has(String(result.primary_intent || "unclear"))) {
+    const next = {
+      ...result,
+      primary_intent: "wrong_number",
+      detected_intent: "wrong_number",
+      secondary_intent: result.primary_intent && result.primary_intent !== "unclear" ? result.primary_intent : result.secondary_intent ?? null,
+      confidence: Math.max(Number(result.confidence) || 0, 0.9),
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.wrong_number.rule_id]),
+      multilingual_contact_revocation: audit(analysis.wrong_number),
+    };
+    next.automation_decision = deriveAutomationDecision(next);
+    if (next.seller_state) next.seller_state = { ...next.seller_state, next_best_action: "update_contact_and_archive" };
+    return next;
+  }
+
+  if (analysis.possible_opt_out && !other_action && !PRECAUTION_EXEMPT_INTENTS.has(String(result.primary_intent || ""))) {
+    return {
+      ...result,
+      matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), analysis.possible_opt_out.rule_id]),
+      ambiguity_flags: uniqStrings([...(result.ambiguity_flags || []), "possible_opt_out_unconfirmed"]),
+      possible_opt_out: { ...audit(analysis.possible_opt_out), token: analysis.possible_opt_out.token },
+      multilingual_contact_revocation: audit(analysis.possible_opt_out),
+      automation_decision: { ...PRECAUTIONARY_HOLD_DECISION },
+    };
+  }
+  return result;
+}
+
+/**
+ * rc-8.5.21 v3: "No, I'm good with the amount you proposed" ACCEPTS our proposal (conversation-ai/acceptance.js);
+ * it is never the "I'm good" decline. Recognized as positive engagement routed to a PERSON (verify the actual
+ * offer, the property and the authority; no automatic acceptance, no contract). A stop / opt-out is untouched.
+ */
+export function rescopeAcceptanceOfProposal(text, result) {
+  if (!result || typeof result !== "object") return result;
+  if (result.compliance_flag === "stop_texting" || result.primary_intent === "opt_out") return result;
+  if (!acceptsOurProposal(text)) return result;
+  const next = {
+    ...result,
+    primary_intent: "seller_interested",
+    detected_intent: "seller_interested",
+    secondary_intent: result.primary_intent && result.primary_intent !== "seller_interested" ? result.primary_intent : result.secondary_intent ?? null,
+    objection: result.objection === "not_interested" ? null : result.objection,
+    acceptance_candidate: true,
+    matched_rule_ids: uniqStrings([...(result.matched_rule_ids || []), "acceptance_of_our_proposal"]),
+  };
+  next.automation_decision = { ...(deriveAutomationDecision(next) || {}), auto_reply_allowed: false, queue_action: "none", suppression_action: "none", human_review_required: true, review_reason: "acceptance_of_our_proposal_verify_offer_property_authority", risk_level: "high" };
+  return next;
+}
+
 export async function classify(message, brain_item = null, options = {}) {
+  const result = rescopeAcceptanceOfProposal(cleanMessage(message), await classifyCore(message, brain_item, options));
+  return applyContactRevocationSafety(result, message);
+}
+
+async function classifyCore(message, brain_item = null, options = {}) {
   // A whole-message slang yes ("Yeppers", "yessir!", "Yuppers 👍") is
   // classified as "yes" (affirmative-slang.js); every other text is unchanged.
   const text = canonicalizeAffirmativeSlang(cleanMessage(message));
@@ -8032,9 +8421,9 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  const heuristic = classifyHeuristic(text, brain_item, {
+  const heuristic = rescopeDirectNoWithoutContext(text, rescopeOwnerButNotSelling(text, rescopeWrittenOwnershipDenial(text, classifyHeuristic(text, brain_item, {
     conversation_context,
-  });
+  }))), conversation_context);
 
   if (heuristicOnly) {
     const final_motivation = estimateMotivationScore(heuristic);
@@ -8050,8 +8439,9 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  // Compliance is absolute
-  if (heuristic.compliance_flag === "stop_texting") {
+  // Compliance is absolute: a deterministic opt-out (the compliance flag OR the terminal opt-out intent)
+  // is final — the model is never consulted, so it can never re-label it (rc-8.5.21 v3)
+  if (heuristic.compliance_flag === "stop_texting" || heuristic.primary_intent === "opt_out") {
     const final_motivation = estimateMotivationScore(heuristic);
     const automation_decision = deriveAutomationDecision(heuristic);
     return {
@@ -8100,7 +8490,11 @@ export async function classify(message, brain_item = null, options = {}) {
     };
   }
 
-  const final_compliance = heuristic.compliance_flag ?? ai_result.compliance_flag;
+  // Deterministic rules run BEFORE and REGARDLESS of the model: an explicit opt-out returned above
+  // (and is re-asserted by applyContactRevocationSafety). The model may only ADD a stop, never clear
+  // one or set any other compliance flag (rc-8.5.21-v3fix P0-C), and it can never turn a deterministic
+  // channel preference into a suppression (rc-8.5.21-optout 38d808c2).
+  const final_compliance = heuristic.compliance_flag ?? (isChannelPreferenceOnly(text) ? null : (ai_result.compliance_flag === "stop_texting" ? "stop_texting" : null));
   const final_intents = resolveIntents(text, {
     compliance_flag: final_compliance,
     stop_other_action: classifyStopScope(text) === STOP_SCOPE.OTHER_ACTION,

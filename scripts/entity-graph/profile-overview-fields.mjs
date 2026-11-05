@@ -12,15 +12,14 @@
  * The spec's eg_field_profile (re-profiled at facts refresh) replaces this
  * snapshot once the read model is live.
  *
- * Usage: node scripts/entity-graph/profile-overview-fields.mjs   (DATABASE_URL or /tmp/.dburl)
+ * Usage: node scripts/entity-graph/profile-overview-fields.mjs
+ * Credential: LC_RO_ENTITY_GRAPH_DB_URL_FILE (the role-enforced read-only diagnostics credential; scripts/lib/prod-db-credentials.mjs).
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import pg from 'pg'
+import { connectReadOnlyDiagnostics } from '../lib/prod-db-credentials.mjs'
 
-const url = process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim()
-const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } })
-await client.connect()
+const client = await connectReadOnlyDiagnostics({ purpose: 'entity_graph', applicationName: 'lc-eg-profile-fields', statementTimeoutMs: 60_000 })
 await client.query("set statement_timeout = '60s'; set default_transaction_read_only = on")
 
 const { rows: cols } = await client.query(`

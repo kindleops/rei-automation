@@ -216,7 +216,7 @@ test("purpose-question coverage never swallows a second clause, profanity, an of
   const cases = [
     ["What do you want from me generally", (i) => i !== "who_is_this"], // frozen calibration negative (ic3_en_prop_a04)
     ["What do you want for it?", (i) => i !== "who_is_this"],
-    ["What the fuck do you want?", (i) => i === "hostile_or_legal"],
+    ["What the fuck do you want?", (i) => i === "hostile_or_troll"], // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
     ["Which company bought it?", (i) => i !== "who_is_this"],
     ["Doing what I can", (i) => i !== "who_is_this"],
     ["Who is Derik?", (i) => i !== "who_is_this"], // wrong-person signal, not an identity question

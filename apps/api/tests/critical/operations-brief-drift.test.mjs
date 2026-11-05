@@ -103,8 +103,7 @@ test('conversation.review_digest carries the brief: with the operations read mod
 
 // ── drift guards ────────────────────────────────────────────────────────────
 const MIG = new URL('../../../../supabase/migrations/PROPOSED_20261016140000_operations_action_center.sql', import.meta.url)
-// Package A: the operations schedules live in the Package A seed (without pipeline-reconcile)
-const SEED = new URL('../../../../supabase/migrations/PROPOSED_20261020120100_research_package_schedules.sql', import.meta.url)
+const SEED = new URL('../../../../supabase/migrations/PROPOSED_20261016140100_operations_schedules.sql', import.meta.url)
 
 test('drift: every agent.ops_* read function embeds EXACTLY the operations-sql.js text', () => {
   const sql = fs.readFileSync(MIG, 'utf8')
@@ -117,8 +116,24 @@ test('drift: every agent.ops_* read function embeds EXACTLY the operations-sql.j
   assert.doesNotMatch(sql.replace(/\/\*sql:[\s\S]*?\/\*end\*\//g, ''), /\b(insert into|update|delete from|alter table|drop table)\s+public\./i)
 })
 
-test('drift: the Package A seed carries OPERATIONS_SCHEDULE_DEFINITIONS minus pipeline-reconcile, every schedule born disabled; handlers gated by AGENT_OPERATIONS_ENABLED', () => {
+test('drift: the schedule seed mirrors OPERATIONS_SCHEDULE_DEFINITIONS, every schedule born disabled; handlers gated by AGENT_OPERATIONS_ENABLED', () => {
   const sql = fs.readFileSync(SEED, 'utf8')
+  const calls = [...sql.matchAll(/runtime_upsert_schedule\('([a-z-]+)', '([a-z._]+)', (\d+), :'owner_id', '([^']+)'::jsonb, (false|true),/g)]
+  assert.deepEqual(calls.map((m) => [m[1], m[2], Number(m[3]), m[5]]), OPERATIONS_SCHEDULE_DEFINITIONS.map((d) => [d.name, d.kind, d.interval_seconds, 'false']))
+  for (const [i, m] of calls.entries()) assert.deepEqual(JSON.parse(m[4]), JSON.parse(JSON.stringify(OPERATIONS_SCHEDULE_DEFINITIONS[i].input)))
+  assert.deepEqual(OPERATIONS_SCHEDULE_DEFINITIONS.find((d) => d.kind === 'recovery.sweep').input.approved_programs, [], 'no re-engagement scope by default')
+  assert.deepEqual(OPERATIONS_KINDS, ['recovery.sweep', 'inbox.action_center', 'pipeline.reconcile', 'ops.supervisor'])
+  assert.equal(operationsEnabled({}), false)
+  assert.equal(operationsEnabled({ AGENT_OPERATIONS_ENABLED: '1' }), true)
+  assert.deepEqual(buildOperationsHandlers({ source: null, store: null, reads: null }), {})
+  const posttest = fs.readFileSync(new URL('../../../../supabase/migrations/PROPOSED_20261016140100_operations_schedules_posttest.sql', import.meta.url), 'utf8')
+  for (const d of OPERATIONS_SCHEDULE_DEFINITIONS) assert.match(posttest, new RegExp(`runtime_upsert_schedule\\('${d.name}', '${d.kind.replace('.', '\\.')}', ${d.interval_seconds}, op,`))
+})
+
+// ── reconciliation: production Package A (release/cloudflare-production) seed drift test, kept alongside the rc-8.5.21 one ──
+const PACKAGE_A_SEED = new URL('../../../../supabase/migrations/PROPOSED_20261020120100_research_package_schedules.sql', import.meta.url)
+test('drift: the Package A seed carries OPERATIONS_SCHEDULE_DEFINITIONS minus pipeline-reconcile, every schedule born disabled; handlers gated by AGENT_OPERATIONS_ENABLED', () => {
+  const sql = fs.readFileSync(PACKAGE_A_SEED, 'utf8')
   const defs = OPERATIONS_SCHEDULE_DEFINITIONS.filter((d) => d.kind !== 'pipeline.reconcile')
   const calls = [...sql.matchAll(/runtime_upsert_schedule\('([a-z-]+)', '([a-z._]+)', (\d+), :'owner_id', '([^']+)'::jsonb, (false|true),/g)].filter((m) => defs.some((d) => d.name === m[1]))
   assert.deepEqual(calls.map((m) => [m[1], m[2], Number(m[3]), m[5]]), defs.map((d) => [d.name, d.kind, d.interval_seconds, 'false']))

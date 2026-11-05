@@ -58,6 +58,9 @@ export const suppressionRules = [
     ],
   },
   {
+    // RETIRED (owner 2026-10-17: a property denial is never global) — automation-rules.js
+    // RETIRED_RULE_KEYS refuses it whatever a stored row says; kept for audit history only.
+    is_active: false,
     rule_key: "suppression.not_owner_bad_contact",
     event_type: "inbound_message_received",
     action_type: "mark_bad_contact",

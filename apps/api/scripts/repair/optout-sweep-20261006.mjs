@@ -36,16 +36,16 @@
 // flagged later_positive_reply=true for a human.
 //
 // Usage (from apps/api). The owner runs --apply with auto mode OFF.
-//   DATABASE_URL=... node --import ./scripts/register-aliases-ops.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./scripts/register-aliases-ops.mjs \
 //     scripts/repair/optout-sweep-20261006.mjs --out=<dir> [--since=2026-09-01]
 //   ... --apply --confirm=optout-sweep-20261006 [--include-hostile-insults]
 //     (--apply also needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
-// --db-url-file=<path> may replace DATABASE_URL. The CSV contains phone numbers:
-// write it OUTSIDE the repo.
+// The replay reads as the role-enforced read-only diagnostics credential
+// (rc-8.5.21-c, scripts/lib/prod-db-credentials.mjs); DATABASE_URL is not read.
+// The CSV contains phone numbers: write it OUTSIDE the repo.
 
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
@@ -82,14 +82,8 @@ const BLOCKING_CONTACTABILITY = new Set(["opted_out", "dnc", "do_not_text", "leg
 const PENDING = ["scheduled", "queued", "pending", "approved", "ready", "processing", "sending"];
 
 // ── 1. read (one read-only transaction) ─────────────────────────────────────
-const dbUrl = process.env.DATABASE_URL || (args["db-url-file"] ? fs.readFileSync(String(args["db-url-file"]), "utf8").trim() : "");
-if (!dbUrl) {
-  console.error("DATABASE_URL or --db-url-file is required (read-only replay)");
-  process.exit(2);
-}
-const pg = createRequire(import.meta.url)("pg");
-const client = new pg.Client({ connectionString: dbUrl });
-await client.connect();
+const { connectReadOnlyDiagnostics } = await import("../../../../scripts/lib/prod-db-credentials.mjs");
+const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-optout-sweep-replay" });
 let messages;
 let threads;
 try {

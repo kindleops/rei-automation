@@ -4,22 +4,22 @@
 //       automation suppressions, thread opt-out / suppressed state, wrong number, prior
 //       not-owner replies. PURE over facts; facts come from the existing
 //       loadSendTimeContactFacts(supabase, row) (read-only selects) or are injected.
-//   isOutsideLocalContactWindow   (queue/conversational-reply-window.js) — the 08–21
-//       recipient-local window; null when the zone is unknown (never a guess).
-//   resolveRecipientTimezone      (queue/recipient-timezone.js) — the recipient's zone from
-//       the PROPERTY's state/ZIP first, then a stored zone; unresolved ⇒ the window
-//       verdict is null and the validator fails closed (never a Chicago default).
-//   evaluateInSessionReply        (same module) — whether the existing engine would
-//       treat this as an in-session reply (reported; the AI policy still applies its
-//       own hours, which are never looser than the existing window).
+//   evaluateReplyTiming           (queue/reply-timing.js) — THE shared send-time eligibility
+//       function: in session (queue/conversational-reply-window.js, the owner rule as
+//       implemented for templates) or 08–21 in every plausible recipient zone
+//       (resolveRecipientZones: area code + mailing state + property state; unknown ⇒ the
+//       conservative lower-48 intersection). The planner, R3 and the row gate call it too.
 //
 // Nothing here writes: the guard's runSendTimeContactGuard / block-send-at-compliance
 // writers are deliberately NOT imported (they cancel/hold rows).
 import { evaluateSendTimeContactGuard, loadSendTimeContactFacts } from '../queue/send-time-contact-guard.js'
-import { evaluateInSessionReply, isOutsideLocalContactWindow } from '../queue/conversational-reply-window.js'
-import { resolveRecipientTimezone } from '../queue/recipient-timezone.js'
+import { evaluateReplyTiming, resolveRecipientZones } from '../queue/reply-timing.js'
 
-export const ELIGIBILITY_BRIDGE_VERSION = 'conv-ai.eligibility-bridge.v1'
+// rc-8.5.21: the window verdict is THE shared eligibility function (queue/reply-timing.js) —
+// in-session (the owner rule, as implemented for templates) OR 08–21 in every plausible
+// recipient zone. outside_window is never null any more: an unknown zone is the conservative
+// intersection, not a fail-open and not a blanket hold.
+export const ELIGIBILITY_BRIDGE_VERSION = 'conv-ai.eligibility-bridge.v2'
 
 /** The hypothetical reply row the existing guard evaluates (a reply, never an opener). */
 export function hypotheticalReplyRow({ sellerPhone, ourPhone = null, threadKey = null, propertyId = null, prospectId = null, inboundId, inboundAt, now }) {
@@ -49,7 +49,7 @@ export function hypotheticalReplyRow({ sellerPhone, ourPhone = null, threadKey =
  * @param {string} a.now
  * @returns {Promise<{ blocked: boolean, reasons: string[], outside_window: boolean|null, in_session: boolean|null, guard: object, version: string }>}
  */
-export async function dryRunEligibility({ row, facts = null, supabase = null, loadFacts = loadSendTimeContactFacts, timezone = null, geography = null, now }) {
+export async function dryRunEligibility({ row, facts = null, supabase = null, loadFacts = loadSendTimeContactFacts, timezone = null, geography = null, mailingGeography = null, recipientZones = null, sessionMinutes = undefined, now }) {
   let f = facts
   const reasons = []
   if (!f) {
@@ -62,9 +62,12 @@ export async function dryRunEligibility({ row, facts = null, supabase = null, lo
   }
   const guard = evaluateSendTimeContactGuard(row, f, { now })
   if (guard.blocked) reasons.push(guard.reason)
-  const tz = resolveRecipientTimezone({ ...row, timezone }, { propertyGeography: geography })
-  const outside = tz.ok ? isOutsideLocalContactWindow(now, tz.iana) : null
-  let inSession = null
-  try { inSession = Boolean(evaluateInSessionReply(row, { now })?.in_session) } catch { inSession = null }
-  return { blocked: Boolean(guard.blocked), reasons, outside_window: outside, timezone_basis: tz.ok ? tz.basis : tz.reason, in_session: inSession, guard: { blocked: guard.blocked, reason: guard.reason || null, reason_code: guard.reason_code || null }, version: ELIGIBILITY_BRIDGE_VERSION }
+  const zones = recipientZones || resolveRecipientZones({ recipientPhone: row.to_phone_number, propertyGeography: geography, mailingGeography, storedTimezone: timezone })
+  const timing = evaluateReplyTiming({ at: now, queuedAt: now, inboundId: row.inbound_message_id, inboundAt: row.metadata?.inbound_received_at || null, zones: zones.zones, sessionMinutes })
+  return {
+    blocked: Boolean(guard.blocked), reasons, outside_window: !timing.lawful, timezone_basis: zones.certainty, in_session: timing.in_session,
+    timing: { lawful: timing.lawful, basis: timing.basis, next_permitted_at: timing.next_permitted_at, zones: timing.zones, certainty: zones.certainty, sources: (zones.sources || []).map((x) => x.source) },
+    guard: { blocked: guard.blocked, reason: guard.reason || null, reason_code: guard.reason_code || null, signal: guard.detail?.signal || null, source: guard.detail?.source || null },
+    version: ELIGIBILITY_BRIDGE_VERSION,
+  }
 }

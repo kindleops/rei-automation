@@ -1,5 +1,7 @@
 /**
  * RC 7.1 D10 — quiet hours never fall back to Chicago.
+ * rc-8.5.21 S3: the zone is resolved by queue/recipient-window-policy.js — the recipient's area code
+ * first, the property / stored zone only narrows, no recipient evidence ⇒ the continental intersection.
  *
  * Owner: "missing timezone must never fall back to Chicago for recipient
  * contact windows. Recipient/property timezone needs to remain authoritative."
@@ -48,12 +50,18 @@ test("a BLANK zone on a Pacific property is no longer a Central send at 06:30 lo
   assert.equal(verdict.allowed, false, "06:30 Pacific is outside the window");
   assert.equal(verdict.reason, "outside_local_send_window");
   assert.equal(verdict.timezone, "America/Los_Angeles");
-  assert.equal(verdict.timezone_basis, "property_geography");
+  // rc-8.5.21 S3: the recipient's own area code (323, Los Angeles) is the basis; the property narrows
+  assert.equal(verdict.timezone_basis, "recipient_area_code");
   assert.equal(verdict.next_open_at, "2026-04-04T15:00:00.000Z", "08:00 Pacific");
 });
 
+// rc-8.5.21 S3 (recipient-window-policy.js): the recipient's phone is evidence (323 above is Los
+// Angeles), so "no zone anywhere" needs a non-geographic number. Nothing at all ⇒ HOLD (unchanged);
+// a stored zone / the property alone ⇒ UNKNOWN ⇒ the conservative continental intersection
+// (08:00 PT … 21:00 ET): 15:00Z on 2026-04-04 is 08:00 PT / 11:00 ET, its first open instant.
+const NON_GEO = "+15005550100";
 test("no zone anywhere → HOLD with a clear reason; no zone is assumed", () => {
-  const verdict = evaluateContactWindow(row({ timezone: null }), { now: MORNING });
+  const verdict = evaluateContactWindow(row({ timezone: null, to_phone_number: NON_GEO }), { now: MORNING });
   assert.equal(verdict.allowed, false);
   assert.equal(verdict.hold, true);
   assert.equal(verdict.reason, "recipient_timezone_unresolved");
@@ -61,8 +69,20 @@ test("no zone anywhere → HOLD with a clear reason; no zone is assumed", () => 
 });
 
 test("an unrecognised stored zone is not Chicago either", () => {
-  const verdict = evaluateContactWindow(row({ timezone: "Narnia" }), { now: MORNING });
+  const verdict = evaluateContactWindow(row({ timezone: "Narnia", to_phone_number: NON_GEO }), { now: MORNING });
   assert.equal(verdict.hold, true);
+});
+
+test("a stored zone or the property alone is never the recipient zone: a Central-stored, Illinois-property row with no recipient evidence waits for 08:00 Pacific", () => {
+  for (const over of [{ timezone: "Central" }, { timezone: null, property_address_state: "IL", property_address_zip: "60601" }]) {
+    const early = evaluateContactWindow(row({ to_phone_number: NON_GEO, ...over }), { now: EARLY });
+    assert.equal(early.allowed, false, JSON.stringify(over));
+    assert.equal(early.hold === true, false);
+    assert.equal(early.timezone, null, "unknown is never shown as a zone");
+    assert.equal(early.timezone_certainty, "unknown");
+    assert.equal(early.next_open_at, MORNING);
+    assert.equal(evaluateContactWindow(row({ to_phone_number: NON_GEO, ...over }), { now: MORNING }).allowed, true);
+  }
 });
 
 test("the property is authoritative over a contradicting stored zone (geography wins)", () => {
@@ -85,8 +105,12 @@ test("rows that carry only a property_id are placed from the properties table", 
   assert.equal(rowNeedsPropertyGeography(onlyId), true);
   const verdict = evaluateContactWindow(onlyId, { now: EARLY, propertyGeography: { state: "CA", zip: "90011" } });
   assert.equal(verdict.timezone, "America/Los_Angeles");
-  assert.equal(verdict.timezone_basis, "property_record");
+  assert.equal(verdict.timezone_basis, "recipient_area_code");
+  assert.ok(verdict.zones.includes("America/Los_Angeles"));
   assert.equal(verdict.allowed, false);
+  // the property record still narrows: an Eastern-area-code owner of the same LA property waits for 08:00 PT
+  const absentee = evaluateContactWindow({ ...onlyId, to_phone_number: "+12125550100" }, { now: EARLY, propertyGeography: { state: "CA", zip: "90011" } });
+  assert.deepEqual([absentee.allowed, absentee.timezone, absentee.next_open_at], [false, "America/New_York", MORNING]);
 });
 
 test("stored labels and IANA names are read; nothing defaults", () => {
@@ -107,7 +131,7 @@ test("pre-claim: an unplaceable row is HELD (paused, operator-visible) — not d
   const result = await loadRunnableSendQueueRows(10, {
     now: MORNING,
     stale_lock_recovery_enabled: false,
-    supabaseClient: makeSendQueueRowsSupabase([row({ timezone: null })]),
+    supabaseClient: makeSendQueueRowsSupabase([row({ timezone: null, to_phone_number: NON_GEO })]),
     pauseInvalidQueueRow: async (normalized, payload) => { paused.push({ id: normalized.id, payload }); return { ...normalized, ...payload }; },
   });
   assert.equal(result.rows.length, 0);

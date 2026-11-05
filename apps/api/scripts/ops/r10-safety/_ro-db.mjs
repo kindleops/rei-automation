@@ -1,27 +1,25 @@
 // Read-only Postgres access for the round-10 safety scripts (2026-10-08).
-// - DATABASE_URL from the environment (never printed).
-// - One session: default_transaction_read_only=on, statement_timeout=30s.
+// - rc-8.5.21-c: the connection is the role-enforced read-only diagnostics credential
+//   from scripts/lib/prod-db-credentials.mjs (LC_RO_OPS_DIAG_DB_URL_FILE). The role is
+//   verified unable to write send_queue / sms_templates / system_control / … before
+//   the first query; DATABASE_URL is no longer read. Never printed.
+// - One session: default_transaction_read_only=on, statement_timeout=30s (defense in
+//   depth on top of the role).
 // - phoneRef(): a phone is only ever printed as a short salted SHA-256 ref.
 // - roSupabase(): the tiny supabase-js subset the canonical
 //   cancelSupabasePendingOutbound needs for its DRY RUN (select/eq/in/limit);
 //   every write method throws, so the dry run cannot write.
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { createRequire } from "node:module";
+import { connectReadOnlyDiagnostics } from "../../../../../scripts/lib/prod-db-credentials.mjs";
 
-const require = createRequire(import.meta.url);
-const pg = require("pg");
-
-export async function connectReadOnly() {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    console.error("DATABASE_URL is required (pass it via env; it is never printed)");
+export async function connectReadOnly(purpose = "ops_diag") {
+  try {
+    return await connectReadOnlyDiagnostics({ purpose, applicationName: `lc-r10-safety-ro-${purpose}`, statementTimeoutMs: 30_000 });
+  } catch (e) {
+    console.error(`read-only diagnostics credential refused: ${e.message}`);
     process.exit(2);
   }
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
-  await client.query("set statement_timeout='30s'; set default_transaction_read_only=on;");
-  return client;
 }
 
 const SALT = "lc-r10-2026-10-08";

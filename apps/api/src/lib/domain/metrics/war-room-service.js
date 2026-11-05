@@ -208,7 +208,7 @@ export async function buildWarRoom(params = {}) {
   const SQ_COLS = 'id,queue_status,created_at,sent_at,delivered_at,failed_reason,delivery_confirmed,' +
     'blocked_reason,blocked_reasons,market,property_address_state,property_address_city,' +
     'template_id,selected_template_id,template_key,agent_name,selected_agent_id,sms_agent_id,' +
-    'campaign_id,thread_key,message_body,rendered_message,estimated_cost,detected_intent,from_phone_number'
+    'campaign_id,thread_key,message_body,rendered_message,estimated_cost,detected_intent,from_phone_number,source'
   // message_events has no carrier_name/line_type columns — carrier intel stays unwired.
   const ME_COLS = 'id,direction,delivery_status,provider_delivery_status,detected_intent,is_opt_out,' +
     'opt_out_keyword,thread_key,template_id,market,created_at,from_phone_number'
@@ -281,9 +281,12 @@ export async function buildWarRoom(params = {}) {
     }
   }
 
+  // 8.5.16 unified origin: an ai_generated message has no template; it is its own
+  // first-class bucket, never attributed to a template and never mistaken for manual copy
   const tplFor = (r) => {
-    const id = clean(r.template_id) || clean(r.selected_template_id) || clean(r.template_key)
-    return { id, meta: id ? tplMeta.get(id) : undefined }
+    const id = clean(r.template_id) || clean(r.selected_template_id) || clean(r.template_key) ||
+      (lower(r.source) === 'ai_conversation' ? 'origin:ai_generated' : '')
+    return { id, meta: id && !id.startsWith('origin:') ? tplMeta.get(id) : undefined }
   }
 
   const agentFor = (r, meta) => {

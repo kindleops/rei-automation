@@ -156,7 +156,9 @@ test("§14 the dispatcher evaluates the contact window before sending", async ()
   const fs = await import("node:fs");
   const source = await fs.promises.readFile(
     new URL("../../src/lib/domain/queue/process-send-queue.js", import.meta.url), "utf8");
-  assert.match(source, /evaluate_contact_window\(/);
+  // rc-8.5.21 S3: the window is evaluated through the ONE dispatch decision (sms-engine#evaluateDispatchWindow),
+  // which runs the injected / default evaluate_contact_window on the row
+  assert.match(source, /evaluateDispatchWindow\(queue_row,[\s\S]{0,400}evaluateContactWindow: evaluate_contact_window/);
   // A campaign row is NOT manual_inbox, so it cannot inherit the quiet-hours
   // exemption that path carries.
   assert.match(source, /fresh_manual_inbox_send/);

@@ -2,7 +2,7 @@
 // 404 with an empty body unless AGENT_ENABLED and AGENT_OPERATIONS_ENABLED. Read only.
 import { corsHeaders, ensureMutationAuth } from '../../../_shared.js'
 import { handleWorkItems } from '@/lib/agent/operations/operations-routes.js'
-import { getOperationsRouteServices } from '@/lib/ai/operations-runtime-wiring.js'
+import { getOperationsRouteServices } from '@/lib/ai/research-runtime-wiring.js' // reconciliation: production's composition (store + membership only; no send path)
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

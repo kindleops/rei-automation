@@ -1,0 +1,241 @@
+{
+ "note": "md5 of pg_get_functiondef (whitespace collapsed) of every historical version of reader link 1 functions",
+ "by_md5": {
+  "7bc3a92277cc9a4cf714a0acc6b356b6": [
+   {
+    "function": "lc_egress_platform_allowlists()",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "91f4e380c0799aeceae26536bf05b9d0": [
+   {
+    "function": "lc_reachable_egress_indirect(oid)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "3101fd82f150995216c42cda1ba0e025": [
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "73b01486d4a527551f6f43c3c105855b": [
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "341f7dba",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_operator_role(uuid,uuid)",
+    "commit": "4de6c6b3",
+    "date": "2026-10-16",
+    "file": "supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql"
+   }
+  ],
+  "f87bfb498add8be269b556b8e2acca40": [
+   {
+    "function": "lc_mcp_ops_finding(uuid,text)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_finding(uuid,text)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_finding(uuid,text)",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_finding(uuid,text)",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "c7dc7f84b248b41df72d35eb34a100c8": [
+   {
+    "function": "lc_mcp_ops_research_valuation_snapshot()",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_research_valuation_snapshot()",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_research_valuation_snapshot()",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_ops_research_valuation_snapshot()",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "47f1be1b866b9d662752b0c0f13ee323": [
+   {
+    "function": "lc_mcp_action_center(uuid,text,boolean,uuid,integer)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_action_center(uuid,text,boolean,uuid,integer)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_action_center(uuid,text,boolean,uuid,integer)",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_action_center(uuid,text,boolean,uuid,integer)",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "e04d5c119b6d52413f44357670fc2ee0": [
+   {
+    "function": "lc_mcp_thread_hold_status(uuid)",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_thread_hold_status(uuid)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_thread_hold_status(uuid)",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_thread_hold_status(uuid)",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "5be9f7e6f736cb9c0fe2dc6dff3f20eb": [
+   {
+    "function": "lc_mcp_followup_intent_health()",
+    "commit": "53a09f86",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_followup_intent_health()",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_followup_intent_health()",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_followup_intent_health()",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "7c03128276c0a76f56cc1373ae109112": [
+   {
+    "function": "lc_reachable_egress_indirect(oid)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "7a20cbc0c739631f1cd5d5174e1ec4ec": [
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "0b5af472",
+    "date": "2026-10-23",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "3c9670e11fc48c118caad55e37a9921d": [
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "70dcd850",
+    "date": "2026-10-22",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   }
+  ],
+  "3a57361277c8138e883c2354708fd32d": [
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "c9ca663e",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "341f7dba",
+    "date": "2026-10-19",
+    "file": "supabase/migrations/PROPOSED_20261019150000_lc_mcp_reader.sql"
+   },
+   {
+    "function": "lc_mcp_reader_self_check(text[],text[],name)",
+    "commit": "4de6c6b3",
+    "date": "2026-10-16",
+    "file": "supabase/migrations/PROPOSED_20261016120000_lc_mcp_reader.sql"
+   }
+  ]
+ }
+}

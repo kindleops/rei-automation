@@ -5,7 +5,9 @@
 // Prints counts only (never a phone, name or message body). Run it before the
 // canary, after each canary day, and before switching canary → live.
 //
-//   DATABASE_URL=… node apps/api/scripts/ops/no-response-followup-smoke.mjs [--since=ISO]
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node apps/api/scripts/ops/no-response-followup-smoke.mjs [--since=ISO]
+//   (rc-8.5.21-c: the role-enforced read-only diagnostics credential, verified by
+//   scripts/lib/prod-db-credentials.mjs before the first query)
 //
 // Checks (each must be 0 violations; exit 1 otherwise):
 //   flags          mode / enable instant / canary cap / follow-up + queue modes
@@ -19,13 +21,7 @@
 //   window         sent outside 8am–9pm recipient-local
 //   templates      sent rows whose template_id is not an active, auto-safe sms_templates row
 
-import pg from "pg";
-
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL is required");
-  process.exit(2);
-}
+import { connectReadOnlyDiagnostics } from "../../../../scripts/lib/prod-db-credentials.mjs";
 const sinceArg = (process.argv.find((a) => a.startsWith("--since=")) || "").slice(8) || null;
 
 const NR = `q.type = 'followup' and q.metadata ? 'no_response_followup'`;
@@ -36,7 +32,7 @@ const NON_OWNER = `('wrong_number','wrong_person','not_owner','non_owner','forme
 const STAGE_ORDER = `array['ownership_confirmation','offer_interest','asking_price','property_condition','offer','formal_contract','under_contract','disposition','prepared_to_close','closed']`;
 const KIND_STAGE = `case q.metadata->'no_response_followup'->>'kind' when 's2_interest' then 'offer_interest' when 's3_asking_price' then 'asking_price' when 'offer' then 'offer' end`;
 
-const client = new pg.Client({ connectionString: url, statement_timeout: 15_000, connectionTimeoutMillis: 15_000 });
+let client = null;
 const violations = [];
 
 async function one(label, sql, params = []) {
@@ -50,7 +46,7 @@ function check(label, n) {
 }
 
 try {
-  await client.connect();
+  client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-followup-smoke", statementTimeoutMs: 15_000 });
   await client.query("begin read only");
 
   const flags = await one("flags", `select key, value from system_control where key in
@@ -142,7 +138,7 @@ try {
   console.error("smoke test error:", error?.message || error);
   violations.push("error");
 } finally {
-  await client.end().catch(() => {});
+  await client?.end().catch(() => {});
 }
 
 console.log(violations.length ? `\nSMOKE FAIL (${violations.length})` : "\nSMOKE PASS");

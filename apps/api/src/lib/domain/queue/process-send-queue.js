@@ -1,4 +1,5 @@
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
+import { HOLD_CAPABILITIES, holdOverrideOf, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
 import {
   CAMPAIGN_PAUSED_REASON,
   evaluateCampaignDispatchAuthority,
@@ -27,6 +28,7 @@ import {
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
 import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-seller-queue-row.js";
+import { SENDER_CONTINUITY_REASONS, SENDER_CONTINUITY_UNREADABLE } from "@/lib/domain/delivery/sender-continuity.js";
 import {
   buildDispatchRefusalBackoff,
   buildTerminalRefusalUpdate,
@@ -38,7 +40,7 @@ import {
 import { recordLaunchCriticalAlert } from "@/lib/domain/alerts/launch-critical-alerts.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
-import { loadPropertyGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
+import { loadPropertyGeography, loadMailingGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   governanceApplies,
   governanceExcludedTemplateIds,
@@ -53,12 +55,20 @@ import {
   hasSupabaseConfig,
   supabase as defaultSupabase,
 } from "@/lib/supabase/client.js";
-import { getSystemValue } from "@/lib/system-control.js";
+import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
+import { evaluateAiConversationRowGate, aiRowCancelPayload, loadNewerInboundsForRow } from "@/lib/domain/queue/ai-conversation-row-gate.js";
+import { evaluateAgentMessageRowGate, agentMessageRowCancelPayload, readAgentMessageActivation } from "@/lib/domain/queue/agent-message-row-gate.js";
+import { createFollowUpLifecycleDeps, evaluateFollowUpIntentRowGate, isLifecycleRow } from "@/lib/domain/followups/followup-lifecycle.js";
+import { isVerifiedAiGeneratedRow, lookupAiGeneratedMessageByQueueKey, recordAiRowProviderOutcome } from "@/lib/domain/messages/ai-generated-message.js";
+import { evaluateAgentTextRowGate, readAgentTextActivation, readLeadHolder, loadInboundsSince, loadOutboundsSince, agentTextRowCancelPayload } from "@/lib/domain/queue/agent-text-row-gate.js";
+import { evaluateAgentHeldTemplateRowGate } from "@/lib/domain/queue/agent-held-template-row-gate.js";
+import { appliesBlankGreetingRule } from "@/lib/domain/messaging/transport-content-rules.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
 import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
   claimSendQueueRow,
   evaluateContactWindow,
+  evaluateDispatchWindow,
   finalizeSendQueueFailure,
   finalizeSendQueueSuccess,
   incrementTextgridNumberUsage,
@@ -657,6 +667,22 @@ async function blockQueueRowByIneligibleSender(queue_row = {}, selection = {}, d
       // Sender Routing 2.0 hold context (market, pools checked, why each
       // failed). Only present when the gated policy parked the row.
       ...(selection.sender_routing ? { sender_route_hold: selection.sender_routing } : {}),
+      // SENDER CONTINUITY (owner P0, rc-8.5.21): the row stays bound to the thread's established
+      // sender; the hold is visible and is released only by releaseSenderContinuityHolds (which
+      // revalidates the conversation first) or resolved by an audited operator reassignment.
+      ...(selection.sender_continuity
+        ? {
+          sender_continuity_hold: {
+            reason,
+            sender_reason: selection.sender_reason || null,
+            established_sender: selection.sender_continuity.established_sender || selection.established_sender || null,
+            established_source: selection.sender_continuity.established_source || null,
+            row_from_phone_number: queue_row.from_phone_number || null,
+            stage: selection.continuity_stage || "dispatch_selection",
+            held_at: now,
+          },
+        }
+        : {}),
     },
   };
 
@@ -1532,7 +1558,6 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     now,
     window_minutes: conversational_reply_window_minutes,
   });
-  const inbound_auto_reply = in_session_reply.in_session === true;
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
   let authorization_consumed_at = null;
 
@@ -1655,12 +1680,194 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         warn("queue.property_geography_unavailable", { queue_row_id, message: geography_error?.message || String(geography_error) });
       }
     }
+    // rc-8.5.21 RUN-06: the owner's MAILING state (recipient evidence), the same evidence the
+    // recipient-window scheduler plans with; a failed read is absent evidence, as at plan time
+    let mailing_geography = null;
+    if (!deps.evaluateContactWindow && clean(queue_row.property_id)) {
+      try {
+        const mailing = await (deps.loadMailingGeography || loadMailingGeography)(getSupabase(deps), [queue_row.property_id]);
+        mailing_geography = mailing.get(clean(queue_row.property_id)) || null;
+      } catch (mailing_error) {
+        warn("queue.mailing_geography_unavailable", { queue_row_id, message: mailing_error?.message || String(mailing_error) });
+      }
+    }
 
-    const contact_window = evaluate_contact_window(queue_row, {
-      ...deps,
+    // ── 8.5.16 R3: AI conversation rows only (source 'ai_conversation'); no-op for every other row ──
+    // Kill switch system_control[ai_conversation_send_enabled] off ⇒ cancel; recipient-local
+    // window closed or zone unknown ⇒ defer (no in-session bypass for AI rows).
+    const ai_gate = await evaluateAiConversationRowGate(queue_row, {
+      readSwitch: deps.readAiConversationSwitch || (hasSupabaseConfig() ? getSystemValueFresh : async () => null),
+      loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
+      loadNewerInbounds: deps.loadNewerInbounds || ((r) => loadNewerInboundsForRow(getSupabase(deps), r)),
+      // link #32: LeadCommand's own AI reply stands down on a lead an agent holds
+      readLeadHolder: deps.readAgentLeadHolder || (deps.supabase || deps.supabaseClient || hasSupabaseConfig() ? ((thread_key) => readLeadHolder(getSupabase(deps), thread_key, { strict: false })) : null),
       now,
       propertyGeography: property_geography,
+      windowMinutes: conversational_reply_window_minutes,
     });
+    if (ai_gate.applies && ai_gate.action !== "proceed") {
+      if (ai_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, aiRowCancelPayload(queue_row, { now, reason: ai_gate.reason }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, ai_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: ai_gate.reason,
+        queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: ai_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    // ── link #32: ONE VOICE on an agent-held lead — an automated TEMPLATE row (campaign / template follow-up / auto-reply)
+    // for a lead an Agntei employee holds is cancelled; an operator's manual send and the AI rows are untouched ──
+    const held_gate = await evaluateAgentHeldTemplateRowGate(queue_row, {
+      readHolder: deps.readAgentLeadHolder || (deps.supabase || deps.supabaseClient || hasSupabaseConfig() ? ((thread_key) => readLeadHolder(getSupabase(deps), thread_key, { strict: false })) : null),
+    });
+    if (held_gate.applies && held_gate.action !== "proceed") {
+      if (held_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentTextRowCancelPayload(queue_row, { now, reason: held_gate.reason, by: 'agent_held_template_gate' }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, held_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: held_gate.reason,
+        queue_status: held_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: held_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    // ── link #32: AGENT-COMPOSED TEXT rows only (metadata.agent_text_intent_id); no-op for every other row ──
+    // Its OWN gate (the AI reply gate above skips these rows): both emergency stops + ai_agent_text_enabled, the body =
+    // its immutable agent_text ledger record, the author still holds the lead, holds, staleness, the window. Every
+    // later gate still runs.
+    const agent_text_gate = await evaluateAgentTextRowGate(queue_row, {
+      readActivation: deps.readAgentTextActivation || (() => readAgentTextActivation(getSupabase(deps))),
+      loadRecord: deps.loadAiGeneratedMessage || ((queue_key) => lookupAiGeneratedMessageByQueueKey(getSupabase(deps), queue_key)),
+      readHolder: deps.readAgentLeadHolder || ((thread_key) => readLeadHolder(getSupabase(deps), thread_key)),
+      loadInbounds: deps.loadAgentTextInbounds || ((thread_key, since) => loadInboundsSince(getSupabase(deps), thread_key, since)),
+      loadOutbounds: deps.loadAgentTextOutbounds || ((thread_key, since) => loadOutboundsSince(getSupabase(deps), thread_key, since)),
+      readLeadArchive: deps.readLeadArchive || ((thread_key) => readLeadArchiveState(getSupabase(deps), thread_key)),
+      now,
+    });
+    if (agent_text_gate.applies && agent_text_gate.action !== "proceed") {
+      if (agent_text_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentTextRowCancelPayload(queue_row, { now, reason: agent_text_gate.reason, next_permitted_at: agent_text_gate.next_permitted_at || null }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, agent_text_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: agent_text_gate.reason,
+        queue_status: agent_text_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: agent_text_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+    // the exact, verified text of an agent (the transport's 'agent_text' content profile applies to it below)
+    const agent_text_send = agent_text_gate.applies === true && agent_text_gate.action === "proceed" && isVerifiedAiGeneratedRow(queue_row);
+
+    // ── link #32: AGENT-INITIATED message rows only (metadata.agent_message_intent_id); no-op for every other row ──
+    // Both emergency stops, the AI-reply certification gate and the agent-message switch re-read at dispatch:
+    // off ⇒ cancel (nothing was sent); unreadable ⇒ defer. Every later gate still runs.
+    const agent_gate = await evaluateAgentMessageRowGate(queue_row, {
+      readActivation: deps.readAgentMessageActivation || (() => readAgentMessageActivation(getSupabase(deps))),
+    });
+    if (agent_gate.applies && agent_gate.action !== "proceed") {
+      if (agent_gate.action === "cancel") {
+        await updateQueueRow(queue_row_id, agentMessageRowCancelPayload(queue_row, { now, reason: agent_gate.reason }), deps);
+      } else {
+        await releaseSkippedQueueRow(queue_row, lock_token, agent_gate.reason, { ...deps, now });
+      }
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: agent_gate.reason,
+        queue_status: agent_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        final_queue_status: agent_gate.action === "cancel" ? "cancelled" : queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
+    // ── P0 2026-10-17: follow-up LIFECYCLE rows only (metadata.followup_intent_id); no-op for every other row ──
+    // The row was materialized (rendered, validated, re-checked) before it became claimable. At dispatch the
+    // intent must still be `ready` and bound to THIS row, its template still approved (revoked ⇒ cancel +
+    // rematerialize, audited), no newer inbound (⇒ superseded), ≤ 2 texts per rolling 24 h (⇒ defer).
+    // The body is never re-rendered here. Every later gate still runs.
+    if (isLifecycleRow(queue_row)) {
+      const fu_gate = await evaluateFollowUpIntentRowGate(queue_row, deps.followUpLifecycleDeps || createFollowUpLifecycleDeps({ supabase: getSupabase(deps), now: () => now, ...(deps.followUpHoldCheck ? { holdCheck: deps.followUpHoldCheck } : {}) }));
+      if (fu_gate.applies && fu_gate.action !== "proceed") {
+        if (fu_gate.action === "hold") {
+          await updateQueueRow(queue_row_id, {
+            queue_status: "paused_automation_hold",
+            paused_reason: fu_gate.reason,
+            guard_status: "held",
+            guard_reason: fu_gate.reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: fu_gate.reason, final_queue_status: "paused_automation_hold", held_by: "followup_intent_gate", finalized_at: now },
+          }, deps);
+        } else if (fu_gate.action === "cancel") {
+          await updateQueueRow(queue_row_id, {
+            queue_status: "cancelled",
+            guard_status: "blocked",
+            guard_reason: fu_gate.reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: fu_gate.reason, cancellation_reason: fu_gate.reason, final_queue_status: "cancelled", cancelled_by: "followup_intent_gate", finalized_at: now },
+          }, deps);
+        } else {
+          await releaseSkippedQueueRow(queue_row, lock_token, fu_gate.reason, {
+            ...deps,
+            now,
+            metadata_patch: fu_gate.defer_until ? { next_eligible_at: fu_gate.defer_until, followup_gate_deferred: fu_gate.reason } : { followup_gate_deferred: fu_gate.reason },
+          });
+        }
+        return {
+          ok: false,
+          skipped: true,
+          sent: false,
+          reason: fu_gate.reason,
+          queue_status: fu_gate.action === "cancel" ? "cancelled" : fu_gate.action === "hold" ? "paused_automation_hold" : "queued",
+          final_queue_status: fu_gate.action === "cancel" ? "cancelled" : fu_gate.action === "hold" ? "paused_automation_hold" : "queued",
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
+    }
+
+    // rc-8.5.21 S3 / owner ruling 2026-10-18: ONE dispatch decision (sms-engine#evaluateDispatchWindow):
+    // the messaging category + its window verdict. Category 1 (an in-session reply to the seller's
+    // inbound) is eligible at any hour unless the jurisdiction × category restriction table binds it;
+    // a nurture / campaign touch is never category 1, even inside an active session.
+    const dispatch_window = evaluateDispatchWindow(queue_row, {
+      ...deps,
+      now,
+      windowMinutes: conversational_reply_window_minutes,
+      evaluateContactWindow: evaluate_contact_window,
+      propertyGeography: property_geography,
+      mailingGeography: mailing_geography || deps.mailingGeography || null,
+    });
+    const contact_window = dispatch_window.contact_window;
+    const inbound_auto_reply = in_session_reply.in_session === true && dispatch_window.active_conversation_lawful === true;
 
     console.log("CONTACT WINDOW CHECK", {
       row_id: queue_row_id,
@@ -1982,13 +2189,44 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       }
     }
 
+    // P0 (rc-8.5.21): an empty or unrendered body is NEVER sent — whatever wrote the row, after the
+    // deferred render above. A template-backed deferred row reaches this point only rendered.
+    {
+      const final_body = clean(queue_row.message_body || queue_row.message_text);
+      // an operator's manual text is sent exactly as typed (its braces are the operator's); template-
+      // rendered rows (follow-ups, auto-replies, campaigns) must never carry an unfilled placeholder
+      const unrendered = !manual_inbox_send && /\{\{[^}]*\}\}|\[\[[^\]]*\]\]/.test(final_body);
+      if (!final_body || unrendered || isDeferredQueueRow(queue_row)) {
+        const reason = !final_body ? "empty_message_body_after_render" : unrendered ? "unrendered_placeholder_after_render" : "deferred_message_unresolved";
+        await getSupabase(deps)
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "paused_deferred_unresolved",
+            guard_status: "blocked",
+            guard_reason: reason,
+            last_guard_checked_at: now,
+            paused_reason: reason,
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: { ...(queue_row.metadata ?? {}), skip_reason: reason, final_queue_status: "paused_deferred_unresolved", finalized_at: now },
+          })
+          .eq("id", queue_row_id);
+        info("send.blocked_body_not_sendable", { queue_row_id, reason });
+        return { ok: false, skipped: true, reason, queue_row_id, sent: false };
+      }
+    }
+
     // ── Template ↔ asset reselection ────────────────────────────────────
     // A pending row whose template does not describe its property is moved to
     // an asset-eligible template of the same use case, stage and language
     // BEFORE the body guards below run, so the replacement passes every one
     // of them. Same row, schedule, sender and keys. Nothing eligible → the
     // final asset guard further down blocks it.
-    if (!manual_inbox_send && clean(queue_row.message_body || queue_row.message_text)) {
+    // 8.5.16: an ai_generated row's text is immutable (its ai_generated_messages record):
+    // it is never swapped for a template here; the final asset guard below still blocks it.
+    if (!manual_inbox_send && !isVerifiedAiGeneratedRow(queue_row) && clean(queue_row.message_body || queue_row.message_text)) {
       const pre_guard = await evaluateTemplateAssetGuard({
         supabase: getSupabase(deps),
         queue_row,
@@ -2066,7 +2304,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      */
     const buyer_disposition_send = isBuyerDispositionSend(queue_row);
 
-    if (!manual_inbox_send && !buyer_disposition_send && !seller_first_name) {
+    // 8.5.16 origin ai_generated: the body is final text (no "Hi {first name}" render),
+    // verified against its immutable record by the AI row gate above.
+    const ai_message_send = isVerifiedAiGeneratedRow(queue_row);
+
+    if (!manual_inbox_send && !buyer_disposition_send && !ai_message_send && !seller_first_name) {
       // Mark row as blocked — do not send.
       const supabase_client = getSupabase(deps);
       await supabase_client
@@ -2214,10 +2456,14 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     // ── Blank greeting guard ─────────────────────────────────────────────
     // Block any row where the rendered body starts with a blank greeting.
     // This is a belt-and-suspenders guard for rows that bypassed feeder checks.
+    // (domain/messaging/transport-content-rules.js carries the SAME literals for the agent-text validator.) A verified
+    // agent-composed text (queue_agent_text: the agent-text row gate matched its body to the immutable ledger record
+    // above) was never rendered: the greeting rule does not apply to it (profile 'agent_text').
     const BLANK_GREETING_GUARD_RE = /^(hi|hey|hello|hola|ola|marhaba)\s*,/i;
     const BLANK_GREETING_INLINE_RE = /(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/;
     if (
       !manual_inbox_send &&
+      appliesBlankGreetingRule(agent_text_send ? "agent_text" : "rendered") &&
       (BLANK_GREETING_GUARD_RE.test(message_fields.body) ||
         BLANK_GREETING_INLINE_RE.test(message_fields.body))
     ) {
@@ -2471,7 +2717,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       {
         supabase: getSupabase(deps),
         store: deps.store,
-        sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name }),
+        sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name, ...(agent_text_send ? { agent_text_exact_body: true } : {}) }),
         // Claims only. The adapter re-verifies every one of them against
         // durable rows before it will let a send cross an active brake, and
         // builds to null for any execution that is not a consumed scoped
@@ -2491,8 +2737,31 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         getSystemValue: deps.getSystemValue || getSystemValue,
         scoped_canary: deps.scoped_canary === true,
         now,
+        // the final sender-continuity check reads the same fleet / blocklist seams the selection used
+        ...(typeof deps.loadOutboundNumberByPhone === "function" ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
+        ...(typeof deps.loadDispatchBlockedSenders === "function" ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),
+        ...(typeof deps.loadEstablishedSender === "function" ? { loadEstablishedSender: deps.loadEstablishedSender } : {}),
+        ...(typeof deps.finalSenderContinuityCheck === "function" ? { finalSenderContinuityCheck: deps.finalSenderContinuityCheck } : {}),
       }
     );
+
+    // SENDER CONTINUITY — the FINAL check inside the seam refused this attempt (the row's number is not
+    // the thread's established sender, or that sender can no longer send): a VISIBLE HOLD bound to the
+    // thread's sender, never a retry from another number and never a transport failure.
+    if (dispatch.provider_invoked === false && dispatch.stage === "runtime_authority" && SENDER_CONTINUITY_REASONS.has(clean(dispatch.reason))) {
+      const held = await blockQueueRowByIneligibleSender(queue_row, {
+        reason: clean(dispatch.reason),
+        deferred: clean(dispatch.reason) === SENDER_CONTINUITY_UNREADABLE,
+        ineligible_sender: true,
+        terminal: false,
+        from_phone_number: queue_row.from_phone_number || null,
+        sender_reason: dispatch.sender_continuity?.sender_reason || null,
+        sender_continuity: dispatch.sender_continuity || { established_sender: null },
+        continuity_stage: "final_transport_check",
+      }, deps);
+      await reconcileBuyerOutreachFromQueueRow({ ...queue_row, queue_status: held.queue_status }, deps);
+      return { ...held, logical_communication_id: dispatch.logical_communication_id || null, final_check: true };
+    }
 
     // A refusal BEFORE the wire is not a provider failure: it must not consume
     // a retry or be recorded as a delivery attempt. Release the row and say why,
@@ -2675,6 +2944,11 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         now,
       }
     );
+
+    // rc-8.5.21: an AI row's immutable record learns the provider outcome (no-op for every other row)
+    if (queue_row?.metadata?.ai_message_id) {
+      try { await (deps.recordAiRowProviderOutcome || recordAiRowProviderOutcome)(getSupabase(deps), queue_row, { eventType: "provider_accepted", providerResult: send_result, detail: { queue_status: "sent" } }); } catch { /* bookkeeping only */ }
+    }
 
     /**
      * §1 — the outreach target learns what the queue just recorded.
@@ -2926,6 +3200,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
             now,
           })
         : null;
+      if (queue_row?.metadata?.ai_message_id) {
+        try { await (deps.recordAiRowProviderOutcome || recordAiRowProviderOutcome)(getSupabase(deps), queue_row, { eventType: "provider_failed", providerResult: { ok: false, status: error?.status || null }, detail: { reason: String(error?.message || "send_failed").slice(0, 120) } }); } catch { /* bookkeeping only */ }
+      }
 
       try {
         await writeOutboundFailureMessageEvent(queue_row, error, {
@@ -3070,6 +3347,72 @@ export async function processSendQueueItem(queue_row, deps = {}) {
   }
 
   /**
+   * AUTOMATION HOLD (P0 containment 2026-10-16) — the single dispatch check.
+   *
+   * Every queue send (auto-reply, follow-up, nurture, campaign, workflow,
+   * retry, released review rows, manual send-now through the queue) passes
+   * here before any claim or provider call. A held thread / property / owner
+   * DEFERS: skipped, no retry consumed, row untouched (a hold is reversible).
+   * A manual operator row passes only with an explicit override carried on
+   * the row (metadata.automation_hold_override: approval_ref, reason,
+   * operator_id). Fail closed: an unreadable hold defers the send.
+   */
+  {
+    const row_metadata =
+      resolved_queue_row?.metadata && typeof resolved_queue_row.metadata === "object" ? resolved_queue_row.metadata : {};
+    const is_manual_row = row_metadata.manual_operator_send === true;
+    const hold_override = is_manual_row ? holdOverrideOf(row_metadata.automation_hold_override) : null;
+    // thread_key is the seller phone; a row whose thread_key is missing or differs from its destination is
+    // checked under both keys.
+    const dispatch_keys = [...new Set([clean(resolved_queue_row.thread_key), clean(resolved_queue_row.to_phone_number)].filter(Boolean))];
+    let dispatch_hold = null;
+    for (const thread_key of dispatch_keys.length ? dispatch_keys : [null]) {
+      dispatch_hold = await resolveAutomationHold(
+        {
+          thread_key,
+          property_id: clean(resolved_queue_row.property_id) || null,
+          master_owner_id: clean(resolved_queue_row.master_owner_id) || null,
+        },
+        { capability: is_manual_row ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND, supabase: deps.supabase || null }
+      );
+      if (dispatch_hold.held) break;
+    }
+    if (dispatch_hold.held && !(hold_override && !dispatch_hold.fail_closed)) {
+      warn("queue.dispatch_deferred_by_automation_hold", {
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        hold_ids: dispatch_hold.hold_ids,
+        fail_closed: dispatch_hold.fail_closed === true,
+      });
+      // rc-8.5.21 v3 (RT-44): the deferral is RECORDED on the row (reason, originating event, resource,
+      // next eligible action, review requirement) with one audited transition per new hold set
+      let held_record = null;
+      try {
+        const { recordHeldAction } = await import("@/lib/domain/queue/held-action-record.js");
+        held_record = await recordHeldAction(resolved_queue_row, dispatch_hold, {
+          supabase: deps.supabase || deps.supabaseClient || null,
+          capability: is_manual_row ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND,
+          now: deps.now || new Date().toISOString(),
+          ...(typeof deps.recordAutomationHoldEvent === "function" ? { recordEvent: deps.recordAutomationHoldEvent } : {}),
+        });
+      } catch {
+        held_record = { ok: false };
+      }
+      return {
+        ok: false,
+        status: 423,
+        sent: false,
+        skipped: true,
+        reason: dispatch_hold.fail_closed ? "automation_hold_lookup_failed" : "automation_hold",
+        error: "automation_hold",
+        message: "This conversation is under an automation hold; the send is deferred, not attempted.",
+        diagnostics: { hold_ids: dispatch_hold.hold_ids, fail_closed: dispatch_hold.fail_closed === true, held_recorded: held_record?.ok === true },
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        queue_item_id: getQueueRowId(resolved_queue_row),
+      };
+    }
+  }
+
+  /**
    * CAMPAIGN EXECUTION AUTHORITY — pause stops pending work, not just new work.
    *
    * Placed HERE, at the one entry point every dispatch passes through, and
@@ -3148,3 +3491,14 @@ export async function processSendQueue(input = {}, deps = {}) {
 }
 
 export default processSendQueueItem;
+
+/** link 10: whether a lead was archived (sold, unavailable, duplicate, dead) — an archived lead gets no more agent texts. */
+async function readLeadArchiveState(supabase, thread_key) {
+  try {
+    const { data, error } = await supabase.from("inbox_thread_state").select("is_archived, archive_scope").eq("thread_key", thread_key).limit(5);
+    if (error) return { read_failed: true };
+    return { archived: (data || []).some((r) => r?.is_archived === true && String(r?.archive_scope || "lead") === "lead") };
+  } catch {
+    return { read_failed: true };
+  }
+}

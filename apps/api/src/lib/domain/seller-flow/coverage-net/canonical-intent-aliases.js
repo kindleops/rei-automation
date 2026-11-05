@@ -61,6 +61,8 @@ export const CANONICAL_INTENTS = Object.freeze([
   "unclear",
   "non_owner_referral",
   "property_specific_non_owner",
+  // OWNER DECISION 2026-10-17: polite decline to the ownership question — ownership UNVERIFIED
+  "ownership_declined_unverified",
   "tenant_respondent",
   "former_owner_respondent",
   "property_manager_respondent",
@@ -98,6 +100,8 @@ const INTENT_ALIASES = Object.freeze({
   wrong_num: "wrong_number",
   non_owner_referral: "non_owner_referral",
   property_specific_non_owner: "property_specific_non_owner",
+  ownership_declined_unverified: "ownership_declined_unverified",
+  ownership_declined: "ownership_declined_unverified",
   never_been_owner: "property_specific_non_owner",
   not_the_owner: "property_specific_non_owner",
   no_longer_owner: "former_owner_respondent",

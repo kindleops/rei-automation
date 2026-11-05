@@ -13,9 +13,11 @@
  *
  *   node scripts/ops/seller-intelligence-propagation-report.mjs [--group-by state|county_name] [--limit N]
  *
- * Requires SUPABASE_DB_URL (PostgREST does not expose the `seller` schema).
+ * Needs a direct connection (PostgREST does not expose the `seller` schema): the
+ * role-enforced read-only diagnostics credential, LC_RO_SELLER_INTEL_DB_URL_FILE
+ * (scripts/lib/prod-db-credentials.mjs, rc-8.5.21-c).
  */
-import pg from 'pg';
+import { connectReadOnlyDiagnostics } from '../../../../scripts/lib/prod-db-credentials.mjs';
 import {
   buildCatchUpSql,
   buildPropagationReport,
@@ -35,12 +37,6 @@ const arg = (name, fallback = null) => {
 const GROUPABLE = new Set(['state', 'county_name']);
 
 async function main() {
-  const url = String(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || '').trim();
-  if (!url) {
-    console.error('SUPABASE_DB_URL is required (the seller schema is not exposed over PostgREST).');
-    process.exit(2);
-  }
-
   const groupBy = arg('group-by');
   if (groupBy && !GROUPABLE.has(groupBy)) {
     console.error(`--group-by must be one of: ${[...GROUPABLE].join(', ')}`);
@@ -48,8 +44,7 @@ async function main() {
   }
   const limit = Number(arg('limit', '250000'));
 
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
+  const client = await connectReadOnlyDiagnostics({ purpose: 'seller_intel', applicationName: 'lc-seller-intel-propagation' });
   try {
     // Read-only by construction, not by convention: the transaction itself
     // refuses a write even if this script were later edited carelessly.

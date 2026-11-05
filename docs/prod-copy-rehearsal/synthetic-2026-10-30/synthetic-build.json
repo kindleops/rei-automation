@@ -1,0 +1,263 @@
+{
+  "database": "lc_prodcopy_synth_src_20261030",
+  "dump": "/tmp/claude-0/-home-user/27a0536f-585a-5abd-9c87-5a216e5e94e1/scratchpad/synth-final/synthetic-20261030.dump",
+  "sha256": "417eed1ed41ea0885855f85a32c7ef2dcfbd4fe7ea96869cf9eac7793b661f5d",
+  "bytes": 1183494,
+  "built_ms": 2377,
+  "steps": [
+    {
+      "kind": "skip",
+      "name": "drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+      "reason": "cluster-global role reset skipped (shared local server)",
+      "ms": 0
+    },
+    {
+      "kind": "skip",
+      "name": "drop a leftover lc_action_gateway role (cluster-global; disposable cluster only)",
+      "reason": "cluster-global role reset skipped (shared local server)",
+      "ms": 0
+    },
+    {
+      "kind": "file",
+      "name": "supabase-shim.sql",
+      "ms": 23
+    },
+    {
+      "kind": "file",
+      "name": "20260831000000_durable_run_locks_and_idempotency_ledger.sql",
+      "ms": 43
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261010120000_agent_s3_persistence.sql",
+      "ms": 95
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261010130000_agent_research_ro.sql",
+      "ms": 47
+    },
+    {
+      "kind": "file",
+      "name": "send_queue_live_baseline.sql",
+      "ms": 43
+    },
+    {
+      "kind": "sql",
+      "name": "public.system_control + public.send_queue (runtime fixture)",
+      "ms": 21
+    },
+    {
+      "kind": "file",
+      "name": "operations_public_baseline.sql",
+      "ms": 51
+    },
+    {
+      "kind": "file",
+      "name": "research_valuation_public_baseline.sql",
+      "ms": 14
+    },
+    {
+      "kind": "file",
+      "name": "legacy_conversation_turns_baseline.sql",
+      "ms": 15
+    },
+    {
+      "kind": "file",
+      "name": "automation_holds_public_baseline.sql",
+      "ms": 18
+    },
+    {
+      "kind": "file",
+      "name": "campaign_target_graph_live_functions_baseline.sql",
+      "ms": 29
+    },
+    {
+      "kind": "file",
+      "name": "contact_property_resolution_live_constraints.sql",
+      "ms": 17
+    },
+    {
+      "kind": "file",
+      "name": "lc_mcp_reader_chain_baseline.sql",
+      "ms": 34
+    },
+    {
+      "kind": "file",
+      "name": "action_gateway_baseline.sql",
+      "ms": 35
+    },
+    {
+      "kind": "file",
+      "name": "action_gateway_t2_baseline.sql",
+      "ms": 31
+    },
+    {
+      "kind": "file",
+      "name": "action_gateway_t34_baseline.sql",
+      "ms": 24
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016200000_automation_holds_registry.sql",
+      "ms": 42
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261012140000_intel_runtime.sql",
+      "ms": 86
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261013120000_agent_capabilities.sql",
+      "ms": 36
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261013160000_conversation_ai_shadow.sql",
+      "ms": 29
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql",
+      "ms": 25
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261013161000_conversation_decide_event_budget.sql",
+      "ms": 22
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261014150000_ops_health_snapshot_delivery_ref.sql",
+      "ms": 15
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261014120000_persistent_missions.sql",
+      "ms": 36
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261015130000_message_origin_ai_generated_messages.sql",
+      "ms": 29
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261015190000_negotiation_authority.sql",
+      "ms": 38
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261015191000_ai_operator_feedback.sql",
+      "ms": 41
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261015110000_block_repeat_asking_price_mirror.sql",
+      "ms": 19
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261015120000_repeat_asking_price_question_kind.sql",
+      "ms": 23
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016100000_zip_acquisition_intelligence.sql",
+      "ms": 52
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016120000_conversation_reply_turns.sql",
+      "ms": 41
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016140000_operations_action_center.sql",
+      "ms": 38
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016150000_ai_conversation_company_identity_setting.sql",
+      "ms": 13
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016155000_campaign_graph_prior_reply_not_owner.sql",
+      "ms": 38
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016160000_runtime_event_budget_ceilings.sql",
+      "ms": 27
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016161000_negotiation_send_authorization.sql",
+      "ms": 39
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261016162000_ops_research_valuation_snapshot.sql",
+      "ms": 23
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql",
+      "ms": 24
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261017120000_followup_intent_lifecycle.sql",
+      "ms": 48
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261017121000_conversation_reply_turn_dispatch_lease.sql",
+      "ms": 45
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261017122000_conversation_turn_operator_items.sql",
+      "ms": 20
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261019120000_payload_clean_opaque_ids.sql",
+      "ms": 27
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261019150000_lc_mcp_reader.sql",
+      "ms": 133
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261019160000_action_gateway.sql",
+      "ms": 188
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261020100000_action_gateway_t2.sql",
+      "ms": 109
+    },
+    {
+      "kind": "file",
+      "name": "PROPOSED_20261020110000_action_gateway_t34.sql",
+      "ms": 134
+    },
+    {
+      "kind": "file",
+      "name": "action_gateway_agent_message_baseline.sql",
+      "ms": 40
+    },
+    {
+      "kind": "file",
+      "name": "prod_copy_synthetic_corpus.sql",
+      "ms": 60
+    }
+  ],
+  "synthetic": true,
+  "note": "invented rows only; production-shaped schema from the repository release chain"
+}

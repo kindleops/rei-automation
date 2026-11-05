@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey,
+import { evaluateContactWindow, evaluateRecipientWindowForEntry, enqueueSendQueueItem, buildSendQueueDedupeKey,
   evaluateOutboundNumberEligibility,
 } from "@/lib/supabase/sms-engine.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
@@ -1954,37 +1954,67 @@ function parseContactWindowRange(window_text = "") {
   return { start, end };
 }
 
-function getLocalMinutesNow(timezone) {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone || "America/Chicago",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date());
-    const hh = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-    const mm = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-    return hh * 60 + mm;
-  } catch {
-    return null;
-  }
+/**
+ * The recipient-window evidence of a campaign candidate at one instant, as THE recipient-window policy
+ * reads it (the recipient phone first, then the owner's mailing state, the property only narrowing, the
+ * stored zone only narrowing) — shared by the plan-time window check and the next-schedulable search so
+ * the two can never disagree.
+ */
+function candidateWindowEntry(candidate = {}, at) {
+  const property_state = clean(candidate.property_state || candidate.property_address_state || candidate.raw?.property_address_state || "") || null;
+  const mailing_state = clean(candidate.owner_address_state || candidate.raw?.owner_address_state || "") || null;
+  return {
+    entry: "campaign",
+    recipient_phone: candidate.canonical_e164 || null,
+    timezone: candidate.timezone || null,
+    property_geography: property_state ? { state: property_state, zip: clean(candidate.property_zip || candidate.property_address_zip || candidate.raw?.property_address_zip || "") || null } : null,
+    mailing_geography: mailing_state ? { state: mailing_state, zip: null } : null,
+    // recipient evidence beyond phone / mailing, when the candidate carries it (rc-8.5.21): the same
+    // row metadata the canonical writer stamps and the dispatcher re-reads
+    metadata: {
+      ...(clean(candidate.recipient_verified_timezone || candidate.raw?.recipient_verified_timezone || "") ? { recipient_verified_timezone: clean(candidate.recipient_verified_timezone || candidate.raw?.recipient_verified_timezone) } : {}),
+      ...(Array.isArray(candidate.recipient_location_history_zones || candidate.raw?.recipient_location_history_zones) ? { recipient_location_history_zones: candidate.recipient_location_history_zones || candidate.raw?.recipient_location_history_zones } : {}),
+    },
+    scheduled_for: at,
+    now: at,
+  };
 }
 
-function computeNextSchedulableTime(candidate = {}, now_iso = new Date().toISOString()) {
-  const range = parseContactWindowRange(candidate.contact_window);
-  if (!range) return now_iso;
-  const local_minutes = getLocalMinutesNow(candidate.timezone);
-  if (local_minutes === null) return now_iso;
-  if (local_minutes <= range.start) {
-    const now = new Date();
-    now.setUTCMinutes(now.getUTCMinutes() + Math.max(range.start - local_minutes, 0));
-    return now.toISOString();
+const NEXT_SCHEDULABLE_STEP_MS = 15 * 60 * 1000;
+const NEXT_SCHEDULABLE_HORIZON_MS = 8 * 24 * 60 * 60 * 1000;
+
+/**
+ * rc-8.5.21: the next instant a campaign touch may be scheduled, from THE recipient-window policy (the
+ * same zones and verdict as the plan-time window check and the dispatcher), never a single stored
+ * timezone or a fixed UTC hour. The candidate's finer contact_window (when parseable) must also hold in
+ * EVERY plausible recipient zone, the dispatcher's intersection rule. Nothing places the recipient ⇒ the
+ * instant itself (the dispatcher HOLDS such a row; no guessed window). Pure over its inputs.
+ */
+export function computeNextSchedulableTime(candidate = {}, now_iso = new Date().toISOString(), deps = {}) {
+  const evaluate = deps.evaluateRecipientWindowForEntry || evaluateRecipientWindowForEntry;
+  const start = Date.parse(now_iso);
+  if (!Number.isFinite(start)) return now_iso;
+  const finer = parseContactWindowRange(candidate.contact_window);
+  const insideFiner = (ms, zones) => {
+    if (!finer) return true;
+    return (zones || []).every((zone) => {
+      const m = getLocalMinutesAt(new Date(ms), zone);
+      if (m === null) return false;
+      return finer.start <= finer.end ? m >= finer.start && m <= finer.end : m >= finer.start || m <= finer.end;
+    });
+  };
+  let t = start;
+  for (let guard = 0; guard < 2000 && t - start <= NEXT_SCHEDULABLE_HORIZON_MS; guard += 1) {
+    const at = new Date(t).toISOString();
+    const w = evaluate(candidateWindowEntry(candidate, at), { now: at });
+    if (w?.hold === true) return now_iso;
+    const zones = Array.isArray(w?.zones) ? w.zones : [];
+    if (w?.allowed === true && zones.length && insideFiner(t, zones)) return at;
+    if (w?.allowed === true && !zones.length) return at;
+    const next = Date.parse(w?.next_open_at || w?.next_eligible_at || "");
+    t = w?.allowed !== true && Number.isFinite(next) && next > t ? next : t + NEXT_SCHEDULABLE_STEP_MS;
   }
-  const next_day = new Date();
-  next_day.setUTCDate(next_day.getUTCDate() + 1);
-  next_day.setUTCHours(14, 0, 0, 0);
-  return next_day.toISOString();
+  return now_iso;
 }
 
 function getLocalMinutesAt(date, timezone) {
@@ -2849,12 +2879,11 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
     return { ok: false, reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, reason: "next_eligible_at_future", next_eligible_at: candidate.next_eligible_at };
   }
 
-  const window_check = evaluateContactWindow(
-    {
-      contact_window: candidate.contact_window || null,
-      timezone: candidate.timezone || "America/Chicago",
-      scheduled_for: options.now || new Date().toISOString(),
-    },
+  // rc-8.5.21 (criterion 14): the plan-time check asks the SAME recipient-window functions as the
+  // dispatcher — the recipient phone first, mailing then property evidence, the candidate's stored
+  // zone only narrowing (never the bare "America/Chicago" default)
+  const window_check = evaluateRecipientWindowForEntry(
+    { ...candidateWindowEntry(candidate, options.now || new Date().toISOString()), now: options.now },
     { now: options.now }
   );
 
@@ -4647,6 +4676,9 @@ export async function createSendQueueItem(candidate = {}, options = {}, deps = {
         template_key: clean(options.template_id) || null,
         property_address_city: clean(pick(candidate.property_city, candidate.raw?.property_address_city)) || null,
         property_address_zip: clean(pick(candidate.property_zip, candidate.raw?.property_address_zip)) || null,
+        // rc-8.5.21 RUN-06: the owner's mailing state (recipient evidence) rides the row, so the canonical
+        // writer's recipient-zone stamp and the dispatcher judge the touch on the evidence it was planned with
+        owner_address_state: clean(pick(candidate.owner_address_state, candidate.raw?.owner_address_state)) || null,
         property_type: clean(pick(candidate.property_type, candidate.raw?.property_type)) || null,
         seller_status: clean(pick(candidate.seller_status, candidate.contact_status, candidate.activity_status)) || null,
         pipeline_stage: clean(pick(candidate.pipeline_stage, candidate.conversation_stage, candidate.stage_code)) || null,

@@ -24,6 +24,20 @@ import { NEXT_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-tran
 import { finalizeSellerAcceptance } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { HOLD_CAPABILITIES, loadActiveAutomationHolds, matchAutomationHolds } from "@/lib/domain/holds/automation-hold.js";
+
+// AUTOMATION HOLD (P0 2026-10-16): every advancing sweep skips held rows. The
+// active hold set is loaded ONCE per run (the table is tiny) and matched in
+// memory with the same predicate as automation_hold_for. A failed load runs no
+// sweep at all (fail closed).
+let ACTIVE_HOLDS = [];
+function heldRow(outcome, scope, idKey, idValue) {
+  const matched = matchAutomationHolds(ACTIVE_HOLDS, scope, HOLD_CAPABILITIES.RECOVERY);
+  if (!matched.length) return false;
+  outcome.held_skipped = (outcome.held_skipped || 0) + 1;
+  outcome.results.push({ [idKey]: idValue, ok: true, skipped: "automation_hold", hold_ids: matched.map((h) => h.id) });
+  return true;
+}
 
 const STALE_ACTIVE_HOURS = 6;
 const LOOKBACK_HOURS = 72;
@@ -186,6 +200,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
     outcome,
     processRow: async (row) => {
       if (row.is_suppressed === true) return;
+      if (heldRow(outcome, { thread_key: row.thread_key, opportunity_id: pageOpps.get(clean(row.thread_key))?.id }, "thread_key", row.thread_key)) return;
       outcome.scanned += 1;
 
       // Prefer the persisted deal record's next action. Otherwise, human review
@@ -296,6 +311,7 @@ async function recoverAdeNeverRan(supabase, { limit, dryRun, deps }) {
     budget,
     outcome,
     processRow: async (opp) => {
+      if (heldRow(outcome, { opportunity_id: opp.id, thread_key: opp.primary_thread_key, property_id: opp.primary_property_id }, "opportunity_id", opp.id)) return;
       outcome.scanned += 1;
       if (!clean(opp.primary_property_id)) {
         outcome.results.push({ opportunity_id: opp.id, ok: false, reason: "no_property_id" });
@@ -377,6 +393,7 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
     outcome,
     processRow: async (opp) => {
       if ((lifecycleStageNumber(opp.acquisition_stage) || 1) >= 6) return; // healthy
+      if (heldRow(outcome, { opportunity_id: opp.id, thread_key: opp.primary_thread_key }, "opportunity_id", opp.id)) return;
       outcome.scanned += 1;
 
       // S6 AUTHORITY. This sweep selects on metadata terms_accepted = true and
@@ -416,6 +433,7 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
         // offer -> no closing case. The acceptance_event_id is derived from the
         // opportunity so repeated sweeps cannot double-bind.
         let converged = null;
+        let routed_to_review = false;
         try {
           const finalized = await finalizeSellerAcceptance({
             opportunity_id: opp.id,
@@ -430,8 +448,15 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
             closing_case_id: finalized?.closing_case_id || null,
             reason: finalized?.reason || null,
           };
+          routed_to_review = finalized?.routed_to_human_review === true;
         } catch {
           converged = { reason: "finalize_exception" };
+        }
+        // The acceptance guard routed this deal to HUMAN REVIEW: the stage must
+        // not move on the recovery's own authority either.
+        if (routed_to_review) {
+          outcome.results.push({ opportunity_id: opp.id, ok: true, skipped: "routed_to_human_review", converged });
+          return;
         }
         const advanced = await transitionOpportunityStage(
           opp.id,
@@ -521,6 +546,7 @@ async function recoverTransitionWithoutStatePatch(supabase, { limit, dryRun, now
     }
     const currentNumber = lifecycleStageNumber(state?.lifecycle_stage) || 1;
     if (currentNumber >= decidedNumber && (state?.next_action || !decision.next_action)) continue;
+    if (heldRow(outcome, { thread_key: threadKey }, "thread_key", threadKey)) continue;
 
     outcome.scanned += 1;
     if (dryRun) {
@@ -704,6 +730,7 @@ async function recoverNegotiationStateIntegrity(supabase, { limit, dryRun }) {
       const missingAuthority = Boolean(ade) && state && state.recommended_offer == null;
       const unlockedAcceptance = Boolean(state?.terms_accepted) && state?.accepted_price == null;
       if (!missingState && !missingAuthority && !unlockedAcceptance) return; // healthy
+      if (heldRow(outcome, { opportunity_id: opp.id, thread_key: opp.primary_thread_key, property_id: opp.primary_property_id }, "opportunity_id", opp.id)) return;
 
       outcome.scanned += 1;
       if (dryRun) {
@@ -773,6 +800,7 @@ async function recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }) {
     budget: limit,
     outcome,
     processRow: async (opp) => {
+      if (heldRow(outcome, { opportunity_id: opp.id, thread_key: opp.primary_thread_key }, "opportunity_id", opp.id)) return;
       const state = opp.metadata?.negotiation_state || {};
       const offers = Array.isArray(state.offers_made) ? state.offers_made : [];
       const lastOffer = offers[offers.length - 1] || null;
@@ -889,6 +917,13 @@ export async function recoverSellerExecutionGaps({
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   if (!supabase) return { ok: false, reason: "missing_supabase" };
+
+  const holdSet = await loadActiveAutomationHolds({ supabase });
+  if (!holdSet.ok) {
+    warn("[SELLER_GAP_RECOVERY_HOLD_LOOKUP_FAILED]", { error: holdSet.error });
+    return { ok: false, reason: "automation_hold_lookup_failed", dry_run: dryRun, sweeps_executed: [], sweeps: [], total_scanned: 0, total_repaired: 0 };
+  }
+  ACTIVE_HOLDS = holdSet.holds;
 
   const registry = [
     [SELLER_GAP_SWEEPS.STALE_ACTIVE_WITHOUT_NEXT_ACTION,

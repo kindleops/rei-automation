@@ -66,6 +66,18 @@ function chainTo(entry, forbidden) {
   return { chain: null, size: prev.size }
 }
 
+/** Every source file reachable from the Package A entries (the composition the tick route and the Operations API load). */
+function packageAClosure() {
+  const seen = new Set()
+  const q = ENTRIES.map((e) => path.join(API, e))
+  while (q.length) {
+    const f = q.shift(); if (seen.has(f)) continue; seen.add(f)
+    const src = fs.readFileSync(f, 'utf8'); IMPORT_RE.lastIndex = 0; let m
+    while ((m = IMPORT_RE.exec(src))) { const d = resolveSpec(f, m[1] || m[2] || m[3]); if (d && !seen.has(d)) q.push(d) }
+  }
+  return [...seen].map((f) => path.relative(SRC, f))
+}
+
 // THE SEND STACK: every module that can transmit, queue, schedule or release a message, or change a campaign,
 // an auto-reply / follow-up mode, a disposition, a stage or an offer — plus the capability plane (whose
 // services include Send Now) and every messaging runtime that Package A does not ship.
@@ -90,16 +102,17 @@ const SEND_STACK = new RegExp('^lib/(' + [
   'system-control',
 ].join('|') + ')')
 
+// agntei reconciliation (2026-11-05): the rc-8.5.21 lineage now shares these directories. Package A's entries are
+// its own composition (research-runtime-wiring.js) and the modules it loads; operations-runtime-wiring.js,
+// missions/index.js, operations/index.js and operations-handlers.js are the rc-8.5.21 assembly (capability plane by
+// design) and are no longer Package A entries. Package A's handlers live in package-a-operations-handlers.js.
 const ENTRIES = [
   'src/lib/ai/research-runtime-wiring.js',
-  'src/lib/ai/operations-runtime-wiring.js',
-  'src/lib/agent/missions/index.js',
   'src/lib/agent/missions/property-research-handler.js',
   'src/lib/agent/missions/property-research-triggers.js',
   'src/lib/agent/missions/valuation-refresh-handler.js',
   'src/lib/agent/missions/review-digest-handler.js',
-  'src/lib/agent/operations/index.js',
-  'src/lib/agent/operations/operations-handlers.js',
+  'src/lib/agent/operations/package-a-operations-handlers.js',
   'src/lib/agent/operations/operations-routes.js',
   'src/lib/agent/runtime/runtime-service.js',
   'src/lib/domain/property-research/research-pipeline.js',
@@ -129,14 +142,9 @@ test('NO-SEND (static): the BFS really finds a send path when one exists (the de
 })
 
 test('NO-SEND (static): no Package A module writes a public table through a client (.from(x).insert/update/upsert/delete) or touches system_control / send_queue / campaigns for writing', () => {
-  const files = [
-    ...fs.readdirSync(path.join(SRC, 'lib/agent/missions')).map((f) => `lib/agent/missions/${f}`),
-    ...fs.readdirSync(path.join(SRC, 'lib/agent/operations')).map((f) => `lib/agent/operations/${f}`),
-    ...fs.readdirSync(path.join(SRC, 'lib/domain/property-research')).map((f) => `lib/domain/property-research/${f}`),
-    ...fs.readdirSync(path.join(SRC, 'lib/domain/valuation-refresh')).map((f) => `lib/domain/valuation-refresh/${f}`),
-    ...fs.readdirSync(path.join(SRC, 'lib/domain/opportunity-economics')).map((f) => `lib/domain/opportunity-economics/${f}`),
-    'lib/ai/research-runtime-wiring.js', 'lib/ai/operations-runtime-wiring.js',
-  ].filter((f) => f.endsWith('.js'))
+  // agntei reconciliation: the Package A closure (the rc-8.5.21 modules sharing these directories are not loaded by it)
+  const files = packageAClosure().filter((f) => /^lib\/(agent\/(missions|operations)|domain\/(property-research|valuation-refresh|opportunity-economics))\/|^lib\/ai\/research-runtime-wiring\.js$/.test(f))
+  assert.ok(files.length >= 15, `${files.length} Package A modules scanned`)
   for (const f of files) {
     const src = fs.readFileSync(path.join(SRC, f), 'utf8')
     assert.doesNotMatch(src, /\.from\(\s*['"][a-z_]+['"]\s*\)[\s\S]{0,200}?\.(insert|upsert|update|delete)\(/, `${f} writes a table through a client`)
@@ -145,15 +153,18 @@ test('NO-SEND (static): no Package A module writes a public table through a clie
   }
 })
 
-test('EXCLUDED CAPABILITIES are absent from the tree, not merely unwired', () => {
+test('EXCLUDED CAPABILITIES are absent from the Package A composition (its import graph), not merely unwired', () => {
+  // agntei reconciliation: the rc-8.5.21 lineage ships these modules in the same tree (off by default, its own
+  // composition); Package A must still never load them
+  const closure = new Set(packageAClosure())
   for (const f of [
     'lib/agent/missions/mission-capability-hook.js', 'lib/agent/missions/research-mission-handler.js', 'lib/agent/missions/supervisor-handler.js',
     'lib/agent/missions/discovery-handler.js', 'lib/agent/missions/discovery-source.js', 'lib/agent/missions/research-trigger-hook.js', 'lib/agent/missions/missions-routes.js',
     'lib/agent/operations/pipeline-reconciler.js', 'lib/agent/operations/auto-recovery.js', 'lib/agent/operations/dead-deal-correction.js',
     'lib/ai/mission-runtime-wiring.js', 'lib/ai/followup-runtime-wiring.js', 'lib/ai/conversation-turn-handler.js', 'lib/ai/conversation-turn-wiring.js',
     'lib/domain/followups/followup-execution.js', 'lib/domain/negotiation/negotiation-composer.js', 'lib/domain/negotiation/send-authorization.js',
-  ]) assert.equal(fs.existsSync(path.join(SRC, f)), false, `${f} must not exist in Package A`)
-  const handlers = fs.readFileSync(path.join(SRC, 'lib/agent/operations/operations-handlers.js'), 'utf8')
+  ]) assert.equal(closure.has(f), false, `${f} must not be loaded by Package A`)
+  const handlers = fs.readFileSync(path.join(SRC, 'lib/agent/operations/package-a-operations-handlers.js'), 'utf8')
   assert.doesNotMatch(handlers, /capability_id:\s*'/, 'no operations handler invokes a capability')
   assert.doesNotMatch(handlers, /enqueueFollowupIntent\(|autoRecoverySource\?\.run|createPipelineReconcileHandler/, 'follow-up linkage, auto-recovery and pipeline.reconcile are removed')
 })
@@ -182,10 +193,15 @@ test('KIND ALLOWLIST: Package A registers ONLY its research / operations kinds, 
   assert.deepEqual(researchRuntimeHandlers({ AGENT_ENABLED: '1', AGENT_RUNTIME_ENABLED: '1' }), {}, 'no package flag ⇒ {}')
 })
 
-test('KIND ALLOWLIST: the tick route adds only researchRuntimeHandlers() to production\'s handler map', () => {
+test('KIND ALLOWLIST: the tick route spreads researchRuntimeHandlers() LAST, so Package A\'s handlers win for its kinds', () => {
+  // agntei reconciliation: the rc-8.5.21 kinds are registered too, each behind its own flag (default off) and the
+  // DB arming; production's restricted composition keeps its kinds
   const route = fs.readFileSync(path.join(SRC, 'app/api/internal/agent/runtime/tick/route.js'), 'utf8')
-  assert.match(route, /handlers: \{ \.\.\.DEFAULT_RUNTIME_HANDLERS, \.\.\.conversationRuntimeHandlers\(\), \.\.\.researchRuntimeHandlers\(\) \}/)
-  assert.doesNotMatch(route, /missionRuntimeHandlers|operationsRuntimeHandlers|followupRuntimeHandlers/)
+  const m = route.match(/handlers: \{([^}]*)\}/)
+  assert.ok(m, 'handler map')
+  const spreads = [...m[1].matchAll(/\.\.\.([A-Za-z_]+)(?:\(\))?/g)].map((x) => x[1])
+  assert.equal(spreads[0], 'DEFAULT_RUNTIME_HANDLERS')
+  assert.equal(spreads.at(-1), 'researchRuntimeHandlers')
 })
 
 test('KIND ALLOWLIST: the owner arming SQL arms exactly RESEARCH_PACKAGE_KINDS (one kind with an event budget, ≤ 0.30)', () => {

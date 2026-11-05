@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { stampOutboundQuestionKind } from "@/lib/domain/queue/outbound-question-kind.js";
 import { reconcileProviderCallback } from "@/lib/domain/communications/reconcile-provider-callback.js";
 import {
   normalizeProvenance,
@@ -16,13 +17,25 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isVerifiedAiGeneratedRow } from "@/lib/domain/messages/ai-generated-message.js";
+import { recordAgentDeliveryVerdict } from "@/lib/domain/outreach/lead-events.js";
 import { evaluateInSessionReply, loadConversationalReplyWindowMinutes } from "@/lib/domain/queue/conversational-reply-window.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { resolveConversationalCeiling, withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { SEND_CLASS, isConversationalSendClass, resolveSendClass, sourceSendClass } from "@/lib/domain/delivery/send-class.js";
 import { senderRoutingCeiling } from "@/lib/domain/routing/sender-routing/sender-routing-gate.js";
-import { loadPropertyGeography, resolveRecipientTimezone, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
+import { buildLeaseRecoveryPatch, evaluateExpiredProcessingLease, loadLeaseDispatchEvidence, resolveCrashedAttemptsInPlace } from "@/lib/domain/queue/processing-lease-recovery.js";
+import { loadPropertyGeography, loadMailingGeography, rowMailingGeography, rowNeedsPropertyGeography, storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
+import {
+  CONTACT_HOURS,
+  MESSAGING_CATEGORIES,
+  classifyMessagingCategory,
+  evaluateMessagingWindow,
+  recipientEvidenceFromRow,
+  recipientZoneStamp,
+  resolveRecipientWindowZones,
+} from "@/lib/domain/queue/recipient-window-policy.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
   classifyThreadFromChronology,
@@ -45,6 +58,7 @@ import {
 } from "@/lib/domain/delivery/delivery-receipt-reconcile.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { evaluateSenderDispatchEligibility, loadDispatchBlockedSenders } from "@/lib/domain/delivery/sender-dispatch-eligibility.js";
+import { SENDER_CONTINUITY_MISMATCH, SENDER_CONTINUITY_UNREADABLE, SENDER_UNAVAILABLE, checkContinuityStamp, continuityStamp, evaluateSenderContinuity, isContinuityBoundRow } from "@/lib/domain/delivery/sender-continuity.js";
 import {
   evaluateGlobalSendBrakeState,
   rowCampaignId,
@@ -54,6 +68,8 @@ import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-m
 import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
 import { observeSendQueueInsert } from "@/lib/domain/intelligence/runtime/observation.js";
 import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
+import { HOLD_CAPABILITIES, SENDABLE_QUEUE_STATUSES, holdOverrideOf, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
+import { evaluateEnqueueContactRestrictions } from "@/lib/domain/queue/enqueue-contact-restrictions.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -376,7 +392,17 @@ function emitFutureRowExpirationBlocked(row = {}, context = {}) {
   });
 }
 
-async function applySendQueueLifecyclePatch(supabase, { id, patch, context = {} }) {
+async function applySendQueueLifecyclePatch(supabase, { id, patch, expect = null, context = {} }) {
+  // a compare-and-set patch (rc-8.5.21 RUN-09 lease re-dispatch): applied only while the row is still in
+  // the expected state; zero rows ⇒ not applied (the row moved on)
+  if (expect && typeof expect === "object") {
+    let query = supabase.from(SEND_QUEUE_TABLE).update(patch).eq("id", id);
+    if (expect.queue_status) query = query.eq("queue_status", expect.queue_status);
+    if (expect.lock_token) query = query.eq("lock_token", expect.lock_token);
+    const { data, error } = await query.select("id");
+    if (error) throw error;
+    return { applied: Array.isArray(data) && data.length === 1, blocked: false };
+  }
   const is_stale_runnable_expire =
     lowerStatus(patch.queue_status) === "expired" &&
     clean(patch.failed_reason) === STALE_RUNNABLE_FAILED_REASON;
@@ -568,6 +594,15 @@ export function normalizeSendQueueRow(row) {
     current_stage: safe_row.current_stage || null,
     message_type: safe_row.message_type || null,
     use_case_template: safe_row.use_case_template || null,
+    // P0 2026-10-19: the row's language survives normalization. It was dropped here, so a
+    // content-filter rotation read every row as English (owner rule: never English by default).
+    language:
+      clean(
+        safe_row.language ||
+          safe_row.metadata?.language ||
+          safe_row.metadata?.selected_template_language ||
+          safe_row.metadata?.template_language
+      ) || null,
     personalization_tags_used: safe_row.personalization_tags_used || null,
     character_count: Number(safe_row.character_count ?? body.length),
     metadata: ensureObject(safe_row.metadata),
@@ -615,6 +650,8 @@ export function normalizeSendQueueRow(row) {
     campaign_target_id: safe_row.campaign_target_id || null,
     campaign_send_window_id: safe_row.campaign_send_window_id || null,
     dedupe_key: clean(safe_row.dedupe_key || safe_row.metadata?.idempotency_key) || null,
+    // 8.5.16 unified origin: carried only when the row states one (no shape change otherwise)
+    ...(clean(safe_row.message_origin) ? { message_origin: clean(safe_row.message_origin) } : {}),
   };
 }
 
@@ -840,6 +877,10 @@ function preclaimInvalidQueueRowReason(row = null) {
   // paused_review rows must never be runnable — they require human intervention.
   if (lower(normalized.queue_status) === "paused_review") return "paused_review_not_runnable";
 
+  // SENDER CONTINUITY at claim (owner P0, rc-8.5.21): a bound row's from number must still be the
+  // established sender the canonical writer stamped on it — a rewrite after insertion is refused here.
+  if (!checkContinuityStamp(normalized).ok) return SENDER_CONTINUITY_MISMATCH;
+
   // Enforce canonical thread_key: outbound thread_key must match to_phone_number.
   const to_phone = normalizePhone(resolveQueueDestinationPhone(normalized).phone) || null;
   const thread_key_value = clean(normalized.thread_key);
@@ -849,6 +890,12 @@ function preclaimInvalidQueueRowReason(row = null) {
 
   // Manual inbox sends and unknown auto replies may omit template/snapshot/seller checks.
   if (manual_inbox_send || unknown_auto_reply) return null;
+
+  // 8.5.16 MESSAGE ORIGIN (owner 2026-10-15): an ai_generated row has NO template id by
+  // contract; its authority is its immutable ai_generated_messages record (verified at
+  // send). Its body is final text (no placeholders), so no candidate snapshot / first-name
+  // render applies. ONLY origin ai_generated + source ai_conversation + matching body hash.
+  if (isVerifiedAiGeneratedRow(normalized)) return null;
 
   if (!hasSelectedTemplateReference(normalized)) return "missing_selected_template_id";
   if (!getCandidateSnapshot(normalized)) return "missing_candidate_snapshot";
@@ -987,6 +1034,7 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   // property geography (auto-replies, follow-ups, inbox rows carry only a
   // property_id). A failed read leaves the row to its stored zone — or a hold.
   let property_geography = new Map();
+  let mailing_geography = new Map();
   if (typeof deps.evaluateContactWindow !== "function") {
     const ids = raw_rows.filter((row) => rowNeedsPropertyGeography(row)).map((row) => row.property_id);
     if (ids.length) {
@@ -994,6 +1042,17 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
         property_geography = await (deps.loadPropertyGeography || loadPropertyGeography)(supabase, ids);
       } catch (geography_error) {
         log_warn("queue.property_geography_unavailable", { message: geography_error?.message || String(geography_error) });
+      }
+    }
+    // rc-8.5.21 RUN-06: the owner's MAILING state is recipient evidence (the scheduler already uses it):
+    // one read for every candidate with a property, so an unstamped legacy row is judged on the same
+    // evidence the recipient-window scheduler planned it with
+    const mailing_ids = raw_rows.map((row) => clean(row?.property_id)).filter(Boolean);
+    if (mailing_ids.length) {
+      try {
+        mailing_geography = await (deps.loadMailingGeography || loadMailingGeography)(supabase, mailing_ids);
+      } catch (mailing_error) {
+        log_warn("queue.mailing_geography_unavailable", { message: mailing_error?.message || String(mailing_error) });
       }
     }
   }
@@ -1088,18 +1147,23 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       continue;
     }
 
-    const contact_window = evaluate_contact_window(decision.row, {
+    // rc-8.5.21 S3 / owner ruling 2026-10-18: ONE dispatch decision (category + its window verdict)
+    const dispatch_window = evaluateDispatchWindow(decision.row, {
       ...deps,
       now,
+      windowMinutes: conversational_reply_window_minutes,
+      evaluateContactWindow: evaluate_contact_window,
       propertyGeography: property_geography.get(clean(decision.row?.property_id)) || null,
+      mailingGeography: mailing_geography.get(clean(decision.row?.property_id)) || deps.mailingGeography || null,
     });
+    const contact_window = dispatch_window.contact_window;
     const manual_inbox_send = isManualInboxSend(decision.row);
     // A reply to a seller who just texted us (IN SESSION: inbound-linked,
     // queued within conversational_reply_window_minutes of the inbound, session
     // still open, not a follow-up / nurture / campaign touch) is exempt from
     // the contact window. An aged/backlogged reply must respect the window.
-    const inbound_auto_reply =
-      evaluateInSessionReply(decision.row, { now, window_minutes: conversational_reply_window_minutes }).in_session === true;
+    // category 1 (active seller conversation): eligible at any hour unless the restriction table binds it
+    const inbound_auto_reply = dispatch_window.active_conversation_lawful === true;
     // rc-7.1 D10: no recipient zone → HOLD (never a Chicago guess). Exempt
     // traffic (a reply to a seller who just texted, an operator's send) does
     // not need a window, so it is not held here.
@@ -1337,63 +1401,69 @@ export function evaluateContactWindow(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
   const current_time = deps.now ? new Date(deps.now) : new Date();
 
-  // rc-7.1 D10 — the RECIPIENT's zone: the property's geography first, then
-  // the zone stored on the row; neither → HOLD. A blank or unrecognised zone
-  // used to become America/Chicago here (a 06:00 text to a Pacific seller).
-  const recipient = resolveRecipientTimezone(normalized, { propertyGeography: deps.propertyGeography || null });
-  if (!recipient.ok) {
+  // rc-8.5.21 S3 — THE recipient-timezone policy (recipient-window-policy.js), the same resolver +
+  // verdict the follow-up lifecycle schedules with: zones stamped by the policy, then the recipient
+  // phone's area code (then mailing evidence); the property's geography and the stored row zone only
+  // NARROW (never the sole basis for "known"); no recipient evidence ⇒ the conservative continental
+  // intersection (11:00–21:00 ET). Several zones ⇒ the window must be open in EVERY one. A blank zone
+  // never becomes America/Chicago (rc-7.1 D10). Nothing at all places the recipient, or no lawful
+  // instant exists ⇒ HOLD.
+  const resolution = resolveRecipientWindowZones(
+    recipientEvidenceFromRow({ ...normalized, metadata: row?.metadata ?? normalized.metadata }, {
+      propertyGeography: deps.propertyGeography || null,
+      // rc-8.5.21 RUN-06: the owner's mailing state is recipient evidence — the runner loads it from the
+      // property (properties.owner_address_state); a row that carries it (writer / candidate snapshot)
+      // supplies it when the caller did not
+      mailingGeography: deps.mailingGeography || rowMailingGeography({ ...normalized, ...(row || {}), metadata: row?.metadata ?? normalized.metadata }) || null,
+    })
+  );
+  const zones = resolution.zones;
+  const stored_iana = storedTimezoneToIana(normalized.timezone);
+  const resolved_timezone = resolution.primary_zone;
+  const timezone_basis = resolution.basis;
+  const stored_timezone_corrected = Boolean(stored_iana) && zones.some((zone) => zone !== stored_iana);
+  const zone_fields = {
+    zones,
+    timezone_certainty: resolution.certainty,
+    timezone_known: resolution.timezone_known,
+    recipient_local: resolution.recipient_local,
+    recipient_window_policy: resolution.version,
+  };
+  // The window of a category-2 / category-3 row (campaign touch / scheduled follow-up). A category-1
+  // reply (active seller conversation) is judged by evaluateDispatchWindow on top of this verdict.
+  const window_category = classifyMessagingCategory({ row: { ...normalized, metadata: row?.metadata ?? normalized.metadata }, session: { in_session: false } }).category;
+  const verdict = evaluateMessagingWindow({ category: window_category, at: current_time.getTime(), zones, jurisdictions: resolution.jurisdictions });
+  zone_fields.messaging_category = window_category;
+  zone_fields.jurisdictions = resolution.jurisdictions;
+
+  const LOCAL_SEND_START = CONTACT_HOURS.start_hour * 60;
+  const LOCAL_SEND_END = CONTACT_HOURS.end_hour * 60;
+  const current_minutes = resolved_timezone ? buildDateParts(current_time, resolved_timezone).minutes_of_day : null;
+
+  if (!resolution.has_evidence || verdict.hold) {
     return {
       allowed: false,
       hold: true,
       reason: "recipient_timezone_unresolved",
-      detail: recipient.detail,
-      timezone: null,
+      detail: resolution.has_evidence ? "no_lawful_instant_in_zone_intersection" : "no_geography",
+      timezone: resolved_timezone,
+      timezone_basis,
+      ...zone_fields,
       valid_window: false,
       next_open_at: null,
       next_eligible_at: null,
     };
   }
-  const resolved_timezone = recipient.iana;
-  const timezone_basis = recipient.basis;
-  const stored_timezone_corrected = recipient.corrected;
 
-  // Hard local-time window: 08:00 ≤ local < 21:00 (8 AM – 9 PM).
-  const LOCAL_SEND_START = 8 * 60;   // 480
-  const LOCAL_SEND_END   = 21 * 60;  // 1260 (exclusive)
-
-  const local_parts = buildDateParts(current_time, resolved_timezone);
-  const current_minutes = local_parts.minutes_of_day;
-
-  if (current_minutes < LOCAL_SEND_START || current_minutes >= LOCAL_SEND_END) {
-    // Next eligible: next local 08:00 (today if before open, else tomorrow).
-    let next_open_at = null;
-    try {
-      const probe = new Date(current_time.getTime());
-      // Walk forward in 15-minute steps until local time hits the open minute.
-      for (let i = 0; i < 96 * 2; i += 1) {
-        probe.setUTCMinutes(probe.getUTCMinutes() + 15);
-        const p = buildDateParts(probe, resolved_timezone);
-        if (p.minutes_of_day === LOCAL_SEND_START ||
-            (p.minutes_of_day > LOCAL_SEND_START && p.minutes_of_day < LOCAL_SEND_START + 15)) {
-          // Snap to start of that local hour block approximately via ISO
-          next_open_at = new Date(probe.getTime());
-          // refine: back up to nearest start boundary
-          const overshoot = p.minutes_of_day - LOCAL_SEND_START;
-          if (overshoot > 0) next_open_at = new Date(next_open_at.getTime() - overshoot * 60_000);
-          next_open_at = next_open_at.toISOString();
-          break;
-        }
-      }
-    } catch {
-      next_open_at = null;
-    }
-
+  if (!verdict.lawful) {
+    const next_open_at = verdict.next_permitted_at;
     return {
       allowed: false,
       reason: "outside_local_send_window",
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1411,6 +1481,7 @@ export function evaluateContactWindow(row, deps = {}) {
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1426,6 +1497,7 @@ export function evaluateContactWindow(row, deps = {}) {
       timezone: resolved_timezone,
       timezone_basis,
       stored_timezone_corrected,
+      ...zone_fields,
       valid_window: false,
       current_minutes,
     };
@@ -1434,21 +1506,88 @@ export function evaluateContactWindow(row, deps = {}) {
   const start_minutes = parsed_window.start_minutes;
   const end_minutes = parsed_window.end_minutes;
 
-  let within_window = false;
-  if (start_minutes <= end_minutes) {
-    within_window = current_minutes >= start_minutes && current_minutes <= end_minutes;
-  } else {
-    within_window = current_minutes >= start_minutes || current_minutes <= end_minutes;
-  }
+  // the finer window holds in EVERY plausible recipient zone (the same intersection rule)
+  const insideFiner = (minutes) =>
+    start_minutes <= end_minutes
+      ? minutes >= start_minutes && minutes <= end_minutes
+      : minutes >= start_minutes || minutes <= end_minutes;
+  const within_window = zones.every((zone) => insideFiner(buildDateParts(current_time, zone).minutes_of_day));
 
   return {
     allowed: within_window,
     reason: within_window ? "inside_contact_window" : "outside_contact_window",
     timezone: resolved_timezone,
+    timezone_basis,
+    ...zone_fields,
     valid_window: true,
     current_minutes,
     start_minutes,
     end_minutes,
+  };
+}
+
+/**
+ * THE dispatcher's window decision for one queue row (pre-claim and pre-send): the messaging category
+ * (recipient-window-policy.js#classifyMessagingCategory) and its verdict. Category 1 (an in-session
+ * reply to the seller's inbound) is judged by evaluateMessagingWindow (no universal after-hours block;
+ * the jurisdiction × category restriction table) — categories 2 / 3 by the recipient-local window
+ * (evaluateContactWindow). The session decides continuity only: a nurture / campaign touch is never
+ * category 1. Operator (manual inbox) exemptions stay with the caller.
+ * @returns {{ allowed: boolean, category: string, active_conversation_lawful: boolean, in_session: object, contact_window: object }}
+ */
+/**
+ * rc-8.5.21 (owner acceptance criterion 14): the plan-time window check of an entry point that has no
+ * queue row yet — the campaign feeder, queueAutoReply, the workflow guard / condition, the canonical
+ * queue writer. It builds the row-shaped evidence (the RECIPIENT PHONE first, then mailing, property and
+ * any stored zone, which only narrows) and asks the SAME functions the dispatcher uses at send time:
+ * evaluateContactWindow for a campaign touch / scheduled follow-up, evaluateDispatchWindow for a reply
+ * (an in-session reply to the seller's inbound is category 1). Never a bare zone.
+ * @param {{ entry: 'campaign'|'followup'|'reply', recipient_phone?: string|null, timezone?: string|null,
+ *           property_geography?: {state?: string|null, zip?: string|null}|null, mailing_geography?: {state?: string|null, zip?: string|null}|null,
+ *           metadata?: object, scheduled_for?: string|null, inbound_message_event_id?: string|null, inbound_received_at?: string|null, now?: string|null }} e
+ */
+export function evaluateRecipientWindowForEntry(e = {}, deps = {}) {
+  const now = e.now || deps.now || nowIso();
+  const entry = e.entry === "campaign" || e.entry === "reply" ? e.entry : "followup";
+  const metadata = {
+    ...(e.metadata && typeof e.metadata === "object" ? e.metadata : {}),
+    ...(entry === "reply"
+      ? { type: "reply", inbound_message_event_id: e.inbound_message_event_id || null, inbound_received_at: e.inbound_received_at || null, conversational_reply: { queued_at: now } }
+      : { send_kind: entry === "campaign" ? "campaign" : "followup" }),
+  };
+  const row = {
+    to_phone_number: e.recipient_phone || null,
+    timezone: e.timezone || null,
+    scheduled_for: e.scheduled_for || now,
+    scheduled_for_utc: e.scheduled_for || now,
+    created_at: now,
+    type: entry === "campaign" ? "campaign" : entry === "reply" ? "auto_reply" : "followup",
+    property_address_state: e.property_geography?.state || null,
+    property_address_zip: e.property_geography?.zip || null,
+    metadata,
+  };
+  const d = { ...deps, now, mailingGeography: e.mailing_geography || deps.mailingGeography || null };
+  if (entry === "reply") {
+    const v = evaluateDispatchWindow(row, d);
+    return { ...v.contact_window, allowed: v.allowed, messaging_category: v.category, in_session: v.in_session?.in_session === true, entry };
+  }
+  return { ...evaluateContactWindow(row, d), entry };
+}
+
+export function evaluateDispatchWindow(row, deps = {}) {
+  const now = deps.now || nowIso();
+  const contact_window = (deps.evaluateContactWindow || evaluateContactWindow)(row, deps);
+  const in_session = evaluateInSessionReply(row, { now, window_minutes: deps.windowMinutes ?? deps.conversational_reply_window_minutes ?? undefined });
+  const { category } = classifyMessagingCategory({ row, session: in_session });
+  const active_conversation_lawful =
+    category === MESSAGING_CATEGORIES.ACTIVE_CONVERSATION &&
+    evaluateMessagingWindow({ category, at: new Date(now).getTime(), zones: contact_window?.zones || [], jurisdictions: contact_window?.jurisdictions || [] }).lawful;
+  return {
+    allowed: active_conversation_lawful || (contact_window?.allowed === true && contact_window?.hold !== true),
+    category,
+    active_conversation_lawful,
+    in_session,
+    contact_window,
   };
 }
 
@@ -1614,11 +1753,13 @@ async function stickyThreadSelection(normalized, deps = {}, { thread_sender = nu
     return {
       ok: false,
       reason: sticky.reason,
+      ...(sticky.sender_reason ? { sender_reason: sticky.sender_reason } : {}),
       deferred: sticky.reason === "sender_blocklist_unreadable",
       ineligible_sender: true,
       terminal: false,
       selected: null,
-      from_phone_number: thread_sender,
+      // a held thread row stays bound to the thread's own sender (owner P0, sender continuity)
+      from_phone_number: thread_sender || normalizePhone(sticky.thread_sender) || null,
     };
   }
   const row = await loadOutboundNumberByPhone(sticky.phone, deps).catch(() => null);
@@ -1660,17 +1801,80 @@ async function resolveRowSendClass(row, normalized, deps = {}) {
   }
 }
 
+/**
+ * SENDER CONTINUITY at dispatch (owner P0, rc-8.5.21; delivery/sender-continuity.js). A bound row on a
+ * thread with an ESTABLISHED sender is never routed: no routing-graph pick, no sticky fallback, no
+ * rotation. It sends from the established sender while that number can send; otherwise it is a
+ * VISIBLE HOLD (sender_unavailable) bound to that sender. A row naming any other number is refused
+ * (sender_continuity_mismatch), never "corrected". Unreadable thread state defers (fail closed).
+ * Returns a selection / hold, or null when the rule does not decide (not bound / new conversation).
+ * With injected fleet fakes and no client, a unit test never reaches a real database (not established).
+ */
+async function senderContinuitySelection(row, normalized, deps = {}, { send_class = null, send_class_basis = null } = {}) {
+  const subject = { ...(normalized || {}), ...(row && typeof row === "object" ? row : {}) };
+  if (!isContinuityBoundRow(subject)) return null;
+  const injected =
+    typeof deps.loadOutboundNumberByPhone === "function" ||
+    typeof deps.loadTextgridFleet === "function" ||
+    typeof deps.selectAvailableTextgridNumber === "function";
+  const verdict = await evaluateSenderContinuity(subject, {}, { ...deps, noDefaultDb: injected });
+  const intended = normalizePhone(subject.from_phone_number) || null;
+  if (!verdict.ok && verdict.reason === SENDER_CONTINUITY_UNREADABLE) {
+    return { ok: false, reason: SENDER_CONTINUITY_UNREADABLE, deferred: true, ineligible_sender: true, terminal: false, selected: null, from_phone_number: intended, sender_continuity: verdict };
+  }
+  if (!verdict.applies || !verdict.established) return null;
+  if (!verdict.ok) {
+    // a row naming another number on an established thread (forged / stale): refused, held visibly
+    return { ok: false, reason: SENDER_CONTINUITY_MISMATCH, ineligible_sender: true, terminal: false, selected: null, from_phone_number: intended, established_sender: verdict.established_sender, sender_continuity: verdict, send_class, send_class_basis };
+  }
+  const sender = verdict.established_sender;
+  let fleet_row = null;
+  try {
+    fleet_row = await loadOutboundNumberByPhone(sender, deps);
+  } catch (error) {
+    return { ok: false, reason: "outbound_number_eligibility_unavailable", deferred: true, ineligible_sender: true, selected: null, from_phone_number: sender, sender_continuity: verdict, error: error?.message || "outbound_number_lookup_failed" };
+  }
+  const blocked_senders = await loadDispatchBlockedSendersFor(deps);
+  if (!blocked_senders) {
+    return { ok: false, reason: "sender_blocklist_unreadable", deferred: true, ineligible_sender: true, selected: null, from_phone_number: sender, sender_continuity: verdict };
+  }
+  const eligibility = evaluateSenderDispatchEligibility(fleet_row, { blocked: blocked_senders, phone: sender, now: deps.now ? new Date(deps.now) : new Date(), send_class });
+  if (!eligibility.ok) {
+    // the thread's number cannot send right now: a VISIBLE HOLD bound to it (never a fallback number)
+    return { ok: false, reason: SENDER_UNAVAILABLE, sender_reason: eligibility.reason, ineligible_sender: true, terminal: false, selected: null, from_phone_number: sender, sender_continuity: verdict, send_class, send_class_basis };
+  }
+  return {
+    ok: true,
+    selected: { id: (intended === sender ? normalized.textgrid_number_id : null) || fleet_row?.id || null, phone_number: sender, metadata: {} },
+    from_phone_number: sender,
+    reason: intended ? "sender_continuity_thread_sender_revalidated" : "sender_continuity_thread_sender_bound",
+    send_class,
+    send_class_basis,
+    sender_continuity: verdict,
+  };
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
   // COLD sends are capped by daily_limit; CONVERSATIONAL sends (replies to
   // engaged sellers, operator sends) only by the total safety ceiling.
   const { send_class, basis: send_class_basis } = await resolveRowSendClass(row, normalized, deps);
+  // OWNER P0 (rc-8.5.21): an established thread's sender is decided HERE, before any router.
+  {
+    const continuity = await senderContinuitySelection(row, normalized, deps, { send_class, send_class_basis });
+    if (continuity) return continuity;
+  }
+  // LOCKED OWNER RULE (thread continuity), rc-8.5.21: a lifecycle follow-up (metadata.followup_intent_id)
+  // is PINNED to the thread's established sender it was materialized with. It is never rerouted (no
+  // routing-graph pick, no sticky-thread fallback, no rotation): an ineligible pinned sender BLOCKS the
+  // row visibly and the follow-up lifecycle holds the intent for an operator.
+  const followup_pinned = Boolean(clean((row?.metadata ?? normalized.metadata ?? {})?.followup_intent_id));
 
   // SENDER ROUTING 2.0 (double-gated). Thread continuity, the routing graph and
   // a PARK (no retry burn) when nothing in the market's graph can send. null =
   // not deciding (gate off / graph absent) -> both branches below, unchanged.
   // With the env ceiling off this is one synchronous read: no import, no await.
-  if (senderRoutingCeiling(deps.env || process.env)) {
+  if (!followup_pinned && senderRoutingCeiling(deps.env || process.env)) {
     const { routeQueueRowViaPolicy } = await import("@/lib/domain/routing/sender-routing/sender-routing-runtime.js");
     const routed = await routeQueueRowViaPolicy(normalized, {
       ...deps,
@@ -1728,7 +1932,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       now: deps.now ? new Date(deps.now) : new Date(),
       send_class,
     });
-    if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable") {
+    if (!eligibility.ok && eligibility.reason !== "sender_blocklist_unreadable" && !followup_pinned) {
       // A REPLY on a seller conversation (not a campaign touch) whose pinned
       // sender can no longer send: the sticky thread sender rule picks the
       // highest-priority eligible fallback and persists it (never silent:
@@ -1750,6 +1954,7 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
         from_phone_number: intended,
         send_class,
         send_class_basis,
+        ...(followup_pinned ? { followup_sender_pinned: true } : {}),
       };
     }
 
@@ -1765,6 +1970,11 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
       send_class,
       send_class_basis,
     };
+  }
+
+  // a pinned follow-up with no sender is never given one here (never a rotation pick): blocked visibly
+  if (followup_pinned) {
+    return { ok: false, reason: "followup_sender_missing", ineligible_sender: true, terminal: true, selected: null, from_phone_number: null, send_class, send_class_basis, followup_sender_pinned: true };
   }
 
   if (typeof deps.selectAvailableTextgridNumber === "function") {
@@ -2038,6 +2248,10 @@ export function buildSuccessMessageEvent(row, send_result, options = {}) {
       queue_key,
       send_result,
       client_send_id: normalized.metadata?.client_send_id || null,
+      // 8.5.16 unified origin + the AI record link; present ONLY on rows that state an origin
+      ...(clean(normalized.message_origin || row_metadata.message_origin)
+        ? { message_origin: clean(normalized.message_origin || row_metadata.message_origin), ai_message_id: clean(row_metadata.ai_message_id) || null }
+        : {}),
       enrichment: {
         thread_key,
         property_id: normalized.property_id || null,
@@ -2592,6 +2806,9 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     rotation_failure_class === "content_filter_blocked" &&
     Boolean(originating_template_id);
   let rotation = null;
+  // P0 2026-10-19: a row whose language is unknown is HELD for a person — never rotated onto
+  // English copy, never re-dispatched by the retry path.
+  let rotation_hold = null;
   if (rotation_eligible) {
     try {
       const { resolveRotationTemplate } = await import(
@@ -2602,6 +2819,7 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
         supabase: options.supabase || options.supabaseClient,
       });
       if (result?.resolved) rotation = result;
+      else if (result?.hold) rotation_hold = clean(result.reason) || "rotation_language_unknown";
     } catch (rotation_error) {
       info("queue_failover_rotation_error", {
         queue_id: normalized.id,
@@ -2621,7 +2839,9 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   const retry_permitted = classified.retryable === true;
   const terminal_queue_status = rotation
     ? "queued"
-    : !retry_permitted
+    : rotation_hold
+      ? "held"
+      : !retry_permitted
       ? (classified.queue_disposition && classified.queue_disposition !== "queued"
           ? classified.queue_disposition
           : "failed")
@@ -2636,7 +2856,8 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     // A scheduled retry time on a non-retry-safe outcome is a loaded gun: any
     // scanner reading next_retry_at would treat the row as due.
     next_retry_at:
-      rotation || (retry_permitted && !is_final_failure) ? addMinutesIso(now, 5) : null,
+      rotation || (retry_permitted && !is_final_failure && !rotation_hold) ? addMinutesIso(now, 5) : null,
+    ...(rotation_hold ? { held_at: now } : {}),
     is_locked: false,
     locked_at: null,
     lock_token: null,
@@ -2658,6 +2879,7 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
       : {}),
     metadata: {
       ...normalized.metadata,
+      ...(rotation_hold ? { dispatch_hold: rotation_hold, requires_human_review: true } : {}),
       ...(rotation
         ? {
             tried_template_ids,
@@ -3091,6 +3313,15 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     });
   }
 
+  // rc-8.5.21 RUN-09: a lease-expired row whose durable evidence PROVES no provider call happened is
+  // re-dispatched EXACTLY ONCE (processing-lease-recovery.js); anything ambiguous keeps the manual-review
+  // hold below. One read of the §11 attempt ledger for every expired lease; unreadable ⇒ all held.
+  const lease_evidence = expired_leases.length
+    ? await loadLeaseDispatchEvidence(supabase, expired_leases.map((row) => row.id))
+    : { ok: true, byRow: new Map() };
+  // rc-8.5.21 v3 (RT-14): attempts allocated but never started are provably unsent — resolved in the
+  // ledger before the verdict (never in a dry run)
+  if (!dry_run && lease_evidence.ok) await resolveCrashedAttemptsInPlace(supabase, lease_evidence, { now });
   for (const row of expired_leases) {
     // Closure-pass certification fixes (2026-08-26):
     // P2 — a processing row that ALREADY SENT (provider id / sent_at) must
@@ -3108,6 +3339,22 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     ) {
       continue;
     }
+    const lease_verdict = evaluateExpiredProcessingLease(row, {
+      attempts_readable: lease_evidence.ok,
+      attempts: lease_evidence.byRow.get(clean(row.id)) || [],
+    });
+    if (lease_verdict.action === "reconcile_sent") {
+      // rc-8.5.21 v3 (RT-15): the provider accepted (the §11 attempt carries its id) — sent, never re-sent
+      const { processing_run_id: _run2, ...reconcile_patch } = buildLeaseRecoveryPatch(row, lease_verdict, { now });
+      updates.push({ id: row.id, patch: reconcile_patch, expect: { queue_status: "processing", lock_token: clean(row.lock_token) || null } });
+      continue;
+    }
+    if (lease_verdict.action === "redispatch") {
+      const { processing_run_id: _run, ...redispatch_patch } = buildLeaseRecoveryPatch(row, lease_verdict, { now });
+      // compare-and-set: only a row still `processing` under the SAME lock is returned to the queue
+      updates.push({ id: row.id, patch: redispatch_patch, expect: { queue_status: "processing", lock_token: clean(row.lock_token) || null } });
+      continue;
+    }
     updates.push({
       id: row.id,
       patch: {
@@ -3121,9 +3368,13 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
           processing_started_at: null,
           processing_worker_id: null,
           processing_timeout_at: null,
+          // rc-8.5.21 v3: never a silent hold — the blockers and the operator review requirement
+          lease_recovery: { action: "manual_review", at: now, blockers: lease_verdict.blockers || [], operator_review_required: true, next_action: "operator_reconcile_provider_outcome" },
         },
         updated_at: now,
       },
+      // rc-8.5.21 v4 (rt-cr-05): the ambiguous crash raises an OPERATOR item when the hold lands
+      lease_manual_review: { blockers: lease_verdict.blockers || [], source: clean(row.source || row?.metadata?.source) || null },
     });
   }
 
@@ -3141,16 +3392,18 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   let applied_patch_count = 0;
 
   if (!dry_run) {
-    for (const { id, patch } of deduped_updates) {
+    for (const { id, patch, expect, lease_manual_review } of deduped_updates) {
       const patch_result = await applySendQueueLifecyclePatch(supabase, {
         id,
         patch,
+        expect,
         context: lifecycle_context,
       });
       if (patch_result.blocked) {
         blocked_expiration_count += 1;
       } else if (patch_result.applied) {
         applied_patch_count += 1;
+        if (lease_manual_review) await raiseLeaseManualReviewItem({ id, ...lease_manual_review, now }, options);
       }
     }
   }
@@ -4381,6 +4634,31 @@ export async function syncClassifiedInboxThreadState({
   return upsertInboxThreadState(inboxPayload, deps);
 }
 
+/**
+ * rc-8.5.21 v4 (rt-cr-05): a send that crashed after its §11 provider-start marker (the provider may have
+ * received it) is never re-sent automatically — and it is never a silent hold either: ONE operator item per
+ * row (notification_events, deduplicated on the row id) names it, its blockers and the next action. Never
+ * throws into the lifecycle pass.
+ */
+export async function raiseLeaseManualReviewItem({ id, blockers = [], source = null, now = new Date().toISOString() } = {}, options = {}) {
+  try {
+    const record = options.recordLaunchCriticalAlert || (await import("@/lib/domain/alerts/launch-critical-alerts.js")).recordLaunchCriticalAlert;
+    return await record({
+      code: "queue_dispatch_failure",
+      subsystem: "queue_lease_recovery",
+      severity: "critical",
+      dedupe_key: `launch_safety:queue_lease_recovery:manual_review:${clean(id)}`,
+      source_entity_type: "send_queue",
+      source_entity_id: clean(id),
+      summary: "A send crashed mid-dispatch: provider outcome unknown, a person must reconcile it",
+      description: "The worker died after the provider-start marker and before any provider answer was recorded. The row is held (expired, processing_lease_expired_manual_review) and is never re-sent automatically: check the carrier for the message, then mark it sent or authorize one resend.",
+      metadata: { queue_row_id: clean(id), blockers: (blockers || []).slice(0, 8), row_source: source, next_action: "operator_reconcile_provider_outcome", at: now },
+    });
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function syncDeliveryEvent(payload, options = {}) {
   const now = options.now || nowIso();
   const provider_message_sid = clean(payload?.message_id || payload?.provider_message_sid || payload?.sid);
@@ -4582,6 +4860,17 @@ export async function syncDeliveryEvent(payload, options = {}) {
     );
   }
 
+  // link #32: the carrier's verdict on a text an AGENT asked for (metadata.agent_text_intent_id) reaches the agents'
+  // event feed as delivery_changed delivered / undelivered (never blocks the webhook, never resends)
+  if (final_delivery_status === "delivered" || final_delivery_status === "failed") {
+    for (const row of send_queue_data || []) {
+      await recordAgentDeliveryVerdict(supabase, row, {
+        delivered: final_delivery_status === "delivered",
+        code: final_delivery_status === "failed" ? clean(normalized_failure?.failure_class || provider_status || "undelivered") : "carrier_delivered",
+      });
+    }
+  }
+
   const outreachUpdater = options.updateContactOutreachState || updateContactOutreachState;
 
   if (Array.isArray(message_events_data) && message_events_data.length > 0) {
@@ -4735,6 +5024,9 @@ export const SEND_QUEUE_INSERT_COLUMNS = [
   "stage_after",
   "textgrid_message_id",
   "selected_template_id",
+  // PROPOSED 20261015130000; written ONLY when a row sets it (the AI path), so every
+  // existing producer's insert payload is unchanged
+  "message_origin",
   "market",
   "textgrid_number",
   "guard_status",
@@ -4824,7 +5116,12 @@ function sanitizeSendQueuePayload(payload) {
 export function buildSendQueueInsertPayload(row = {}, now = null) {
   const ts = now || nowIso();
   const normalized = normalizeSendQueueRow(row);
-  const metadata = ensureObject(normalized.metadata);
+  // rc-8.5.15.1: every canonical-writer row carries metadata.question_kind (the
+  // repeat-asking-price guard keys on it, not on use_case_template alone).
+  const metadata = stampOutboundQuestionKind({
+    ...normalized,
+    metadata: ensureObject(normalized.metadata),
+  });
   // Preserve the canonical ph_ text phone id in metadata (message_events has no
   // canonical text phone_id column; provenance must survive on the queue row too).
   if (normalized.phone_id && metadata.canonical_phone_id == null) {
@@ -4938,6 +5235,7 @@ export function buildSendQueueInsertPayload(row = {}, now = null) {
     campaign_id: normalized.campaign_id || null,
     campaign_target_id: normalized.campaign_target_id || null,
     campaign_send_window_id: normalized.campaign_send_window_id || null,
+    ...(clean(normalized.message_origin) ? { message_origin: clean(normalized.message_origin) } : {}),
   };
 
   const payload = {};
@@ -5246,6 +5544,23 @@ export async function enqueueSendQueueItem(payload = {}, deps = {}) {
   return insertSupabaseSendQueueRow(payload, deps);
 }
 
+/**
+ * rc-8.5.21 RUN-06: the row's metadata with metadata.recipient_zones / recipient_zone_certainty /
+ * recipient_zone_policy stamped through recipientZoneStamp(resolveRecipientWindowZones(...)). Pure.
+ * A row with no recipient phone is returned unchanged.
+ */
+export function stampRecipientWindowEvidence(row = {}, { mailingGeography = null } = {}) {
+  const metadata = row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+  if (!clean(resolveQueueDestinationPhone(row || {}).phone)) return row?.metadata ?? metadata;
+  const resolution = resolveRecipientWindowZones(
+    recipientEvidenceFromRow({ ...row, metadata }, { mailingGeography: mailingGeography || rowMailingGeography({ ...row, metadata }) || null })
+  );
+  // nothing places the recipient ⇒ NO stamp: a stamp is evidence, and the dispatcher must still HOLD a row
+  // nothing places (rc-7.1 D10) rather than read an "unknown" stamp as the conservative intersection
+  if (!resolution.has_evidence || !resolution.zones.length) return metadata;
+  return { ...metadata, ...recipientZoneStamp(resolution) };
+}
+
 export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   const now = deps.now || nowIso();
   const sanitized = sanitizeSendQueuePayload({
@@ -5266,6 +5581,17 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     row.metadata = attachOutboundProvenance(row);
   } catch {
     // Provenance stamping must never block a send.
+  }
+
+  // rc-8.5.21 RUN-06: EVERY row leaves the canonical writer stamped with its recipient evidence, resolved
+  // by THE recipient-window policy (the recipient phone's area code, the owner's mailing state when the
+  // row carries it, any earlier stamp; the property only narrows), so the dispatcher re-reads the
+  // resolution the scheduler planned with. Re-resolving over an existing stamp only ever ADDS zones (a
+  // stamp is itself recipient evidence), never widens the window. Stamping never blocks a write.
+  try {
+    row.metadata = stampRecipientWindowEvidence(row);
+  } catch {
+    // the dispatcher re-resolves the same evidence at send time
   }
 
   // Internal test-phone quarantine: any outbound to a registered internal
@@ -5351,6 +5677,112 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
         queue_key: paused_row.queue_key,
         raw: data || paused_row,
       };
+    }
+  }
+
+  // ── AUTOMATION HOLD (P0 containment 2026-10-16) ─────────────────────
+  // The single enqueue chokepoint for every surface (auto-reply, follow-ups,
+  // nurture, campaigns, workflows, referral, bulk tools, manual send-now): a
+  // SENDABLE row is never created for a held thread / property / owner. A
+  // manual operator send passes only with an explicit, audited override
+  // { approval_ref, reason, operator_id } carried on the row
+  // (metadata.automation_hold_override); the DB trigger enforces the same.
+  // Fail closed: an unreadable hold is a hold. Non-sendable (paused/audit)
+  // rows are not gated.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status))) {
+    const hold_override = holdOverrideOf(row.metadata?.automation_hold_override);
+    const is_manual_send = is_inbox_send_now || row.metadata?.manual_operator_send === true;
+    // Both the caller's thread key and the normalized one (normalizeSendQueueRow
+    // canonicalizes thread_key to the destination phone) are checked.
+    const hold_capability = is_manual_send ? HOLD_CAPABILITIES.MANUAL_SEND : HOLD_CAPABILITIES.OUTBOUND_SEND;
+    const hold_thread_keys = [...new Set([clean(payload.thread_key), clean(row.thread_key)].filter(Boolean))];
+    let enqueue_hold = null;
+    for (const thread_key of hold_thread_keys.length ? hold_thread_keys : [null]) {
+      enqueue_hold = await resolveAutomationHold(
+        { thread_key, property_id: row.property_id || payload.property_id, master_owner_id: row.master_owner_id || payload.master_owner_id },
+        { capability: hold_capability, supabase: deps.supabase || deps.supabaseClient || null }
+      );
+      if (enqueue_hold.held) break;
+    }
+    if (enqueue_hold.held && !(is_manual_send && hold_override && !enqueue_hold.fail_closed)) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: enqueue_hold.fail_closed ? "automation_hold_lookup_failed" : is_manual_send ? "automation_hold_requires_override" : "automation_hold",
+        automation_hold: { hold_ids: enqueue_hold.hold_ids, fail_closed: enqueue_hold.fail_closed === true },
+        item_id: null,
+        queue_row_id: null,
+        queue_item_id: null,
+        queue_key: clean(row.queue_key) || null,
+      };
+    }
+    if (enqueue_hold.held && hold_override) {
+      row.metadata = { ...(row.metadata || {}), automation_hold_override: { ...hold_override, hold_ids: enqueue_hold.hold_ids, used_at: now } };
+    }
+  }
+
+  // ── CONTACT RESTRICTIONS at queue insertion (rc-8.5.21 v3 P0-C, RT-47) ──
+  // The writer itself refuses a SENDABLE row for a suppressed / opted-out / precautionary-held phone,
+  // a property-denied / declined-unverified / do-not-contact property × contact, an ownership thread
+  // hold, or an unsolicited follow-up on a hostile thread — the dispatcher's own evaluator in its
+  // restrictions scope (enqueue-contact-restrictions.js). FAIL CLOSED: an unreadable fact refuses.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status))) {
+    let restriction_client = deps.supabase || deps.supabaseClient || null;
+    if (!restriction_client && typeof deps.insertSupabaseSendQueueRow !== "function") {
+      try { restriction_client = getSupabase(deps); } catch { restriction_client = null; }
+    }
+    const restriction = await evaluateEnqueueContactRestrictions(
+      { ...row, thread_key: clean(payload.thread_key) || row.thread_key },
+      { supabase: restriction_client, now: Date.parse(now) || Date.now() }
+    );
+    if (restriction.refused) {
+      warn("queue.enqueue_contact_restricted", { queue_key: clean(row.queue_key) || null, reason: restriction.reason });
+      return {
+        ok: false,
+        blocked: true,
+        reason: restriction.reason,
+        contact_restriction: { guard_reason: restriction.guard_reason || null, detail: restriction.detail || {} },
+        item_id: null,
+        queue_row_id: null,
+        queue_item_id: null,
+        queue_key: clean(row.queue_key) || null,
+      };
+    }
+  }
+
+  // ── SENDER CONTINUITY at queue insertion (owner P0, rc-8.5.21) ──────
+  // A sendable conversation row on a thread with an ESTABLISHED sender must name that sender: a row
+  // naming another number is refused here (never written, never "corrected"). A matching row is
+  // stamped with the established sender (metadata.sender_continuity) so the claim-time check can
+  // tell a later rewrite of from_phone_number. Unreadable thread state never blocks the write: the
+  // dispatcher and the final check inside the transport seam fail closed on the same read.
+  if (SENDABLE_QUEUE_STATUSES.includes(normalizeQueueStatusValue(row.queue_status)) && clean(row.from_phone_number)) {
+    const subject = { ...row, thread_key: clean(payload.thread_key) || row.thread_key };
+    if (isContinuityBoundRow(subject)) {
+      const continuity = await evaluateSenderContinuity(subject, {}, {
+        ...deps,
+        noDefaultDb: typeof deps.insertSupabaseSendQueueRow === "function" && !deps.supabase && !deps.supabaseClient,
+      });
+      if (continuity.applies && continuity.established && !continuity.ok) {
+        warn("queue.sender_continuity_insert_refused", {
+          queue_key: clean(row.queue_key) || null,
+          thread_key: clean(subject.thread_key) || null,
+          from: clean(row.from_phone_number) || null,
+          established_sender: continuity.established_sender,
+        });
+        return {
+          ok: false,
+          blocked: true,
+          reason: SENDER_CONTINUITY_MISMATCH,
+          sender_continuity: { established_sender: continuity.established_sender, from_phone_number: normalizePhone(row.from_phone_number) || null },
+          item_id: null,
+          queue_row_id: null,
+          queue_item_id: null,
+          queue_key: clean(row.queue_key) || null,
+        };
+      }
+      const stamp = continuityStamp(continuity, now);
+      if (stamp) row.metadata = { ...(row.metadata || {}), sender_continuity: stamp };
     }
   }
 
@@ -5485,6 +5917,40 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   throw error;
 }
 
+export const SENDER_BINDING_UNAUDITED_EVENT = "sender_binding_unaudited_change";
+const AUDITED_BINDING_EVENTS = ["sender_thread_reassigned", "sender_thread_rerouted"];
+
+/**
+ * rc-8.5.21 v4 (rt-sc-06): is the STORED thread sender backed by an audited move? If yes it is kept; if not,
+ * the move is recorded (append-only) as an unaudited binding change. Never throws into the caller.
+ */
+export async function reviewSenderBindingMove({ supabase, thread_key, stored, incoming, direction = "projection", now = new Date().toISOString() } = {}) {
+  if (!supabase?.from || !thread_key || !stored || !incoming) return { keep_stored: false, reason: "unwired" };
+  const ev = await supabase.from("automation_events").select("event_type,payload,created_at").eq("conversation_thread_id", thread_key).in("event_type", AUDITED_BINDING_EVENTS).order("created_at", { ascending: false }).limit(5);
+  if (ev?.error) return { keep_stored: false, reason: "audit_unreadable" };
+  const latest = (Array.isArray(ev?.data) ? ev.data : [])[0] || null;
+  if (latest && normalizePhone(latest?.payload?.to_phone_number) === stored) return { keep_stored: true, reason: "stored_sender_audited" };
+  // a stored number the seller already SAW us text from is explained (the outbound wrote it): no event
+  const seen = await supabase.from("send_queue").select("from_phone_number,created_at").eq("thread_key", thread_key).in("queue_status", ["sent", "delivered"]).order("created_at", { ascending: false }).limit(1);
+  if (seen?.error) return { keep_stored: false, reason: "outbound_unreadable" };
+  const last_from = normalizePhone((Array.isArray(seen?.data) ? seen.data : [])[0]?.from_phone_number);
+  if (last_from && last_from === stored) return { keep_stored: false, reason: "stored_sender_seen_by_seller" };
+  await recordUnauditedSenderBindingEvent(supabase, { thread_key, stored, incoming, direction, now });
+  return { keep_stored: false, reason: "stored_sender_unaudited" };
+}
+
+/** Append-only automation_events record of an unaudited thread-sender move (an event, never a queue row). */
+async function recordUnauditedSenderBindingEvent(supabase, { thread_key, stored, incoming, direction, now }) {
+  const event = {
+    event_type: SENDER_BINDING_UNAUDITED_EVENT,
+    source: "inbox_thread_state_projection",
+    conversation_thread_id: thread_key,
+    payload: { thread_key, stored_our_number: stored, incoming_our_number: incoming, direction, at: now, requires_operator_review: true },
+    created_at: now,
+  };
+  return supabase.from("automation_events").insert(event);
+}
+
 /**
  * Upserts a row into the inbox_thread_state table.
  * This table is used to drive the Nexus Inbox dashboard.
@@ -5517,7 +5983,7 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   // terminal contact state (counts alone are insufficient for true→false guard).
   const { data: existing_state } = await supabase
     .from('inbox_thread_state')
-    .select('inbound_count,outbound_count,is_suppressed,status,next_action,automation_state,disposition')
+    .select('inbound_count,outbound_count,is_suppressed,status,next_action,automation_state,disposition,our_number')
     .eq('thread_key', thread_key)
     .limit(1)
     .maybeSingle();
@@ -5554,6 +6020,28 @@ export async function upsertInboxThreadState(payload, deps = {}) {
       last_sync_at: now,
     }
   };
+
+  // rc-8.5.21 v4 (rt-sc-06): a write that would MOVE the thread's sender binding (our_number) to another
+  // number of ours. Only a seller-visible OUTBOUND (sent from the bound sender), an audited operator
+  // reassignment or the audited sticky reroute (direct, evented writes) are binding changes. Here:
+  //   - the stored number is backed by an AUDITED reassignment / reroute ⇒ it is kept (an inbound to the old
+  //     number used to undo an approved reassignment the moment the seller replied);
+  //   - otherwise the projection follows the inbound exactly as before, and the move is recorded as an
+  //     append-only automation_events `sender_binding_unaudited_change` (the stored number was not explained
+  //     by any audit). The AI dispatcher holds the thread for review on that evidence
+  //     (held_sender_binding_unaudited); nothing else changes for the live template path.
+  {
+    const prior_ours = normalizePhone(prior?.our_number);
+    const incoming_ours = normalizePhone(insert_payload.our_number);
+    if (prior_ours && incoming_ours && prior_ours !== incoming_ours && prior_ours !== canonical_seller_phone && increment_direction !== "outbound") {
+      try {
+        const binding = await (deps.reviewSenderBindingMove || reviewSenderBindingMove)({ supabase, thread_key, stored: prior_ours, incoming: incoming_ours, direction: increment_direction || "projection", now });
+        if (binding?.keep_stored) delete insert_payload.our_number;
+      } catch {
+        // the binding review is evidence, never a reason to fail the projection
+      }
+    }
+  }
 
   // Name is additive only: a message without one (an inbound, an auto-reply)
   // must never blank the name a campaign send already recorded.

@@ -20,8 +20,8 @@
 // the brief is present with every operations section unavailable.
 import { RuntimePermanentError } from '../runtime/runtime-tick.js'
 import { REVIEW_DIGEST_KIND, missionIdentity } from './mission-kinds.js'
-import { recordFindings } from './record-findings.js' // Package A: not research-mission-handler.js (capability plane → send stack)
-import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // Package A: the same constant, without the capability plane import
+import { recordFindings } from './record-findings.js' // reconciliation (production Package A): research kinds have no import path to the send stack
+import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // reconciliation (production Package A): the same constant, without the capability plane import
 import { buildOperatingBrief } from '../operations/operating-brief.js'
 
 /** Optional shadow source over the guarded GET-only read client: { summary({ since }) → { by_outcome, total } }. */

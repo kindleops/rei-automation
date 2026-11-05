@@ -34,8 +34,10 @@ export function LCAskHost() {
 
 function PromptDialog({ req, onSettle }: { req: LCPromptRequest; onSettle: (value: string | null) => void }) {
   const [value, setValue] = useState(req.initialValue ?? '')
+  const [acknowledged, setAcknowledged] = useState(false)
   const fieldId = useId()
-  const empty = !value.trim()
+  const ackId = useId()
+  const empty = value.trim().length < Math.max(1, req.minLength ?? 1) || (Boolean(req.acknowledge) && !acknowledged)
   const submit = () => { if (!empty) onSettle(value) }
   return (
     <LCDialog
@@ -63,6 +65,17 @@ function PromptDialog({ req, onSettle }: { req: LCPromptRequest; onSettle: (valu
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
         />
       </label>
+      {req.acknowledge ? (
+        <label className="lc-field lc-field--check" htmlFor={ackId}>
+          <input
+            id={ackId}
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          <span className="lc-field__label">{req.acknowledge}</span>
+        </label>
+      ) : null}
     </LCDialog>
   )
 }

@@ -16,7 +16,7 @@ import { ResearchCanvas } from '../research/ResearchCanvas'
 import { ResearchInspector } from '../research/ResearchInspector'
 import { RunStream } from '../stream/RunStream'
 import { ApprovalsList } from '../../approvals/ApprovalsList'
-import { ConversationIntelPanel } from '../../conversation-intel/ConversationIntelPanel'
+import { ConversationIntelControls, ConversationIntelPanel } from '../../conversation-intel/ConversationIntelPanel'
 import { setIntel, useIntel } from '../../conversation-intel/conversation-intel-model'
 
 const LEFT = { min: 248, max: 440, def: 296 }
@@ -102,16 +102,7 @@ function ResearchInspectorFor({ snap }: { snap: RunSnapshot }) {
 }
 
 function IntelInspector() {
-  return (
-    <div className="agx-insp">
-      <div className="agx-insp__tabs"><b className="agx-insp__t">Shadow policy</b></div>
-      <div className="agx-insp__body">
-        <section className="agx-panel"><h5>What this is</h5><p>Conversation Engine 2.0 (R1 understanding, R2 composition) runs beside the deterministic engine and records what it understood and would have said. The deterministic engine stays authoritative.</p></section>
-        <section className="agx-panel"><h5>What it never does</h5><p>It never sends, queues, or schedules a message, and it never changes a record. STOP, suppression, wrong number, windows and offers are decided by the existing deterministic rules before any model is called.</p></section>
-        <section className="agx-panel"><h5>AI reply policy</h5><p>Off. The kill switch is engaged by default. Turning on template auto-reply does not turn on AI replies.</p></section>
-      </div>
-    </div>
-  )
+  return <ConversationIntelControls />
 }
 
 function PreflightInspector() {

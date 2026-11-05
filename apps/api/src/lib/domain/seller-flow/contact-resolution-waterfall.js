@@ -47,6 +47,9 @@ export const S1_CONTACT_OUTCOME = Object.freeze({
   FORMER_OWNER: 'former_owner',
   REFERRAL: 'referral',
   OPT_OUT: 'opt_out',
+  // OWNER DECISION 2026-10-17: a polite decline to the ownership question — ownership UNVERIFIED.
+  // Recorded as a property × contact HOLD, never a rejection (no rejected_at, no waterfall).
+  OWNERSHIP_DECLINED: 'ownership_declined_unverified',
 })
 
 /** What the caller should do next. */
@@ -68,6 +71,9 @@ export const CONTACT_PROPERTY_ROLE = Object.freeze({
   FORMER_OWNER: 'former_owner',
   REFERRAL_SOURCE: 'referral_source',
   SUPPRESSED: 'suppressed',
+  // a property × contact no-recontact HOLD (ownership unverified) — NOT a non-ownership fact. Needs
+  // PROPOSED_20261017100000_contact_property_resolution_declined_unverified.sql (the role CHECK).
+  OWNERSHIP_DECLINED_UNVERIFIED: 'ownership_declined_unverified',
 })
 
 /**

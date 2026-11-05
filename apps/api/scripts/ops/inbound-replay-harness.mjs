@@ -12,6 +12,7 @@
 //   * a stratified sample (per intent bucket) for manual review
 //
 // Usage (the @/ alias needs the ops loader — the test loader blocks network):
+//   LC_REPLAY_SUPABASE_URL=<url> LC_REPLAY_SUPABASE_KEY=<key> \
 //   node --import ./scripts/register-aliases-ops.mjs scripts/ops/inbound-replay-harness.mjs [--limit 500] [--env .env.local]
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -54,7 +55,17 @@ const { createClient } = await import("@supabase/supabase-js");
 const { replayInboundCase } = await import("../../src/lib/domain/inbound/inbound-replay-engine.js");
 const { isInternalTestPhone } = await import("../../src/lib/config/internal-phones.js");
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+// rc-8.5.15.1 (owner boundary 2026-10-15): a harness never picks up the production
+// service-role key implicitly. The target is explicit: LC_REPLAY_SUPABASE_URL (default:
+// a LOCAL Supabase, http://127.0.0.1:54321) + LC_REPLAY_SUPABASE_KEY. Replaying
+// production history is a read-only diagnostic the operator opts into by setting both.
+const replayUrl = process.env.LC_REPLAY_SUPABASE_URL || "http://127.0.0.1:54321";
+const replayKey = process.env.LC_REPLAY_SUPABASE_KEY || "";
+if (!replayKey) {
+  console.error("set LC_REPLAY_SUPABASE_KEY (and LC_REPLAY_SUPABASE_URL for a non-local source)");
+  process.exit(2);
+}
+const supabase = createClient(replayUrl, replayKey, {
   auth: { persistSession: false },
 });
 

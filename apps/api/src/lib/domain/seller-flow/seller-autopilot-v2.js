@@ -27,6 +27,7 @@
 //     .effective_authorized_ceiling) and is rounded DOWN, so rounding can
 //     never push it over.
 
+import { isOwnershipUnverified } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { validateConversationContext } from "@/lib/domain/classification/conversation-context.js";
 import { canonicalizeMultilingualReply } from "@/lib/domain/classification/multilingual-short-replies.js";
 import { evaluateOfferReadiness, OFFER_READY_REASONS, OFFER_POLICY_EPOCH } from "@/lib/acquisition/offerReadiness.js";
@@ -351,6 +352,11 @@ export function resolveV2Intent({ classification = null, message = "", stage = V
     const kind = detectIdentityStatement(message);
     if (kind) return { intent: I.IDENTITY_STATEMENT, source: `v2_identity_${kind}`, identity_kind: kind, classifier_intent: primary };
     if (isBareNo(message, { thread_language })) return { intent: I.BARE_NO_AFTER_CLARIFIER, source: "v2_bare_no_after_clarifier", classifier_intent: primary };
+  }
+  // RC 8.5.15 (owner 2026-10-14): a context-bound ownership denial is final for
+  // this property -- never the ownership clarifier (no further ownership question).
+  if (!compliance && isOwnershipUnverified(classification)) {
+    return { intent: I.NON_OWNER, source: "v2_ownership_denied_unverified", classifier_intent: primary };
   }
   if (!after_clarifier && stage === V2_STAGES.S1 && !compliance && [I.UNCLEAR, I.NON_OWNER].includes(from_classifier) && isBareNo(message, { thread_language })) {
     return { intent: I.BARE_NO_OWNERSHIP, source: "v2_bare_no_to_ownership", classifier_intent: primary };
@@ -831,8 +837,12 @@ export const V2_MATRIX = Object.freeze({
   [I.INTEREST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: [U.ASK_PRICE], S4: "anchor" },
   [I.CONDITIONAL_INTEREST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: [U.ASK_PRICE], S4: "anchor" },
   [I.PRICE_GIVEN]: { S1: "price", S2: "price", S3: "price", S4: "price" },
-  [I.NO_PRICE]: { S1: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S2: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S3: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S4: "anchor" },
-  [I.OFFER_REQUEST]: { S1: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S2: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S3: [U.NO_PRICE_CONDITION, U.CONDITION_CLARIFIER], S4: "anchor" },
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): never a condition question before
+  // the price. An offer request before any price ask asks for THEIR number once; a withheld price (no price /
+  // a repeat offer request after our ask) is research → a gated offer recommendation: the base engine's
+  // S3 deflection rule holds it for a person ("defer").
+  [I.NO_PRICE]: { S1: "defer", S2: "defer", S3: "defer", S4: "anchor" },
+  [I.OFFER_REQUEST]: { S1: [U.ASK_PRICE], S2: [U.ASK_PRICE], S3: "defer", S4: "anchor" },
   [I.CONDITION_ANSWER]: { S1: "defer", S2: "defer", S3: "defer", S4: "anchor" },
   [I.WHO_WHY]: { S1: WHO_BY_STAGE[V2_STAGES.S1], S2: WHO_BY_STAGE[V2_STAGES.S2], S3: WHO_BY_STAGE[V2_STAGES.S3], S4: WHO_BY_STAGE[V2_STAGES.S4] },
   [I.CAPITAL_GAINS]: { S1: [U.CAPITAL_GAINS], S2: [U.CAPITAL_GAINS], S3: [U.CAPITAL_GAINS], S4: [U.CAPITAL_GAINS] },

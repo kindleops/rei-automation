@@ -46,9 +46,10 @@
   {
     "family": "never_owned",
     "text": "I never owned that property",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "property_specific_non_owner",
     "stage": "ownership_check",
-    "terminal": true
+    "terminal": true,
+    "relabel_note": "RC 8.5.15 owner rule 2026-10-14: a written ownership denial is property-scoped, never wrong_number"
   },
   {
     "family": "sold",
@@ -278,8 +279,9 @@
   {
     "family": "correction",
     "text": "Actually wait my brother owns it not me",
-    "expected_primary_intent": "wrong_number",
-    "stage": "ownership_check"
+    "expected_primary_intent": "property_specific_non_owner",
+    "stage": "ownership_check",
+    "relabel_note": "RC 8.5.15 owner rule 2026-10-14: a written ownership denial is property-scoped, never wrong_number"
   },
   {
     "family": "callback",

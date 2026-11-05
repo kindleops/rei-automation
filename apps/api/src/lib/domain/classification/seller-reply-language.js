@@ -43,6 +43,11 @@ const SHORT_REPLY_LEXICON = new Map(
   }).map(([language, list]) => [language, new Set(list)])
 );
 
+const HAITIAN_CREOLE_TOKENS = Object.freeze([
+  /\bmwen\b/, /\bnou\b(?!\s+(?:es|son))/, /\bkonnen\b/, /\bvle\b/, /\bvann\b/, /\bkounye\s?a\b/, /\bmesi\b/, /\bkay\s+la\b/,
+  /\bpa\s+(?:vle|konnen|bezwen|gen)\b/, /\bbezwen\b/, /\bpou\s+kounye\b/, /\bmen\s+mwen\b/, /\bm\s+(?:vle|pa|konnen)\b/, /\bsa\s+a\b/, /\bkisa\b/, /\bpoukisa\b/,
+]);
+
 function foldShort(text) {
   return foldReplyText(text)
     .replace(/[^\p{L}\p{N}\s']/gu, " ")
@@ -91,6 +96,12 @@ export function identifyReplyLanguage(message, { detected_language = null, expli
   if (/^[\p{Script=Latin}\p{N}\p{P}\p{S}\s]+$/u.test(raw) && /\b(?:sale|sell|selling|sold|price|offer|house|home|property|owner|interested|million|thousand|cash|buy|buyer)\b/i.test(folded)) {
     return "English";
   }
+
+  // rc-8.5.21 v3 (RT-46): Haitian Creole shares short function words with Spanish / French ("se", "si",
+  // "la", "men") and was read as Spanish — a Creole seller would have been answered in Spanish. Two or
+  // more distinctive Creole tokens name the language (an identified, NOT enabled language: held for a
+  // person, never Spanish, never English).
+  if (HAITIAN_CREOLE_TOKENS.filter((re) => re.test(folded)).length >= 2) return "Haitian Creole";
 
   const fromWords = detectMessageLanguage(raw);
   if (fromWords) return fromWords;

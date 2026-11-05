@@ -1,12 +1,6 @@
-import pg from "pg";
-
-const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
-if (!dbUrl) {
-  console.error("Missing SUPABASE_DB_URL");
-  process.exit(1);
-}
-
-const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+// Read-only diagnostic (rc-8.5.21-c): runs as the role-enforced read-only diagnostics
+// credential, LC_RO_OPS_DIAG_DB_URL_FILE (scripts/lib/prod-db-credentials.mjs).
+import { connectReadOnlyDiagnostics } from "../../../scripts/lib/prod-db-credentials.mjs";
 
 const currentSql = `
 SELECT priority, new_replies, needs_review, waiting, all_messages
@@ -123,7 +117,7 @@ SELECT
 
 const explainSql = `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${proposedSql}`;
 
-await client.connect();
+const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-inbox-counts-parity" });
 try {
   const started = Date.now();
   const [current, proposed, gap, explain] = await Promise.all([
