@@ -332,11 +332,16 @@ test("send-now: a seller-replied S3 cancellation never offers the override", asy
 });
 
 test("cockpit + internal routes take the actor from x-ops-user-id, never from the body", () => {
+  // agntei reconciliation: the P0 send-authority hotfix (production c5a7104f) passes the authenticated operator
+  // principal (cockpit/_shared.js resolveOperatorPrincipal reads x-ops-user-id for an authenticated session only);
+  // the override actor is that principal's id, never anything from the body
   const cockpitRoute = fs.readFileSync(path.join(API_SRC, "app/api/cockpit/inbox/send-now/route.js"), "utf8");
-  assert.match(cockpitRoute, /request\.headers\.get\('x-ops-user-id'\)/);
-  assert.match(cockpitRoute, /runInboxAction\(\{ action: 'send-now', payload: \{ \.\.\.payload, dry_run: false \}, actor \}\)/);
+  assert.match(cockpitRoute, /runInboxAction\(\{ action: 'send-now', payload: \{ \.\.\.payload, dry_run: false \}, operator \}\)/);
+  const shared = fs.readFileSync(path.join(API_SRC, "app/api/cockpit/_shared.js"), "utf8");
+  assert.match(shared, /request\?\.headers\?\.get\?\.\('x-ops-user-id'\)/);
   const svc = fs.readFileSync(path.join(API_SRC, "lib/cockpit/cockpit-service.js"), "utf8");
-  assert.match(svc, /repeat_ask_override_actor: clean\(actor\) \|\| null,/);
+  assert.match(svc, /repeat_ask_override_actor: operator\?\.authenticated === true \? \(clean\(operator\.id\) \|\| null\) : null,/);
+  assert.doesNotMatch(svc, /repeat_ask_override_actor: clean\(payload/);
   assert.match(svc, /repeat_ask_override: false,\n\s+repeat_ask_override_actor: null,/);
   const internal = fs.readFileSync(path.join(API_SRC, "app/api/internal/inbox/send-now/route.js"), "utf8");
   assert.match(internal, /repeat_ask_override_actor: clean\(request\.headers\.get\("x-ops-user-id"\)\) \|\| null/);

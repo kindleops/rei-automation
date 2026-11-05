@@ -27,6 +27,9 @@ import { COMPANY_IDENTITY_KEY, normalizeCompanyIdentity, loadCompanyIdentity } f
 import { DRAFT_MODEL_ENV } from '../../src/lib/ai/conversation-ai-draft-service.js'
 import { AUTO_RECOVERY_ENV, autoRecoveryEnabled } from '../../src/lib/agent/operations/auto-recovery.js'
 import { WORKFORCE_FLAG, WORKFORCE_MODEL_INTERPRET_FLAG, workforceEnabled, modelInterpretEnabled } from '../../src/lib/workforce/config.js'
+// agntei reconciliation: production's P0 send-authority hotfix (c5a7104f) adds manual_send_mode; manual sends are
+// off unless the row is exactly 'enabled'
+import { MANUAL_SEND_MODE_KEY, normalizeManualSendMode, MANUAL_SEND_MODE_ENABLED } from '../../src/lib/domain/queue/manual-send-authority.js'
 import { AGENT_TEXT_SWITCH_KEY, AGENT_TEXT_POLICY_KEY, agentTextSwitchOn } from '../../src/lib/domain/outreach/agent-text.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
@@ -52,6 +55,7 @@ const NEW_ENV_FLAGS = Object.freeze({
   [WORKFORCE_MODEL_INTERPRET_FLAG]: (env) => modelInterpretEnabled({ ...env, [WORKFORCE_FLAG]: '1' }),
 })
 const NEW_SYSTEM_CONTROL_KEYS = Object.freeze({
+  [MANUAL_SEND_MODE_KEY]: (raw) => normalizeManualSendMode(raw) === MANUAL_SEND_MODE_ENABLED,
   [AI_SEND_KILL_SWITCH_KEY]: (raw) => parseKillSwitch(raw) === true,
   [AI_SEND_POLICY_KEY]: (raw) => normalizeSendPolicy(raw).enabled === true,
   [FOLLOWUP_EXECUTION_MODE_KEY]: (raw) => resolveFollowUpExecutionMode(raw) !== 'off',
@@ -87,9 +91,10 @@ test('every NEW env flag is OFF when the variable is absent, empty or not the ar
   assert.equal(workforceEnabled({ [WORKFORCE_FLAG]: '1' }), true)
   assert.equal(modelInterpretEnabled({ [WORKFORCE_FLAG]: '1', [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), true)
   assert.equal(modelInterpretEnabled({ [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), false, 'the interpreter never arms without Workforce')
-  // paid research: even with no flag the ceiling is the $10 testing ceiling, never more
+  // paid research: with no setting the ceiling is the $10 testing ceiling. agntei reconciliation: production's owner
+  // decision of 2026-10-20 (Package A) lets RESEARCH_PAID_CEILING_USD raise it to a hard max of $200, never more
   assert.ok(paidResearchCeiling({}) <= 10)
-  assert.ok(paidResearchCeiling({ [PAID_RESEARCH_CEILING_ENV]: '9999' }) <= 10)
+  assert.ok(paidResearchCeiling({ [PAID_RESEARCH_CEILING_ENV]: '9999' }) <= 200)
 })
 
 test('every NEW system_control key is OFF when the row is absent, empty or invalid', () => {
