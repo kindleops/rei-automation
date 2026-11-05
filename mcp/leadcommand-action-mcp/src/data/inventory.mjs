@@ -24,6 +24,12 @@ export const AGENT_MESSAGE_RPCS = Object.freeze(['action_gateway_agent_message_s
   // the agent-composed text (queue_agent_text): its state read and the ONE writer of the agent's exact text + attribution
   'action_gateway_agent_text_state', 'action_gateway_agent_text_submit'])
 
+/** link 10's RPCs (record sync: the ONE record writer + the record state / history reads): pinned to that migration by test/inventory.test.mjs. */
+export const RECORD_RPCS = Object.freeze(['action_gateway_dw_record_change', 'action_gateway_record_state', 'action_gateway_record_history'])
+
+/** The service principals link's RPCs (the service + delegation lookup, the campaign-draft writer): pinned to that migration by test/inventory.test.mjs. */
+export const SERVICE_RPCS = Object.freeze(['action_gateway_service_principal', 'action_gateway_dw_campaign_draft'])
+
 /** The Workforce × Agntei RPCs (PROPOSED_20261022110000_workforce_agntei.sql): pinned to that migration by test/inventory.test.mjs. */
 export const WF_RPCS = Object.freeze(['action_gateway_workforce_read', 'action_gateway_dw_workforce'])
 
@@ -43,4 +49,8 @@ export const RPCS = Object.freeze(['action_gateway_controls', 'action_gateway_pr
   // link #32 (PROPOSED_20261029100000_action_gateway_agent_message.sql): agent messages, lead ownership, the event feed
   ...AGENT_MESSAGE_RPCS,
   // Workforce × Agntei: the principal-bound read + the ONE Workforce writer
-  ...WF_RPCS])
+  ...WF_RPCS,
+  // link 10 (PROPOSED_20261101120000_record_sync.sql): apply_record_change / apply_person_record_change, get_record_state / _history
+  ...RECORD_RPCS,
+  // service principals (PROPOSED_20261105120000_action_gateway_service_principals.sql): service credentials, campaign drafts
+  ...SERVICE_RPCS])

@@ -54,6 +54,18 @@ export function createGatewayReads({ db }) {
       const [p] = await rows(db.from('properties').select('property_id,property_type,property_address,property_address_full,property_address_city,property_address_state,property_address_zip,market').eq('property_id', String(id)).limit(1), 'property')
       return p || null
     },
+    /** Many properties by id (≤ 200, one keyed read): the ids that exist. */
+    async properties(ids) {
+      const list = [...new Set((ids || []).map(String))].slice(0, 200)
+      if (!list.length) return []
+      return rows(db.from('properties').select('property_id,market').in('property_id', list).limit(list.length), 'properties')
+    },
+    /** One campaign row (the read inventory's public.campaigns), or null. */
+    async campaign(id) {
+      if (!UUID_RE.test(String(id))) return null
+      const [c] = await rows(db.from('campaigns').select('*').eq('id', String(id)).limit(1), 'campaign')
+      return c || null
+    },
     async opportunity(id) {
       if (!UUID_RE.test(String(id))) return null
       const [o] = await rows(db.from('acquisition_opportunities').select('id,primary_property_id,primary_thread_key,acquisition_stage,opportunity_status,market').eq('id', String(id)).limit(1), 'opportunity')

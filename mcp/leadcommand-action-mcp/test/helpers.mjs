@@ -52,7 +52,7 @@ export function fakeGateway({ answer = null, whoami = null } = {}) {
       if (!catalog.get(o.tool)) return { ok: false, status: 'error', tool: o.tool, unknownTool: true, error: { class: 'invalid_input', code: 'UNKNOWN_ACTION', message: 'unknown', retryable: false } }
       return answer ? answer(o) : { ok: true, status: 'succeeded', tool: o.tool, intent_id: crypto.randomUUID(), state: 'succeeded', code: 'OK', result: {} }
     },
-    async whoami(credential) { return whoami ? whoami(credential) : { ok: credential === CRED_A || credential === CRED_B, agent_id: credential === CRED_A ? 'agt_a' : 'agt_b', error: { code: 'CREDENTIAL_UNKNOWN' } } },
+    async whoami(credential, o = {}) { return whoami ? whoami(credential, o) : { ok: credential === CRED_A || credential === CRED_B, agent_id: credential === CRED_A ? 'agt_a' : 'agt_b', error: { code: 'CREDENTIAL_UNKNOWN' } } },
     async recover() { return { scanned: 0, results: [] } },
   }
 }

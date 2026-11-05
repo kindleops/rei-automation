@@ -16,6 +16,7 @@ import { WF_ACTIONS, WF_READS, WF_NAMES } from './actions/workforce/index.js'
 import { OHG_ACTIONS, OHG_READS, OHG_NAMES } from './actions/ohg/index.js'
 import { RECORD_ACTIONS, RECORD_READS, RECORD_NAMES } from './actions/record-sync/index.js'
 import { AGENT_MESSAGE_FAMILY_ACTIONS, AGENT_MESSAGE_FAMILY_READS } from './actions/agent-message/index.js'
+import { CAMPAIGN_ACTIONS, CAMPAIGN_READS, CAMPAIGN_NAMES } from './actions/campaigns/index.js'
 
 const CLIENT_KEY = str(80, { minLength: 8, pattern: '^[A-Za-z0-9_.:-]{8,80}$' })
 const PROPERTY_ID = str(64, { minLength: 1, pattern: '^[A-Za-z0-9_-]{1,64}$' })
@@ -148,6 +149,8 @@ export const READS = Object.freeze([
   ...OHG_READS.map((r) => Object.freeze({ ...r })),
   // link 10: a lead's synchronized record (versions and history)
   ...RECORD_READS.map((r) => Object.freeze({ ...r })),
+  // service principals link: the campaign read-back (get_campaign)
+  ...CAMPAIGN_READS.map((r) => Object.freeze({ ...r })),
   // link #32: lead ownership + the agents' event feed
   ...AGENT_MESSAGE_FAMILY_READS.map((r) => Object.freeze({ ...r })),
   // Workforce × Agntei (docs/WORKFORCE-AGNTEI.md §2): principal-bound reads, no read scope (their own grant + T1)
@@ -177,7 +180,7 @@ function freezeSpec(spec) {
   return Object.freeze({ version: 1, implemented: true, ...spec })
 }
 
-export const ACTIONS = Object.freeze([...IMPLEMENTED, ...T2_SPECS, ...T34_ACTIONS, ...WF_ACTIONS, ...OHG_ACTIONS, ...RECORD_ACTIONS, ...AGENT_MESSAGE_FAMILY_ACTIONS, ...STUBS.filter((x) => !T2_NAMES.has(x.name) && !T34_NAMES.includes(x.name))].map(freezeSpec))
+export const ACTIONS = Object.freeze([...IMPLEMENTED, ...T2_SPECS, ...T34_ACTIONS, ...WF_ACTIONS, ...OHG_ACTIONS, ...RECORD_ACTIONS, ...AGENT_MESSAGE_FAMILY_ACTIONS, ...CAMPAIGN_ACTIONS, ...STUBS.filter((x) => !T2_NAMES.has(x.name) && !T34_NAMES.includes(x.name))].map(freezeSpec))
 /** The Workforce tools (T1, internal only): MCP names leadcommand_<name>. */
 export const WORKFORCE_TOOLS = WF_NAMES
 /** Operation Hidden Gold: the acquisition-operations family (link #29). */
@@ -206,3 +209,5 @@ export function createActionCatalog(actions = ACTIONS, reads = READS) {
 }
 /** agntei ↔ LeadCommand record sync (link 10). */
 export const RECORD_TOOLS = RECORD_NAMES
+/** Campaign drafts (draft only, never launched or sent through the gateway) + the campaign read-back. */
+export const CAMPAIGN_TOOLS = CAMPAIGN_NAMES

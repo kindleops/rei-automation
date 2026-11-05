@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, createActionCatalog, OHG_TOOLS, AGENT_MESSAGE_TOOLS } from '../../src/lib/domain/action-gateway/catalog.js'
+import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, createActionCatalog, OHG_TOOLS, AGENT_MESSAGE_TOOLS, RECORD_TOOLS, CAMPAIGN_TOOLS } from '../../src/lib/domain/action-gateway/catalog.js'
 import { scopeCovers, envelopeRefusal } from '../../src/lib/domain/action-gateway/gateway.js'
 import { judgeApproval, buildApprovalRequest, agentActionApprovalCapability, approvalSnapshotOf } from '../../src/lib/domain/action-gateway/approvals.js'
 import { cleanText } from '../../src/lib/domain/action-gateway/actions.js'
@@ -21,7 +21,9 @@ const MODULE_DIR = path.resolve(HERE, '../../src/lib/domain/action-gateway')
 const PEPPER = 'p'.repeat(40)
 
 test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 set + set_thread_hold + the T2 family (reversible or request-only) + the report-only reconciliation + the T3 / T4 family; a T3 / T4 tool is never standing-grant-only; nothing never-exposed exists', () => {
-  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n))
+  // (the record-sync family, link 10, and the campaign drafts of the service principals link are their own families)
+  const FAMILIES = [...WORKFORCE_TOOLS, ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS, ...RECORD_TOOLS, ...CAMPAIGN_TOOLS]
+  const all = [...ACTIONS.map((a) => a.name), ...READS.filter((r) => r.name !== 'read_conversation_context').map((r) => r.name)].filter((n) => !FAMILIES.includes(n))
   assert.deepEqual([...all].sort(), [...REQUESTED_TOOLS].sort())
   // + the agent-text family (link #32, owner architecture correction 2026-10-29): ONE T3 seller-facing write — the agent's
   //   EXACT text (standing-grantable like the reply) —, the RETIRED brief-based agent message (AGENT_COMPOSES_TEXT), three
@@ -63,7 +65,7 @@ test('catalog: the 22 requested tools + the scoped reads; implemented = the T1 s
   // T3 / T4 always need a per-use authority: a human approval, or (execute_authorized_offer only) a verified envelope ref
   for (const a of impl.filter((x) => x.tier >= TIERS.T3)) assert.ok(a.envelope_authorized !== true || a.name === 'execute_authorized_offer', a.name)
   for (const a of impl) assert.equal(classifyProhibited({ name: a.capability, touches: a.touches, wraps: a.wraps, input_schema: a.input }).prohibited, false, a.name)
-  assert.deepEqual(READS.map((r) => r.name).filter((n) => !WORKFORCE_TOOLS.includes(n) && !OHG_TOOLS.includes(n) && !AGENT_MESSAGE_TOOLS.includes(n)).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
+  assert.deepEqual(READS.map((r) => r.name).filter((n) => !FAMILIES.includes(n)).sort(), ['prepare_acquisition_offer', 'read_conversation_context'])
   for (const n of NEVER_EXPOSED) assert.equal(createActionCatalog().get(n), null, n)
   for (const a of [...ACTIONS, ...READS]) for (const k of Object.keys(a.input.properties)) {
     assert.ok(!FORGED_CONTEXT_KEYS.test(k), `${a.name}.${k} would be refused as forged context`)

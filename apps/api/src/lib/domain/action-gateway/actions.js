@@ -17,6 +17,7 @@ import { WF_LOGIC } from './actions/workforce/index.js'
 import { OHG_LOGIC } from './actions/ohg/index.js'
 import { RECORD_LOGIC } from './actions/record-sync/index.js'
 import { AGENT_MESSAGE_FAMILY_LOGIC } from './actions/agent-message/index.js'
+import { CAMPAIGN_LOGIC } from './actions/campaigns/index.js'
 
 export const POLICY_VERSION = 'v1'
 const sha = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex')
@@ -56,6 +57,7 @@ export const ACTION_LOGIC = Object.freeze({
   ...OHG_LOGIC,
   ...RECORD_LOGIC,
   ...AGENT_MESSAGE_FAMILY_LOGIC,
+  ...CAMPAIGN_LOGIC,
   create_research_job: {
     async resolve(input, { reads }) {
       for (const pid of input.property_ids || []) await mustProperty(reads, pid)

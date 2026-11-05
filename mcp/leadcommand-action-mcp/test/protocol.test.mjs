@@ -5,7 +5,7 @@ import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import Ajv from 'ajv'
 import { connect, fakeGateway, CRED_A } from './helpers.mjs'
-import { REQUESTED_TOOLS, WORKFORCE_TOOLS, OHG_TOOLS, AGENT_MESSAGE_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { REQUESTED_TOOLS, WORKFORCE_TOOLS, OHG_TOOLS, AGENT_MESSAGE_TOOLS, RECORD_TOOLS, CAMPAIGN_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
 import { SMS_ALIASES } from '../src/protocol/server.mjs'
 
 test('initialize: server info, tools-only capabilities, instructions name the ONE governed gateway and that agents never approve', async () => {
@@ -26,7 +26,7 @@ test('discovery: every requested tool + the scoped context read; closed bounded 
     const { tools } = await c.client.listTools()
     // (the composer paths retired for agents — queue_authorized_reply, queue_agent_message — are not advertised)
     const RETIRED = ['queue_authorized_reply', 'queue_agent_message']
-    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (['events_since', 'agent_lead_pool', 'send_controls'].includes(n) ? `leadcommand_${n}` : n)), ...Object.keys(SMS_ALIASES)].filter((n) => !RETIRED.includes(n)).sort())
+    assert.deepEqual(tools.map((t) => t.name).sort(), [...REQUESTED_TOOLS, 'read_conversation_context', ...WORKFORCE_TOOLS.map((n) => `leadcommand_${n}`), ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS.map((n) => (['events_since', 'agent_lead_pool', 'send_controls'].includes(n) ? `leadcommand_${n}` : n)), ...RECORD_TOOLS, ...CAMPAIGN_TOOLS, ...Object.keys(SMS_ALIASES)].filter((n) => !RETIRED.includes(n)).sort())
     const ajv = new Ajv({ strict: false })
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name)
@@ -191,5 +191,30 @@ test('link #32 (owner architecture correction 2026-10-29): sms_send_agent_text s
     assert.deepEqual(gw.calls.map((x) => x.tool), ['queue_agent_text', 'queue_agent_text', 'queue_agent_message', 'events_since', 'transfer_lead'])
     assert.deepEqual(gw.calls[0].args, { client_request_id: 'k-at-00001', campaign_target_id, purpose: 'first_touch', body, attribution }, 'the exact text and attribution, untouched')
     assert.equal(gw.calls[1].args.purpose, 'reply')
+  } finally { await c.close() }
+})
+
+test('campaign drafts + record sync: create_campaign_draft (T1 internal write, draft only) and get_campaign (T1 read) are advertised with closed schemas and risk metadata; the record-sync tools are advertised; no tool launches, schedules or sends a campaign', async () => {
+  const c = await connect()
+  try {
+    const { tools } = await c.client.listTools()
+    const by = Object.fromEntries(tools.map((t) => [t.name, t]))
+    const d = by.create_campaign_draft
+    assert.ok(d, 'create_campaign_draft is advertised')
+    assert.deepEqual([d._meta['leadcommand/tier'], d._meta['leadcommand/capability'], d._meta['leadcommand/risk'], d._meta['leadcommand/seller_facing'], d._meta['leadcommand/implemented']], ['T1', 'campaigns.create_draft', 'internal_write', false, true])
+    assert.deepEqual(d.inputSchema.required, ['client_request_id', 'name'])
+    assert.deepEqual(Object.keys(d.inputSchema.properties).sort(), ['campaign_size', 'client_request_id', 'daily_cap', 'name', 'property_ids', 'template_use_case', 'thread_ids', 'total_cap'])
+    assert.equal(d.annotations.readOnlyHint, false)
+    const g = by.get_campaign
+    assert.deepEqual([g._meta['leadcommand/tier'], g._meta['leadcommand/capability'], g._meta['leadcommand/risk'], g.annotations.readOnlyHint], ['T1', 'campaigns.read', 'read', true])
+    assert.deepEqual(g.inputSchema.required, ['campaign_id'])
+    for (const n of ['apply_record_change', 'apply_person_record_change', 'get_record_state', 'get_record_history']) assert.ok(by[n] && by[n]._meta['leadcommand/implemented'], n)
+    assert.deepEqual([by.apply_record_change._meta['leadcommand/tier'], by.get_record_state._meta['leadcommand/risk']], ['T2', 'read'])
+    // nothing advertised can launch / schedule / activate / send a campaign (pause is the only lifecycle write; resume is a human request)
+    for (const t of tools) assert.ok(!/(launch|activate|schedule_campaign|send_campaign|start_campaign)/.test(t.name), t.name)
+    for (const t of tools.filter((x) => x._meta['leadcommand/capability'].startsWith('campaigns.'))) assert.ok(['campaigns.create_draft', 'campaigns.read', 'campaigns.pause', 'campaigns.request_resume', 'campaigns.adjust_plan'].includes(t._meta['leadcommand/capability']), t.name)
+    await c.client.callTool({ name: 'create_campaign_draft', arguments: { client_request_id: 'draft-0000001', name: 'Oak St pinned', property_ids: ['2128263281'] } })
+    assert.equal(c.gateway.calls.at(-1).tool, 'create_campaign_draft')
+    assert.equal(c.gateway.calls.at(-1).actingAgent, undefined, 'stdio carries no acting agent')
   } finally { await c.close() }
 })

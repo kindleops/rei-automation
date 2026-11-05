@@ -368,3 +368,32 @@ Adds rows to #27's `action_gateway.extensions` (definer functions, the envelope 
 ### 9.5 Activation (each step its own owner approval)
 
 Apply #28 after #27. Then: `T3` / `T4` in `action_gateway_tiers`; per-agent grants (`conversation.queue_reply` T3, `offers.*` T4, `offers.record_counter` T2; tier ceiling); for replies the production AI send capability itself (`ai_conversation_send_enabled` + the policy); for offers `negotiation_send_enabled` + `NEGOTIATION_COMPOSER_ENABLED=1` in the worker; `LC_ACTION_GATEWAY_EXECUTION=1` and arming `action_gateway.execute` in `agent.runtime_limits.kind_limits`; operators deciding approvals / proposing send authorizations.
+
+## 10. Service principals with delegated agents, and campaign drafts (PROPOSED_20261105120000, born OFF)
+
+One administratively managed integration (agntei) instead of one bearer credential per agent.
+
+- **Credential**: `lcsvc_<43 base64url chars>` (256 random bits), stored only as HMAC-SHA256(pepper, token) in
+  `action_gateway.service_principals` (sponsor, tier ceiling, status, 90-day expiry). Sent as `Authorization: Bearer lcsvc_...`
+  on the loopback HTTP transport (stdio stays agent-credential only).
+- **Acting agent**: every request names it in the HTTP header `X-LC-Acting-Agent: agt_<id>`. It must be an ENABLED row of
+  `action_gateway.service_delegates` for that service. From there the agent's OWN grants, read scopes, tenant, leases and
+  ownership rules apply; the effective tier ceiling is min(agent, service). A missing header (`ACTING_AGENT_REQUIRED`), a
+  malformed one (`ACTING_AGENT_MALFORMED`), an unknown agent (`ACTING_AGENT_UNKNOWN`), a non-delegate
+  (`ACTING_AGENT_NOT_DELEGATED`) or a disabled delegate (`DELEGATE_DISABLED`) is refused; identity in arguments stays
+  `FORGED_CONTEXT`. The Workforce tools stay bound to the agent's own credential (`SERVICE_DELEGATION_UNSUPPORTED`).
+- **Database re-verification**: `action_gateway.authorization_guard` accepts the service digest only for an enabled
+  delegate and the service ceiling, and records `action_authorizations.via_service_id`. Audit rows carry
+  `detail.via_service_id`; `delegated_intent` events tie each intent to its service. Revocation (service revoked or a
+  delegate disabled) answers on the next request. An agent acted for only through the service needs no credential of its
+  own (`agent_principals.credential_digest` may be NULL).
+- **Owner script**: `mcp/leadcommand-action-mcp/scripts/mint-service-credential.mjs` (`--create`, `--list`,
+  `--add-delegate`, `--disable-delegate`, `--revoke`); the credential is printed once.
+- **Campaign drafts**: `create_campaign_draft` (T1, `campaigns.create_draft`, the lease-bound writer
+  `public.action_gateway_dw_campaign_draft`) creates a Campaign Composer draft pinned to `property_ids` / `thread_ids`;
+  `get_campaign` (T1, `campaigns.read`) reads it back. Status is always draft; nothing is built, scheduled, queued or sent,
+  and no gateway tool launches a campaign.
+- **Transport allowlist**: the record-sync RPCs of link 10 and this link's two RPCs are in `src/data/inventory.mjs`.
+- **Tests**: `apps/api/tests/critical/action-gateway-service-principal-unit.test.mjs` (no database),
+  `apps/api/tests/critical/action-gateway-service-principal-pg.test.mjs` and
+  `mcp/leadcommand-action-mcp/test/service-e2e-pg.test.mjs` (disposable PostgreSQL 17).

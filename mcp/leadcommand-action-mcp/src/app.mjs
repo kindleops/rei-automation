@@ -11,7 +11,7 @@ import { createActionGateway, createPostgrestActionStore, createGatewayReads, cr
 import { evaluatePlatformExceptions, probePlatformExposure, probeAuditEntries } from '../../leadcommand-mcp/src/data/platform-exposure.mjs'
 
 const bootError = (code, message) => Object.assign(new Error(message), { code })
-const AUDIT_KEYS = ['event_type', 'agent_id', 'action', 'capability', 'tier', 'code', 'correlation_id', 'intent_id', 'transport']
+const AUDIT_KEYS = ['event_type', 'agent_id', 'via_service_id', 'action', 'capability', 'tier', 'code', 'correlation_id', 'intent_id', 'transport']
 
 /**
  * @param {{ env?: object, db?: object, gateway?: object, auditSink?: Function, baseFetch?: Function, scrub?: boolean, provider?: object, serviceEnv?: object, skipSelfCheck?: boolean }} [opts]

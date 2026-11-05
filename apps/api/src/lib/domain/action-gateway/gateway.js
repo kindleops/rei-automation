@@ -19,15 +19,23 @@
 //  14  recovery: an expired lease is re-claimed for re-executable actions (domain writes are atomic and
 //      keyed by the intent: exactly once) or recorded as outcome_unknown (a visible failure)
 //  15  append-only audit at every step (the database's own trail + the host audit sink)
+//
+// SERVICE PRINCIPALS (PROPOSED_20261105120000_action_gateway_service_principals.sql): step 2 also accepts ONE
+// administratively managed service credential (lcsvc_...). Such a request must name its acting agent in the HTTP header
+// X-LC-Acting-Agent (never an argument). credential -> service principal (active, unexpired, sponsor still a member, this
+// tenant) -> the acting agent must be an ENABLED delegate of that service -> from there on the agent's OWN principal
+// applies (grants, read scopes, tenant, leases, ownership rules) with the effective tier ceiling
+// min(agent ceiling, service ceiling). The database re-verifies the delegation when it authorizes (authorization_guard)
+// and records the service on the authorization (via_service_id). A service never acts as itself.
 import crypto from 'node:crypto'
 import { validateSchema } from '../../agent/tools/schema.js'
 import { hashCanonical, canonicalJson } from '../../agent/runtime/canonical.js'
 import { createActionCatalog } from './catalog.js'
 import { ACTION_LOGIC, POLICY_VERSION } from './actions.js'
 import { buildApprovalRequest, judgeApproval } from './approvals.js'
-import { credentialDigest } from './credentials.js'
+import { credentialDigest, serviceCredentialDigest, credentialKind } from './credentials.js'
 import { gwErr, ActionGatewayError, classifyGatewayError } from './errors.js'
-import { FORGED_CONTEXT_KEYS, ESCALATION_KEYS, LIMITS, TIER_LABEL, TERMINAL_STATES, ACTION_GATEWAY_VERSION, READ_SCOPES, APPROVAL_GRANT_TTL_MS } from './constants.js'
+import { FORGED_CONTEXT_KEYS, ESCALATION_KEYS, LIMITS, TIER_LABEL, TERMINAL_STATES, ACTION_GATEWAY_VERSION, READ_SCOPES, APPROVAL_GRANT_TTL_MS, AGENT_ID_RE } from './constants.js'
 import { APPROVAL_TTL_MS } from '../../agent/capabilities/contracts.js'
 import { readConversationContext } from './context-read.js'
 import { encodePropertyRef } from '../../agent/missions/mission-codec.js'
@@ -97,28 +105,86 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
   let auditFailures = 0
 
   async function audit(ev) {
-    const rec = { ...ev, detail: ev.detail || {} }
+    // a delegated call names its service on every audit row (the acting agent is the row's agent_id)
+    const rec = { ...ev, detail: { ...(ev.detail || {}), ...(ev.via_service_id ? { via_service_id: ev.via_service_id } : {}) } }
     try { onAudit?.({ ts: new Date(now()).toISOString(), ...rec }) } catch { /* host sink failure is counted, never fatal */ auditFailures += 1 }
     if (!(await store.audit(rec).catch(() => false))) auditFailures += 1
   }
 
-  async function authenticate(credential, base) {
+  /** The acting-agent header value: null when absent; refused when present but not exactly one agent principal id. */
+  function actingAgentOf(actingAgent) {
+    if (actingAgent == null || actingAgent === '') return null
+    if (typeof actingAgent !== 'string' || !AGENT_ID_RE.test(actingAgent)) throw gwErr('invalid_input', 'ACTING_AGENT_MALFORMED', 'X-LC-Acting-Agent must name exactly one agent principal id (agt_...)')
+    return actingAgent
+  }
+
+  /** The agent principal checks (direct credential or delegated): tenant, status, validity, the agent's own sponsor. */
+  function agentChecks(p, { delegated }) {
+    if (p.org_id !== dataOrgId) throw gwErr('forbidden', 'CROSS_TENANT', 'the agent belongs to another tenant')
+    if (p.status !== 'active') throw gwErr(delegated ? 'forbidden' : 'unauthenticated', `PRINCIPAL_${String(p.status).toUpperCase()}`, 'the agent is not active')
+    if (!(Date.parse(p.credential_expires_at) > now())) throw delegated ? gwErr('forbidden', 'ACTING_AGENT_EXPIRED', 'the acting agent\'s registration expired; an owner renews it') : gwErr('unauthenticated', 'CREDENTIAL_EXPIRED', 'the agent credential expired')
+    if (p.sponsor_is_member !== true) throw gwErr(delegated ? 'forbidden' : 'unauthenticated', 'SPONSOR_NOT_MEMBER', 'the agent\'s accountable operator is no longer a member')
+  }
+
+  /**
+   * Credential -> principal. An AGENT credential is its own principal (an acting-agent header may only name itself).
+   * A SERVICE credential resolves the service, then the acting agent's delegation, then the AGENT's principal with the
+   * effective ceiling min(agent, service). requireActing: false only for whoami (a session may open before it acts).
+   */
+  async function authenticate(credential, base, { actingAgent = null, requireActing = true } = {}) {
+    const kind = credentialKind(credential)
+    if (kind === 'service') return authenticateService(credential, base, { actingAgent, requireActing })
     const digest = credentialDigest(pepper, credential)
     if (!digest) throw gwErr('unauthenticated', 'CREDENTIAL_MISSING_OR_MALFORMED', 'an agent credential is required')
     let p
     try { p = await store.principal(digest) } catch (e) { throw classifyGatewayError(e) }
     if (!p) throw gwErr('unauthenticated', 'CREDENTIAL_UNKNOWN', 'unknown agent credential')
-    if (p.org_id !== dataOrgId) throw gwErr('forbidden', 'CROSS_TENANT', 'the agent belongs to another tenant')
-    if (p.status !== 'active') throw gwErr('unauthenticated', `PRINCIPAL_${String(p.status).toUpperCase()}`, 'the agent is not active')
-    if (!(Date.parse(p.credential_expires_at) > now())) throw gwErr('unauthenticated', 'CREDENTIAL_EXPIRED', 'the agent credential expired')
-    if (p.sponsor_is_member !== true) throw gwErr('unauthenticated', 'SPONSOR_NOT_MEMBER', 'the agent\'s accountable operator is no longer a member')
+    agentChecks(p, { delegated: false })
     base.agent_id = p.agent_id
-    return { principal: p, digest }
+    const acting = actingAgentOf(actingAgent)
+    if (acting && acting !== p.agent_id) throw gwErr('forbidden', 'ACTING_AGENT_NOT_ALLOWED', 'an agent credential acts only as its own agent; only a service credential names an acting agent')
+    return { principal: p, digest, kind: 'agent' }
+  }
+
+  async function authenticateService(credential, base, { actingAgent, requireActing }) {
+    const digest = serviceCredentialDigest(pepper, credential)
+    if (!digest) throw gwErr('unauthenticated', 'CREDENTIAL_MISSING_OR_MALFORMED', 'a service credential is required')
+    // the service is resolved first, so even a malformed header's refusal is audited with the service it came through
+    let acting = null
+    let malformed = null
+    try { acting = actingAgentOf(actingAgent) } catch (e) { malformed = e }
+    if (typeof store.servicePrincipal !== 'function') throw gwErr('unauthenticated', 'SERVICE_PRINCIPALS_UNAVAILABLE', 'service credentials are not enabled on this gateway')
+    let r
+    try { r = await store.servicePrincipal(digest, acting) } catch (e) { throw classifyGatewayError(e) }
+    const s = r?.service
+    if (!s) throw gwErr('unauthenticated', 'SERVICE_CREDENTIAL_UNKNOWN', 'unknown service credential')
+    if (s.org_id !== dataOrgId) throw gwErr('forbidden', 'CROSS_TENANT', 'the service belongs to another tenant')
+    if (s.status !== 'active') throw gwErr('unauthenticated', `SERVICE_PRINCIPAL_${String(s.status).toUpperCase()}`, 'the service principal is not active')
+    if (!(Date.parse(s.credential_expires_at) > now())) throw gwErr('unauthenticated', 'SERVICE_CREDENTIAL_EXPIRED', 'the service credential expired')
+    if (s.sponsor_is_member !== true) throw gwErr('unauthenticated', 'SERVICE_SPONSOR_NOT_MEMBER', 'the service\'s accountable operator is no longer a member')
+    base.via_service_id = s.service_id
+    if (malformed) throw malformed
+    if (!acting) {
+      if (requireActing) throw gwErr('forbidden', 'ACTING_AGENT_REQUIRED', 'a service credential acts only for a delegate agent named in the X-LC-Acting-Agent header; it never acts as itself')
+      return { principal: null, service: s, digest, kind: 'service' }
+    }
+    const st = r?.acting_status
+    if (st === 'unknown_agent') throw gwErr('forbidden', 'ACTING_AGENT_UNKNOWN', 'no agent principal with this id in this tenant')
+    if (st === 'not_delegated') throw gwErr('forbidden', 'ACTING_AGENT_NOT_DELEGATED', 'this agent is not a delegate of the service; an owner registers delegates')
+    if (st === 'delegate_disabled') throw gwErr('forbidden', 'DELEGATE_DISABLED', 'this agent\'s delegation to the service is disabled')
+    const a = r?.agent
+    if (st !== 'ok' || !a || a.agent_id !== acting) throw gwErr('forbidden', 'ACTING_AGENT_NOT_DELEGATED', 'this agent is not a delegate of the service')
+    agentChecks(a, { delegated: true })
+    base.agent_id = a.agent_id
+    const ceiling = Math.min(Number(a.tier_ceiling), Number(s.tier_ceiling))
+    const principal = Object.freeze({ ...a, tier_ceiling: ceiling, agent_tier_ceiling: Number(a.tier_ceiling),
+      via: Object.freeze({ kind: 'service', service_id: s.service_id, display_name: s.display_name, tier_ceiling: Number(s.tier_ceiling), sponsor_user_id: s.sponsor_user_id }) })
+    return { principal, service: s, digest, kind: 'service' }
   }
 
   /** The agent's USABLE standing grants for this capability (version-ordered); typed refusals otherwise. */
   function grantsFor(principal, spec) {
-    if (spec.tier > Number(principal.tier_ceiling)) throw gwErr('forbidden', 'TIER_ABOVE_CEILING', `${spec.name} is ${TIER_LABEL[spec.tier]}; the agent's ceiling is ${TIER_LABEL[principal.tier_ceiling]}`)
+    if (spec.tier > Number(principal.tier_ceiling)) throw gwErr('forbidden', 'TIER_ABOVE_CEILING', `${spec.name} is ${TIER_LABEL[spec.tier]}; the ${principal.via ? 'effective (min of agent and service)' : 'agent\'s'} ceiling is ${TIER_LABEL[principal.tier_ceiling]}`)
     const all = (principal.grants || []).filter((x) => x.capability === spec.capability && Number(x.max_tier) >= spec.tier && Date.parse(x.expires_at) > now())
     if (!all.length) throw gwErr('forbidden', 'CAPABILITY_NOT_GRANTED', `capability ${spec.capability} is not granted to this agent`, { required_capability: spec.capability, tier: TIER_LABEL[spec.tier] })
     const live = all.filter((x) => !x.suspended_reason)
@@ -318,14 +384,21 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     return authorizeAndRun(spec, intent, ctx, base, { decision: d })
   }
 
-  async function call({ credential, tool, args, transport = 'unknown' } = {}) {
+  /** The Workforce tools bind the EMPLOYEE to the credential itself (its digest): they are not delegable to a service. */
+  function delegableOrRefuse(spec, principal) {
+    if (principal?.via && /^workforce_/.test(spec.name)) throw gwErr('forbidden', 'SERVICE_DELEGATION_UNSUPPORTED', `${spec.name} binds the Workforce employee to the agent's own credential; it is not available through a service credential`)
+  }
+
+  /** @param {{ credential: string, actingAgent?: string|null, tool: string, args: object, transport?: string }} o actingAgent = the X-LC-Acting-Agent header (service credentials) */
+  async function call({ credential, actingAgent = null, tool, args, transport = 'unknown' } = {}) {
     const started = now()
     const base = { correlation_id: crypto.randomUUID(), action: null, capability: null, tier: null, agent_id: null, transport }
     const spec = catalog.get(tool)
     try {
       if (!spec) throw gwErr('invalid_input', 'UNKNOWN_ACTION', `unknown tool ${String(tool).slice(0, 64)}`)
       Object.assign(base, { action: spec.name, capability: spec.capability, tier: spec.tier })
-      const { principal, digest } = await authenticate(credential, base)
+      const { principal, digest } = await authenticate(credential, base, { actingAgent })
+      delegableOrRefuse(spec, principal)
       await controlsOrStop(spec, base)
       if (catalog.isRead(spec.name)) return await readTool(spec, principal, args, base, digest)
       if (spec.implemented === false) throw gwErr('not_implemented', 'capability_not_implemented', `${spec.name} is registered but not implemented in this phase`)
@@ -361,6 +434,8 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
       }
       const intent = opened?.intent
       if (!intent?.intent_id) throw gwErr('internal', 'INTENT_OPEN_FAILED')
+      // a delegated call: the intent's trail names the service it came through (the authorization row records it too)
+      if (principal.via) await audit({ ...base, event_type: 'delegated_intent', intent_id: intent.intent_id, code: opened.inserted ? 'OPENED' : 'REUSED', detail: { acting_agent: principal.agent_id } })
       if (!opened.inserted && intent.params_hash !== params_hash) {
         await audit({ ...base, event_type: 'idempotency_conflict', intent_id: intent.intent_id, code: 'IDEMPOTENCY_KEY_REUSED' })
         throw gwErr('conflict', spec.idempotency_conflict_code || 'IDEMPOTENCY_KEY_REUSED', 'this client_request_id was already used for this action and resource with different parameters')
@@ -428,12 +503,24 @@ export function createActionGateway({ store, reads, services, pepper, dataOrgId,
     }))
   }
 
-  /** Verify a credential (session open): the principal it resolves to, or a typed refusal. Audited when refused. */
-  async function whoami(credential) {
+  const agentView = (principal) => ({ agent_id: principal.agent_id, tier_ceiling: TIER_LABEL[principal.tier_ceiling], read_scopes: principal.read_scopes || [],
+    capabilities: (principal.grants || []).map((g) => ({ capability: g.capability, max_tier: TIER_LABEL[g.max_tier], expires_at: g.expires_at })) })
+
+  /**
+   * Verify a credential (session open): the principal it resolves to, or a typed refusal. Audited when refused.
+   * kind 'agent': the agent. kind 'service': the service principal, its enabled delegates and, when the acting-agent
+   * header is present, the acting agent with its EFFECTIVE ceiling (min of agent and service).
+   */
+  async function whoami(credential, { actingAgent = null } = {}) {
     const base = { correlation_id: crypto.randomUUID(), action: null, capability: null, tier: null, agent_id: null, transport: 'session' }
     try {
-      const { principal } = await authenticate(credential, base)
-      return { ok: true, agent_id: principal.agent_id, tier_ceiling: TIER_LABEL[principal.tier_ceiling], read_scopes: principal.read_scopes || [], capabilities: (principal.grants || []).map((g) => ({ capability: g.capability, max_tier: TIER_LABEL[g.max_tier], expires_at: g.expires_at })) }
+      const auth = await authenticate(credential, base, { actingAgent, requireActing: false })
+      if (auth.kind !== 'service') return { ok: true, kind: 'agent', ...agentView(auth.principal) }
+      const s = auth.service
+      const service = { service_id: s.service_id, display_name: s.display_name, tier_ceiling: TIER_LABEL[s.tier_ceiling], credential_expires_at: s.credential_expires_at, delegates: Array.isArray(s.delegates) ? s.delegates : [] }
+      if (!auth.principal) return { ok: true, kind: 'service', service, acting_agent: null, agent_id: null, tier_ceiling: service.tier_ceiling, read_scopes: [], capabilities: [] }
+      const acting = { ...agentView(auth.principal), agent_tier_ceiling: TIER_LABEL[auth.principal.agent_tier_ceiling] }
+      return { ok: true, kind: 'service', service, acting_agent: acting, ...acting }
     } catch (e) {
       const g = e instanceof ActionGatewayError ? e : classifyGatewayError(e)
       await audit({ ...base, event_type: 'session_refused', code: g.code, detail: { class: g.errorClass } })

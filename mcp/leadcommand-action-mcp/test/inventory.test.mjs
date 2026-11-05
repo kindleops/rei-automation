@@ -5,8 +5,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { RELATIONS, RPCS, T2_RPCS, T34_RPCS, OHG_RPCS, WF_RPCS, AGENT_MESSAGE_RPCS } from '../src/data/inventory.mjs'
-import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, OHG_TOOLS, AGENT_MESSAGE_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
+import { RELATIONS, RPCS, T2_RPCS, T34_RPCS, OHG_RPCS, WF_RPCS, AGENT_MESSAGE_RPCS, RECORD_RPCS, SERVICE_RPCS } from '../src/data/inventory.mjs'
+import { ACTIONS, READS, REQUESTED_TOOLS, NEVER_EXPOSED, WORKFORCE_TOOLS, OHG_TOOLS, AGENT_MESSAGE_TOOLS, RECORD_TOOLS, CAMPAIGN_TOOLS } from '@/lib/domain/action-gateway/catalog.js'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261019160000_action_gateway.sql'), 'utf8')
@@ -15,6 +15,8 @@ const T34_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20
 const WF_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261022110000_workforce_agntei.sql'), 'utf8')
 const OHG_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261027120000_action_gateway_ohg.sql'), 'utf8')
 const AM_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261029100000_action_gateway_agent_message.sql'), 'utf8')
+const RS_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261101120000_record_sync.sql'), 'utf8')
+const SP_SQL = fs.readFileSync(path.join(REPO, 'supabase/migrations/PROPOSED_20261105120000_action_gateway_service_principals.sql'), 'utf8')
 
 test('read relations = action_gateway.read_inventory()', () => {
   const m = /-- lc-action-inventory:relations\n\s*select array\[([^\]]+)\]/.exec(SQL)
@@ -46,14 +48,29 @@ test('RPC allowlist = the public functions granted to lc_action_gateway (+ the h
   assert.match(AM_SQL, /grant execute on function public\.action_gateway_agent_message_state\(uuid, uuid, uuid\), public\.action_gateway_message_templates\(\), public\.action_gateway_dw_lead_assignment\(uuid, uuid\),\n  public\.action_gateway_lead_assignment_get\(uuid, uuid\), public\.action_gateway_events_since\(bigint, integer\), public\.action_gateway_agent_lead_pool\(text, integer, text\),\n  public\.action_gateway_send_controls\(\), public\.action_gateway_agent_text_state\(uuid, uuid, uuid\), public\.action_gateway_agent_text_submit\(text, jsonb\) to lc_action_gateway;/)
   // LeadCommand-side functions of #32 (the worker's load / reservations, the delivery writer, the lead holder) never are
   assert.ok(!RPCS.some((r) => /^lc_agent_/.test(r)))
-  assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set([...created, ...t2, ...t34, ...ohg, ...wf, ...am])].sort())
+  // link 10 (record sync): exactly the three public functions that migration creates and grants to lc_action_gateway
+  const rs = [...RS_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
+  assert.deepEqual([...RECORD_RPCS].sort(), [...new Set(rs)].sort(), 'link 10 RPCs')
+  for (const f of ['action_gateway_dw_record_change(uuid,uuid)', 'action_gateway_record_state(uuid)', 'action_gateway_record_history(uuid,integer)']) assert.ok(RS_SQL.includes(`grant execute on function public.${f} to lc_action_gateway;`), f)
+  // service principals: exactly the two public functions that migration creates and grants to lc_action_gateway
+  const sp = [...SP_SQL.matchAll(/create function public\.(action_gateway_[a-z_]+)\(/g)].map((x) => x[1])
+  assert.deepEqual([...SERVICE_RPCS].sort(), [...new Set(sp)].sort(), 'service principals RPCs')
+  assert.ok(SP_SQL.includes('grant execute on function public.action_gateway_service_principal(text, text), public.action_gateway_dw_campaign_draft(uuid, uuid) to lc_action_gateway;'))
+  assert.deepEqual([...RPCS].filter((r) => r !== 'automation_hold_for').sort(), [...new Set([...created, ...t2, ...t34, ...ohg, ...wf, ...am, ...rs, ...sp])].sort())
   assert.ok(RPCS.includes('automation_hold_for'))
 })
 
 test('catalog: every requested tool is registered exactly once (prepare_acquisition_offer as a scoped read); nothing never-exposed is; T3 / T4 tools never run on a standing grant alone', () => {
   const names = ACTIONS.map((a) => a.name)
   assert.equal(new Set(names).size, names.length)
-  assert.deepEqual([...names, ...READS.filter((r) => r.name === 'prepare_acquisition_offer' || WORKFORCE_TOOLS.includes(r.name) || OHG_TOOLS.includes(r.name) || AGENT_MESSAGE_TOOLS.includes(r.name)).map((r) => r.name)].sort(), [...REQUESTED_TOOLS, ...WORKFORCE_TOOLS, ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS].sort())
+  const FAMILY = [...WORKFORCE_TOOLS, ...OHG_TOOLS, ...AGENT_MESSAGE_TOOLS, ...RECORD_TOOLS, ...CAMPAIGN_TOOLS]
+  assert.deepEqual([...names, ...READS.filter((r) => r.name === 'prepare_acquisition_offer' || FAMILY.includes(r.name)).map((r) => r.name)].sort(), [...REQUESTED_TOOLS, ...FAMILY].sort())
+  // the campaign draft is a T1 domain write of its ONE writer, registered as such; the read-back is a T1 read; nothing launches
+  const draft = ACTIONS.find((a) => a.name === 'create_campaign_draft')
+  assert.deepEqual([draft.tier, draft.capability, draft.executor.kind, draft.executor.fn], [1, 'campaigns.create_draft', 'domain_write', 'action_gateway_dw_campaign_draft'])
+  assert.ok(SP_SQL.includes(`('domain_write_action', 'create_campaign_draft', 'PROPOSED_20261105120000_action_gateway_service_principals', null)`))
+  assert.ok(!SP_SQL.includes(`'standing_t2_action'`), 'the link registers no standing T2 action')
+  assert.deepEqual([READS.find((r) => r.name === 'get_campaign').tier, READS.find((r) => r.name === 'get_campaign').capability], [1, 'campaigns.read'])
   // link #32: the agent text (and the retired agent message) are T3 domain writes of the shared handoff, registered as such;
   // the lead writes (assign, release, transfer) are standing T2 reversible
   for (const n of ['queue_agent_message', 'queue_agent_text', 'transfer_lead']) assert.ok(AM_SQL.includes(`('domain_write_action', '${n}', 'PROPOSED_20261029100000_action_gateway_agent_message', null)`), n)

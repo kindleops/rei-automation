@@ -17,6 +17,8 @@ export const INSTRUCTIONS = [
   'Every call needs a client_request_id: the same id for the same action and resource returns the recorded outcome instead of acting twice (retry safely with the same id).',
   'You can never approve anything. When a policy needs a human, the result is approval_pending: an operator decides in LeadCommand; retry the SAME request later.',
   'Identity, tenant, tier, approvals and authority are never tool arguments; supplying them is refused.',
+  'A SERVICE credential (lcsvc_...) acts only for the delegate agent named in the X-LC-Acting-Agent HTTP header of each request; that agent\'s own grants apply, with the tier ceiling min(agent, service). A missing, unknown or non-delegated acting agent is refused.',
+  'Campaign drafts: create_campaign_draft creates a DRAFT campaign pinned to property_ids / thread_ids (never launched, scheduled or sent through the gateway; a human launches from Campaign Command); get_campaign reads it back.',
   'Available now: create_research_job, request_property_valuation, create_operator_task, update_operator_task, draft_seller_reply (draft only, never queued or sent; refused to an agent that sends its own texts), set_thread_hold (SET only; humans release), run_authorized_reconciliation (report only), read_conversation_context (separate read scope). Every other tool is registered but answers capability_not_implemented.',
   'LeadCommand Workforce (leadcommand_workforce_*, T1, internal only): you act as the Workforce employee the owner bound to THIS credential. Call leadcommand_workforce_link_self first (once, inside the owner\'s link window), then claim, report, request research, complete, hand off or escalate YOUR assignments. Nothing there contacts a seller, makes an offer or changes a stage.',
   'Agent texts (sms_send_agent_text → queue_agent_text, T3): YOU compose every SMS; LeadCommand never writes or changes a word. Take the lead first (assign_lead; exactly one holder per lead — a supervisor moves it with transfer_lead), then send the exact body (1–320 characters) with a purpose (first_touch, reply, followup, reengage, nurture, qualification, negotiation, appointment) and your attribution {employee, model, provider, route, session_id, turn_id}; an answer (reply / qualification / negotiation / appointment) names in_reply_to_message_id = the thread\'s latest unanswered seller message. LeadCommand validates the text deterministically (no amounts without a live negotiation send authorization, no human claim or automation denial, an AI-assistant disclosure when the seller asks, at most one question, no links, no no-contact promise …) and enforces every compliance gate; each refusal names its code (CONTENT_REJECTED carries reasons[]). Born OFF: until the owner turns on ai_agent_text_enabled the answer is AGENT_TEXT_KILL_SWITCH_OFF. sms_send_agent_message (LeadCommand wrote from your brief) and the certified reply are RETIRED: they answer AGENT_COMPOSES_TEXT. leadcommand_events_since is your wake-up feed (inbound messages, opt-outs, lead-state changes, lead transfers, delivery changes incl. the carrier\'s delivered / undelivered); leadcommand_agent_lead_pool lists a market\'s addressable leads with the agent-text path\'s eligibility verdict; leadcommand_send_controls says whether seller-facing sends are stopped or switched off right now.',
@@ -82,9 +84,10 @@ export function riskOf(t) {
 
 /**
  * One Server per connection (stdio: one; HTTP: one per session); all share the ONE gateway.
- * @param {{ gateway, credentialOf: () => string|null, transport?: string, sessionGate?: object|null, processGate?: object|null, callTimeoutMs?: number }} deps
+ * @param {{ gateway, credentialOf: () => string|null, actingAgentOf?: (extra: object) => string|null, transport?: string, sessionGate?: object|null, processGate?: object|null, callTimeoutMs?: number }} deps
+ *   actingAgentOf: the X-LC-Acting-Agent header of the request carrying the call (HTTP only; stdio has no headers)
  */
-export function createMcpServer({ gateway, credentialOf, transport = 'stdio', sessionGate = null, processGate = null, callTimeoutMs = 45_000 }) {
+export function createMcpServer({ gateway, credentialOf, actingAgentOf = null, transport = 'stdio', sessionGate = null, processGate = null, callTimeoutMs = 45_000 }) {
   const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } }, instructions: INSTRUCTIONS })
   // retired actions (LeadCommand would compose the words: AGENT_COMPOSES_TEXT) are not advertised
   const tools = gateway.listTools().filter((t) => !t.retired).map((t) => ({
@@ -110,13 +113,14 @@ export function createMcpServer({ gateway, credentialOf, transport = 'stdio', se
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }))
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const alias = SMS_ALIASES[String(req.params.name)] && tools.some((t) => t.name === String(req.params.name)) ? SMS_ALIASES[String(req.params.name)] : null
     const retiredAlias = RETIRED_ALIASES[String(req.params.name)] || null
     const tool = alias ? (typeof alias.route === 'function' ? alias.route(req.params.arguments ?? {}) : alias.to) : retiredAlias || gatewayNameOf(req.params.name)
     if (tool == null) throw new McpError(ErrorCode.InvalidParams, `Tool ${String(req.params.name).slice(0, 64)} not found`)
     const args = alias ? alias.adapt(req.params.arguments ?? {}) : (req.params.arguments ?? {})
-    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), tool, args, transport }))
+    const actingAgent = typeof actingAgentOf === 'function' ? actingAgentOf(extra) : null
+    const run = () => withDeadline(callTimeoutMs, () => gateway.call({ credential: credentialOf(), ...(actingAgent != null ? { actingAgent } : {}), tool, args, transport }))
     let out
     try {
       out = await (sessionGate ? sessionGate.run(() => (processGate ? processGate.run(run) : run())) : processGate ? processGate.run(run) : run())

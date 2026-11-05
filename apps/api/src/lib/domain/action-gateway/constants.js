@@ -60,9 +60,19 @@ export const DOMAIN_WRITES = Object.freeze({
 
 /** Keys a tool argument may never carry: identity, tenancy, authority and approvals come from the server. */
 // (Workforce × Agntei: the acting EMPLOYEE is the authenticated principal's — any employee / actor / assignee argument is forged context too)
-export const FORGED_CONTEXT_KEYS = /^(org|org_id|orgid|tenant|tenant_id|user|user_id|userid|principal|principal_id|agent|agent_id|operator|operator_id|actor|sponsor|sponsor_user_id|role|scope|scopes|approved|approval|approval_id|approval_ref|tier|identity|as_user|impersonate|grant|grant_id|capability|credential|token|policy|policy_id|override|automation_hold_override|lease|lease_token|intent_id|employee|employee_id|employee_ids|as_employee|acting_employee|acting_employee_id|actor_id|actor_employee_id|on_behalf_of|requested_by|assignee|assignee_employee_id|lease_owner|action_principal_id)$/i
+// (service principals: the acting AGENT of a service credential comes only from the X-LC-Acting-Agent header; an acting-agent / service / delegate argument is forged context too)
+export const FORGED_CONTEXT_KEYS = /^(org|org_id|orgid|tenant|tenant_id|user|user_id|userid|principal|principal_id|agent|agent_id|operator|operator_id|actor|sponsor|sponsor_user_id|role|scope|scopes|approved|approval|approval_id|approval_ref|tier|identity|as_user|impersonate|grant|grant_id|capability|credential|token|policy|policy_id|override|automation_hold_override|lease|lease_token|intent_id|employee|employee_id|employee_ids|as_employee|acting_employee|acting_employee_id|actor_id|actor_employee_id|on_behalf_of|requested_by|assignee|assignee_employee_id|lease_owner|action_principal_id|acting_agent|acting_agent_id|service_id|service_principal|service_principal_id|via_service_id|delegate_id)$/i
 /** Keys that would turn a tool into a SQL / egress / proxy surface (agent/tools/prohibited.js + escalation). */
 export const ESCALATION_KEYS = /^(sql|raw_sql|statement|query|query_sql|route|url|endpoint|method|headers|host|table|rpc|function|schema|set_role|role_name|search_path|grant_sql|exec|execute)$/i
+
+/**
+ * SERVICE PRINCIPALS (PROPOSED_20261105120000_action_gateway_service_principals.sql): one administratively managed
+ * integration credential (lcsvc_...) acting for the agent principals an owner registered as its delegates. The acting
+ * agent is named ONLY by this HTTP header (never a tool argument: FORGED_CONTEXT_KEYS still refuses identity keys).
+ */
+export const ACTING_AGENT_HEADER = 'x-lc-acting-agent'
+export const AGENT_ID_RE = /^agt_[a-z0-9][a-z0-9_]{2,40}$/
+export const SERVICE_ID_RE = /^svc_[a-z0-9][a-z0-9_]{2,40}$/
 
 export const LIMITS = Object.freeze({
   lease_seconds: 60,

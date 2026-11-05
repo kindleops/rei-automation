@@ -14,12 +14,18 @@
 //   limits      a process-wide concurrency gate + a per-session gate; bounded sessions (LRU idle eviction;
 //               all busy → 503); idle expiry; body size cap before parsing; header / request timeouts
 //   sessions    random UUIDs from the SDK; routing only, never authentication
+//   service     ONE administratively managed service credential (lcsvc_...) may stand in for many agents: each request
+//               names its acting agent in the X-LC-Acting-Agent header (never a tool argument). The gateway resolves the
+//               service, requires the agent to be an ENABLED delegate of it and then applies the agent's own grants,
+//               with the effective tier min(agent, service). The header is read per request (a session may carry
+//               calls for several delegates of the same service); the session stays bound to the service credential.
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import { createConcurrencyGate, createRateLimiter } from '../../../leadcommand-mcp/src/safety/limits.mjs'
-import { AGENT_CREDENTIAL_RE } from '@/lib/domain/action-gateway/credentials.js'
+import { AGENT_CREDENTIAL_RE, SERVICE_CREDENTIAL_RE } from '@/lib/domain/action-gateway/credentials.js'
+import { ACTING_AGENT_HEADER } from '@/lib/domain/action-gateway/constants.js'
 
 const AUTH_FAIL_PER_MIN = 30
 
@@ -34,11 +40,21 @@ export function allowedHostsFor(bind, port) {
   return new Set(names.map((n) => `${n}:${port}`))
 }
 
-/** The presented agent credential, or null (never throws, never logs the value). */
+/** The presented agent or service credential, or null (never throws, never logs the value). */
 export function bearerCredential(header) {
   if (typeof header !== 'string') return null
   const m = /^Bearer[ ]+([^\s]{1,512})$/i.exec(header.trim())
-  return m && AGENT_CREDENTIAL_RE.test(m[1]) ? m[1] : null
+  return m && (AGENT_CREDENTIAL_RE.test(m[1]) || SERVICE_CREDENTIAL_RE.test(m[1])) ? m[1] : null
+}
+
+/**
+ * The X-LC-Acting-Agent header of a request (Node / Web headers alike): the raw bounded string, or null when absent.
+ * Its shape and the delegation are judged by the gateway (a malformed or repeated header is refused there).
+ */
+export function actingAgentHeader(headers) {
+  const v = headers && typeof headers.get === 'function' ? headers.get(ACTING_AGENT_HEADER) : headers?.[ACTING_AGENT_HEADER]
+  if (v == null || v === '') return null
+  return Array.isArray(v) ? v.join(', ').slice(0, 128) : String(v).slice(0, 128)
 }
 const sha = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest()
 const sameCredential = (a, digest) => Boolean(a) && crypto.timingSafeEqual(sha(a), digest)
@@ -119,7 +135,7 @@ export async function startHttp({ app }) {
       return refuse(res, 400, 'no_session', -32000, 'Bad Request: no valid session; send initialize first')
     }
     // the session opens only for a credential the gateway resolves to an active principal of the served tenant
-    const who = await app.gateway.whoami(credential)
+    const who = await app.gateway.whoami(credential, { actingAgent: actingAgentHeader(req.headers) })
     if (!who.ok) return authRefuse(res, `credential_${String(who.error?.code || 'refused').toLowerCase().slice(0, 40)}`)
     if (sessions.size >= h.max_sessions) {
       const idle = [...sessions.entries()].filter(([, x]) => x.gate.inFlight === 0).sort((a, b) => a[1].lastSeen - b[1].lastSeen)[0]
@@ -128,14 +144,15 @@ export async function startHttp({ app }) {
     }
     const gate = createConcurrencyGate({ max: h.session_concurrency, code: 'SESSION_CONCURRENCY_LIMIT', label: 'concurrent calls on this connection' })
     const digest = sha(credential)
-    const server = app.createServer({ transport: 'streamable-http', sessionGate: gate, processGate, credentialOf: () => credential })
+    // the acting agent is read from EACH request's own headers (the SDK hands them to the tool handler)
+    const server = app.createServer({ transport: 'streamable-http', sessionGate: gate, processGate, credentialOf: () => credential, actingAgentOf: (extra) => actingAgentHeader(extra?.requestInfo?.headers) })
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       enableJsonResponse: true,
       maxRequestBodySize: h.max_body_bytes,
       onsessioninitialized: (id) => {
-        sessions.set(id, { transport, server, gate, lastSeen: Date.now(), credentialDigest: digest, agent_id: who.agent_id })
-        auditor.event('http_session_open', { sessions: sessions.size, agent_id: who.agent_id })
+        sessions.set(id, { transport, server, gate, lastSeen: Date.now(), credentialDigest: digest, agent_id: who.agent_id, service_id: who.service?.service_id || null })
+        auditor.event('http_session_open', { sessions: sessions.size, agent_id: who.agent_id, ...(who.kind === 'service' ? { via_service_id: who.service?.service_id || null } : {}) })
       },
       onsessionclosed: (id) => { void closeSession(id, 'client_delete') },
     })
@@ -157,7 +174,7 @@ export async function startHttp({ app }) {
   const url = `http://${h.bind === '::1' ? '[::1]' : '127.0.0.1'}:${addr.port}${h.path}`
   const sweeper = setInterval(() => { const cutoff = Date.now() - h.session_idle_ms; for (const [id, s] of sessions) if (s.lastSeen < cutoff) void closeSession(id, 'idle') }, Math.min(60_000, Math.max(1000, Math.floor(h.session_idle_ms / 4))))
   sweeper.unref()
-  auditor.event('http_listen', { bind: h.bind, port: addr.port, path: h.path, auth: 'per_agent_bearer_credential', max_sessions: h.max_sessions })
+  auditor.event('http_listen', { bind: h.bind, port: addr.port, path: h.path, auth: 'per_agent_or_service_bearer_credential', max_sessions: h.max_sessions })
   return {
     url,
     port: addr.port,

@@ -42,8 +42,8 @@ export function classifyGatewayError(e) {
   if (m) {
     const code = m[1].replace(/^ACTION_GATEWAY_(ACTION_GATEWAY_)?/, '')
     if (/^(STOPPED|TIER_DISABLED|CAPABILITY_KILLED)$/.test(code)) return gwErr('unavailable', code)
-    if (/^(CREDENTIAL_MISMATCH|PRINCIPAL_INACTIVE|SPONSOR_NOT_MEMBER)$/.test(code)) return gwErr('unauthenticated', code)
-    if (/^(GRANT_INVALID|TIER_ABOVE_CEILING|NO_TENANT|AUTHZ_MISMATCH)$/.test(code)) return gwErr('forbidden', code)
+    if (/^(CREDENTIAL_MISMATCH|PRINCIPAL_INACTIVE|SPONSOR_NOT_MEMBER|SERVICE_INACTIVE|SERVICE_SPONSOR_NOT_MEMBER)$/.test(code)) return gwErr('unauthenticated', code)
+    if (/^(GRANT_INVALID|TIER_ABOVE_CEILING|NO_TENANT|AUTHZ_MISMATCH|DELEGATE_NOT_ENABLED)$/.test(code)) return gwErr('forbidden', code)
     if (/^(APPROVAL_[A-Z_]+)$/.test(code)) return gwErr('refused', code)
     if (/^(ENVELOPE_[A-Z_]+)$/.test(code)) return gwErr('refused', code)
     if (/^(BINDING_EXPIRED|BINDING_REVOKED|NOT_AN_AGNTEI_EMPLOYEE)$/.test(code)) return gwErr('forbidden', code)

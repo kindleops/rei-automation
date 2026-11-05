@@ -35,6 +35,9 @@ export function createPostgrestActionStore({ db }) {
     kind: 'postgrest',
     async controls() { return parseControls(await rpc(db, 'action_gateway_controls', {})) },
     principal: (digest) => rpc(db, 'action_gateway_principal', { p_credential_digest: digest }),
+    // Service principals (PROPOSED_20261105120000): the service by its credential digest + the acting agent's delegation
+    // and, only when that delegation is enabled, the agent's own principal (grants, scopes, ceiling)
+    servicePrincipal: (digest, actingAgentId) => rpc(db, 'action_gateway_service_principal', { p_credential_digest: digest, p_acting_agent: actingAgentId ?? null }),
     openIntent: (row) => rpc(db, 'action_gateway_intent_open', { p: row }),
     getIntent: (id) => rpc(db, 'action_gateway_intent_get', { p_intent_id: id }),
     refuse: (id, code, detail = {}) => rpc(db, 'action_gateway_refuse', { p_intent_id: id, p_code: code, p_detail: detail }),

@@ -6,6 +6,10 @@
 import crypto from 'node:crypto'
 
 export const AGENT_CREDENTIAL_RE = /^lcag_[A-Za-z0-9_-]{43}$/
+// SERVICE credentials (one administratively managed integration acting for registered delegate agents): a distinct
+// prefix, the same 256 random bits, the same pepper and the same HMAC-SHA256 digest at rest
+// (action_gateway.service_principals.credential_digest). A service credential is never an agent credential.
+export const SERVICE_CREDENTIAL_RE = /^lcsvc_[A-Za-z0-9_-]{43}$/
 export const PEPPER_MIN_BYTES = 32
 
 export function assertPepper(pepper) {
@@ -18,6 +22,21 @@ export function assertPepper(pepper) {
 export function credentialDigest(pepper, token) {
   if (typeof token !== 'string' || !AGENT_CREDENTIAL_RE.test(token)) return null
   return crypto.createHmac('sha256', assertPepper(pepper)).update(token, 'utf8').digest('hex')
+}
+
+/** Digest of a presented SERVICE credential; null when it is not service-credential-shaped. */
+export function serviceCredentialDigest(pepper, token) {
+  if (typeof token !== 'string' || !SERVICE_CREDENTIAL_RE.test(token)) return null
+  return crypto.createHmac('sha256', assertPepper(pepper)).update(token, 'utf8').digest('hex')
+}
+
+/** Which kind of credential a presented token is shaped as: 'agent', 'service' or null (never throws, never logs). */
+export const credentialKind = (token) => (typeof token !== 'string' ? null : AGENT_CREDENTIAL_RE.test(token) ? 'agent' : SERVICE_CREDENTIAL_RE.test(token) ? 'service' : null)
+
+/** A new SERVICE credential + its digest (the OWNER mints; the token is shown once and never stored). */
+export function mintServiceCredential(pepper) {
+  const token = `lcsvc_${crypto.randomBytes(32).toString('base64url')}`
+  return { token, digest: serviceCredentialDigest(pepper, token) }
 }
 
 /** A new credential + its digest (the OWNER mints; the token is shown once and never stored). */
