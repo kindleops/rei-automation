@@ -1,5 +1,7 @@
 # agntei launch: branch reconciliation, migrations, credentials and permissions (2026-11-05)
 
+> Superseded in part (2026-11-05, later the same day): section 2 below is replaced by the reconciliation itself, `docs/AGNTEI-PRODUCTION-RECONCILIATION.md` (branch `review/agntei-production-reconciliation`). The migration plan is `docs/AGNTEI-MIGRATION-DOSSIER.md`.
+
 Status: reviewed in a cloud session that cannot reach production, the Supabase project or the Mac.
 Nothing here is applied, merged into a production branch, or deployed.
 
