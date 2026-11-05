@@ -24,6 +24,7 @@ export async function applyOne(connectionString, name, { manifest = JSON.parse(f
   if (crypto.createHash('sha256').update(sql).digest('hex') !== m.sha256) throw new Error(`${m.file} differs from the reviewed manifest: refusing`)
   const before = review(manifest, (await liveCatalog(connectionString)).live)
   if (before.drift.length || before.orderBroken) throw new Error('drift or a broken order in the target database: refusing')
+  if ((before.superseded ?? []).includes(name)) throw new Error(`${name} is superseded in this database (Package A is applied): never apply it`)
   if (before.next !== name) throw new Error(`the next migration is ${before.next ?? 'none (all applied)'}, not ${name}`)
   const c = new pg.Client({ connectionString }); await c.connect()
   try {

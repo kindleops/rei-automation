@@ -9,6 +9,23 @@ import path from 'node:path'
 import pg from 'pg'
 import { SNAPSHOT_SQL } from './chain.mjs'
 
+// agntei reconciliation (2026-11-05): production may carry Package A (release/cloudflare-production 4362dcfa), whose
+// PROPOSED_20261020120000_research_event_budget_ceilings re-creates agent.runtime_enqueue_event with PER-KIND ceilings
+// and says, for the rc-8.5.21 integrator: with Package A applied, never apply
+// PROPOSED_20261013161000_conversation_decide_event_budget (it would re-create the literal 0.05 clamp).
+// Proven on PostgreSQL 17 (agntei-launch-chain-pg.test.mjs): from a Package A state the rest of the chain applies and
+// the ceilings stay in force. So: Package A's body is a REVIEWED alternative (not drift), and the link it replaces
+// reads SUPERSEDED (satisfied for the order, never applied) wherever Package A's ceiling function is live.
+export const PACKAGE_A_CEILING_FN = 'function:agent.runtime_event_budget_ceiling(p_kind text)'
+export const ALTERNATIVE_BODIES = Object.freeze({
+  'agent.runtime_enqueue_event(p_kind text, p_event_key text, p_input jsonb, p_priority integer)': [
+    { source: 'PROPOSED_20261020120000_research_event_budget_ceilings (Package A, production)', md5: '5d8d3c3c88987a43bf72d2929467a7f4' },
+  ],
+})
+export const SUPERSEDED = Object.freeze({
+  PROPOSED_20261013161000_conversation_decide_event_budget: { when: PACKAGE_A_CEILING_FN, by: 'PROPOSED_20261020120000_research_event_budget_ceilings (Package A)' },
+})
+
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..')
 export function review(manifest, live) {
   const versions = new Map() // function -> [{ migration, md5 }] in chain order
@@ -20,18 +37,23 @@ export function review(manifest, live) {
       const cur = live.get(`function:${fn}`)
       if (cur === undefined) return { fn, state: 'missing' }
       const vs = versions.get(fn) ?? []; const i = vs.findIndex((v) => v.md5 === cur); const mine = vs.findIndex((v) => v.migration === m.name)
+      const alt = (ALTERNATIVE_BODIES[fn] ?? []).find((a) => a.md5 === cur)
+      if (i < 0 && alt) return { fn, state: 'at-or-after', live: alt.source }
       if (i < 0) return { fn, state: 'drift' }
       return { fn, state: i >= mine ? 'at-or-after' : 'before', live: vs[i].migration }
     })
     const fnOk = fns.filter((f) => f.state === 'at-or-after').length
     const total = objs.length + fns.length; const ok = present.length + fnOk
     const drift = fns.filter((f) => f.state === 'drift').map((f) => f.fn)
-    const status = total === 0 ? 'nothing-to-check' : ok === total ? 'applied' : ok === 0 ? 'absent' : 'partial'
+    let status = total === 0 ? 'nothing-to-check' : ok === total ? 'applied' : ok === 0 ? 'absent' : 'partial'
+    const sup = SUPERSEDED[m.name]
+    if (sup && live.has(sup.when)) status = 'superseded'
     return { name: m.name, status, checked: total, present: ok, drift, missing: [...objs.filter((k) => !live.has(k)), ...fns.filter((f) => f.state !== 'at-or-after').map((f) => `function:${f.fn} (${f.state}${f.live ? `, live version from ${f.live}` : ''})`)].slice(0, 12), roles: m.roles, rollback: m.rollback }
   })
-  const firstGap = rows.findIndex((r) => r.status !== 'applied')
+  const done = (r) => r.status === 'applied' || r.status === 'superseded'
+  const firstGap = rows.findIndex((r) => !done(r))
   const orderBroken = firstGap >= 0 && rows.slice(firstGap + 1).some((r) => r.status === 'applied' || r.status === 'partial')
-  return { rows, next: firstGap >= 0 ? rows[firstGap].name : null, pending: rows.filter((r) => r.status !== 'applied').map((r) => r.name), orderBroken, drift: rows.flatMap((r) => r.drift.map((d) => `${r.name}: ${d}`)) }
+  return { rows, next: firstGap >= 0 ? rows[firstGap].name : null, pending: rows.filter((r) => !done(r)).map((r) => r.name), superseded: rows.filter((r) => r.status === 'superseded').map((r) => r.name), orderBroken, drift: rows.flatMap((r) => r.drift.map((d) => `${r.name}: ${d}`)) }
 }
 export async function liveCatalog(connectionString) {
   const c = new pg.Client({ connectionString }); await c.connect()

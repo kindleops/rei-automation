@@ -130,3 +130,34 @@ test('PG launch grants: principals registered with a discarded credential, role 
     assert.equal(Number((await env.owner.query("select count(*) n from action_gateway.agent_principals where agent_id like 'agt_launch_%' and credential_digest is not null")).rows[0].n), 0, 'the agents can now act only through the service')
   } finally { fs.rmSync(dir, { recursive: true, force: true }); await env.db.drop().catch(() => {}) }
 })
+
+// agntei reconciliation (2026-11-05): production may carry Package A. Its ceilings migration re-creates
+// agent.runtime_enqueue_event with per-kind ceilings and must never be overwritten by
+// PROPOSED_20261013161000_conversation_decide_event_budget (its literal 0.05 clamp). From that state the reviewer
+// reads the link SUPERSEDED, apply-one refuses it, the rest of the chain applies in order, and Package A's own
+// posttest (minus its standalone-only assertion) still passes.
+test('PG launch review + apply: production with Package A applied; the superseded link is never applied; the ceilings survive the whole chain', { skip }, async () => {
+  const SUP = 'PROPOSED_20261013161000_conversation_decide_event_budget'
+  const shared = new Set([...migrationsOnProductionBranch].filter((n) => n !== SUP))
+  const w = await world((s) => s.kind !== 'migration' || shared.has(path.basename(s.file, '.sql')))
+  try {
+    const pkgA = fs.readFileSync(path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261020120000_research_event_budget_ceilings.sql'), 'utf8')
+    await w.c.query('begin'); await w.c.query(pkgA); await w.c.query('commit')
+    const before = review(manifest, (await liveCatalog(w.url)).live)
+    assert.equal(before.rows.find((r) => r.name === SUP).status, 'superseded')
+    assert.deepEqual(before.drift, [], 'Package A\'s runtime_enqueue_event body is a reviewed alternative, not drift')
+    assert.equal(before.orderBroken, false)
+    assert.equal(before.next, 'PROPOSED_20261017122000_conversation_turn_operator_items')
+    await assert.rejects(applyOne(w.url, SUP, { manifest, log: () => {} }), /superseded/)
+    for (const name of before.pending) await applyOne(w.url, name, { manifest, log: () => {} })
+    const after = review(manifest, (await liveCatalog(w.url)).live)
+    assert.equal(after.next, null, 'every link applied')
+    assert.deepEqual(after.superseded, [SUP])
+    assert.deepEqual(after.drift, [])
+    const post = fs.readFileSync(path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261020120000_research_event_budget_ceilings_posttest.sql'), 'utf8')
+      .split('\n').filter((l) => !/^\\set ON_ERROR_STOP/.test(l) && !/Package A creates no runtime_enqueue_event_at/.test(l)).join('\n')
+    const notices = []; w.c.on('notice', (n) => notices.push(n.message))
+    await w.c.query(post)
+    assert.ok(notices.includes('posttest(research_event_budget_ceilings): apply assertions OK'), notices.join(' | '))
+  } finally { await w.drop() }
+})
