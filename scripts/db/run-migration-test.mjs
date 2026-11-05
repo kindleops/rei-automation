@@ -107,17 +107,62 @@ function sql(url, text, env) {
 
 // ── fresh cluster (unix socket only) ────────────────────────────────────────
 
-export function startCluster({ bin, dataRoot = null, log = () => {} }) {
+// agntei reconciliation (test temp lifecycle): a run that is killed or crashes cannot stop its cluster, so every
+// start first removes leftover lc-mt-* clusters: only a directory that holds a PostgreSQL data directory, whose
+// postmaster is not running and which is older than an hour. Never a symlink. A run also refuses to start below a
+// free-space floor (LC_MT_MIN_FREE_MB, default 1024).
+export function sweepStaleClusters(base = os.tmpdir(), { now = Date.now(), minAgeMs = 3_600_000 } = {}) {
+  const removed = []
+  let names = []
+  try { names = fs.readdirSync(base) } catch { return removed }
+  for (const name of names) {
+    if (!/^lc-mt-[A-Za-z0-9]{6}$/.test(name)) continue
+    const dir = path.join(base, name)
+    let st; try { st = fs.lstatSync(dir) } catch { continue }
+    if (st.isSymbolicLink() || !st.isDirectory() || now - st.mtimeMs < minAgeMs) continue
+    if (!fs.existsSync(path.join(dir, 'data', 'PG_VERSION'))) continue
+    const pidFile = path.join(dir, 'data', 'postmaster.pid')
+    if (fs.existsSync(pidFile)) {
+      const pid = Number(String(fs.readFileSync(pidFile, 'utf8')).split('\n')[0])
+      let alive = false
+      try { process.kill(pid, 0); alive = true } catch (e) { alive = e.code === 'EPERM' }
+      if (alive) continue
+    }
+    fs.rmSync(dir, { recursive: true, force: true })
+    removed.push(dir)
+  }
+  return removed
+}
+
+function assertFreeSpace(dir, minMb = Number(process.env.LC_MT_MIN_FREE_MB ?? 1024)) {
+  const s = fs.statfsSync(dir)
+  const free = Math.floor((Number(s.bavail) * Number(s.bsize)) / 1048576)
+  if (free < minMb) throw new Error(`only ${free} MB free under ${dir}; a migration test needs ${minMb} MB (LC_MT_MIN_FREE_MB)`)
+}
+
+export function startCluster({ bin, dataRoot = null, log = () => {}, keep = false }) {
+  if (!dataRoot) {
+    const swept = sweepStaleClusters()
+    if (swept.length) log(`cluster: removed ${swept.length} leftover cluster(s) from killed runs`)
+  }
+  assertFreeSpace(dataRoot ? path.resolve(dataRoot) : os.tmpdir())
   const root = dataRoot ? fs.mkdtempSync(path.join(path.resolve(dataRoot), 'cluster-')) : fs.mkdtempSync(path.join(os.tmpdir(), 'lc-mt-'))
   const data = path.join(root, 'data')
   const sock = fs.mkdtempSync('/tmp/lcmt-') // short: unix socket paths are length-limited
   const exe = (name) => path.join(bin, name)
   const env = sanitizedPgEnv(process.env)
-  const init = spawnSync(exe('initdb'), ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--no-locale', '--no-instructions'], { encoding: 'utf8', env })
-  if (init.status !== 0) throw new Error(`initdb failed: ${(init.stderr || init.stdout || '').slice(0, 800)}`)
-  const opts = `-c listen_addresses='' -k ${sock} -c port=5432 -c fsync=off -c synchronous_commit=off -c full_page_writes=off`
-  const start = spawnSync(exe('pg_ctl'), ['-D', data, '-o', opts, '-l', path.join(root, 'server.log'), '-w', '-t', '60', 'start'], { encoding: 'utf8', env })
-  if (start.status !== 0) throw new Error(`pg_ctl start failed: ${(start.stderr || start.stdout || '').slice(0, 800)}`)
+  try {
+    const init = spawnSync(exe('initdb'), ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--no-locale', '--no-instructions'], { encoding: 'utf8', env })
+    if (init.status !== 0) throw new Error(`initdb failed: ${(init.stderr || init.stdout || '').slice(0, 800)}`)
+    const opts = `-c listen_addresses='' -k ${sock} -c port=5432 -c fsync=off -c synchronous_commit=off -c full_page_writes=off`
+    const start = spawnSync(exe('pg_ctl'), ['-D', data, '-o', opts, '-l', path.join(root, 'server.log'), '-w', '-t', '60', 'start'], { encoding: 'utf8', env })
+    if (start.status !== 0) throw new Error(`pg_ctl start failed: ${(start.stderr || start.stdout || '').slice(0, 800)}`)
+  } catch (e) {
+    // a failed initdb / start leaves nothing behind (it used to leave both folders)
+    fs.rmSync(sock, { recursive: true, force: true })
+    if (!keep) fs.rmSync(root, { recursive: true, force: true })
+    throw e
+  }
   const url = `postgresql://postgres@/postgres?host=${encodeURIComponent(sock)}&port=5432`
   log(`cluster: started (unix socket only) data=${data}`)
   return {
@@ -126,7 +171,9 @@ export function startCluster({ bin, dataRoot = null, log = () => {} }) {
     stop() {
       spawnSync(exe('pg_ctl'), ['-D', data, '-m', 'fast', '-w', 'stop'], { encoding: 'utf8', env })
       fs.rmSync(sock, { recursive: true, force: true })
-      log('cluster: stopped')
+      // the data directory this run created goes too (it was left behind before: ~48 MB per run)
+      if (!keep) fs.rmSync(root, { recursive: true, force: true })
+      log(keep ? `cluster: stopped (kept ${root})` : 'cluster: stopped and removed')
     },
   }
 }
@@ -351,8 +398,10 @@ export async function main(argv = process.argv.slice(2)) {
   let cluster = null
   let adminUrl = target.url
   if (target.mode === 'cluster') {
-    cluster = startCluster({ bin: target.bin, dataRoot: arg(argv, '--data-root'), log: console.log })
+    cluster = startCluster({ bin: target.bin, dataRoot: arg(argv, '--data-root'), log: console.log, keep: argv.includes('--keep') })
     adminUrl = cluster.url
+    // a signal still stops and removes the cluster
+    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { try { cluster.stop() } finally { process.exit(130) } })
   }
   const results = []
   try {
