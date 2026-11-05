@@ -813,6 +813,17 @@ export function applyContextualShortReply(messageText, validated) {
         ...base,
       };
     }
+    // 2026-11-05 (final release, contextual classification): "Wrong number",
+    // "Not mine", "I sold it", "Never owned it" are not answers to a price,
+    // interest, condition or timeline question. Binding them there made the
+    // primary intent the question's "No" (asking_price_absent,
+    // condition_disclosed, the 30-day nurture) while the wrong-number
+    // suppression still fired underneath. Unbound, the classifier's own
+    // wrong-number and sold detectors decide, as they do for the ownership
+    // question above.
+    if (!(useCase === 'ownership_check' || qType === 'ownership') && (EXPLICIT_DISOWN_RE.test(t) || BARE_SOLD_RE.test(t))) {
+      return { applied: false };
+    }
     // Round 11 (2026-10-09): "Sold" / "It's SOLD" to our interest question is
     // a property transfer, not a decline -- the classifier's sold detector
     // decides (it did before operator interest questions bound a context).

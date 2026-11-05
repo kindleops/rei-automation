@@ -59,6 +59,32 @@ Reconciliation work outside the conflict markers:
 | `migration-version-uniqueness.test.mjs` | Expects the new allowlist entry. |
 | `migration-test-cluster-sweep.test.mjs` (new) | Leftover migration-test clusters are swept safely. |
 | `agntei-launch-chain-pg.test.mjs` | New: a production state with Package A applied (section 5). |
+| `seller-reply-context-matrix-20261105.test.mjs` (new) | The founder's contextual rules, one context at a time (ownership, interest, asking price, condition, timeline, permission to check back, an offer). See section 3a. |
+
+### 3a. Contextual seller-reply classification (2026-11-05)
+
+Every reply below was probed against each preceding question on the reconciled branch.
+
+**One defect, fixed** in `lib/domain/classification/conversation-context.js`.
+- "Wrong number", "Not mine", "I sold it" and "Never owned it" after a price, interest, condition or timeline question were bound to that question's "No". The primary intent became `asking_price_absent`, `condition_disclosed` or the 30-day nurture, while the wrong-number suppression still fired underneath.
+- These replies are now unbound outside the ownership question, as they already were for it. The classifier's own wrong-number and sold detectors decide.
+- The two tests for it fail without the fix and pass with it.
+- Every critical file that imports the classifier, the conversation context or the relationship resolver (116 files): 1,962 pass, 4 skipped, 0 fail.
+- The wider inbound, seller-flow, auto-reply and opt-out files (539 files, no PostgreSQL in this run, so its tests skipped): 7,637 tests, 7,394 pass, 240 skipped, 3 fail. The 3 are the documented gateway baselines (`agent-capabilities` 2, `conversation-ai-canonical-runtime-contract` 1; `docs/AGNTEI-RELEASE-GATE.md`).
+
+**Locked by the new test file (13 tests), unchanged behaviour:**
+
+| Reply | Ownership question | Interest question | Asking price | Condition | Timeline | Check back? |
+|---|---|---|---|---|---|---|
+| "No" | ownership unverified, this property only | not interested, 30-day nurture | no price yet | no repairs | information, not disinterest | ends outreach in scope, not an opt-out |
+
+In every context, including after an offer:
+- A price rejection ("Too low", "No, that's too low", "90k is not the right number") is never a wrong number and never suppresses.
+- Rejecting a sale ("No I'm not selling", "not interested in selling") never rejects ownership.
+- "That's not me", "No, I don't own that" and "I don't own 100 Main St but I own 200 Oak" are property-scoped.
+- "Stop texting me", "remove me from your list", "please don't contact me again" and "STOP" are a global opt-out.
+
+**Observed, not changed (founder review):** "No way, that's way too low" reads as `not_interested`, because the general not-interested phrase "no way" outranks "too low". It is not a wrong number and nothing is suppressed. It does put a seller who is negotiating into the nurture rather than review. Changing the objection precedence touches every reply, so it is left for a decision rather than changed at the freeze.
 
 ## 4. Evidence
 
