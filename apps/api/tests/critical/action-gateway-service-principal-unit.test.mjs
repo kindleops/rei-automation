@@ -16,6 +16,10 @@ import { credentialDigest, serviceCredentialDigest, mintServiceCredential, mintA
 import { FORGED_CONTEXT_KEYS, ACTING_AGENT_HEADER } from '../../src/lib/domain/action-gateway/constants.js'
 import { classifyGatewayError } from '../../src/lib/domain/action-gateway/errors.js'
 import { STRATEGY_STAGE, campaignView, CREATE_DRAFT_SPEC } from '../../src/lib/domain/action-gateway/actions/campaigns/index.js'
+import { newAssertionKeyPair, signActingAssertion } from '../../src/lib/domain/action-gateway/acting-assertion.js'
+
+/** Each delegate's registered key pair (the integration holds the private half and signs every call with it). */
+const KEYS = Object.fromEntries(['agt_sterling', 'agt_scout', 'agt_outsider', 'agt_paused'].map((a) => [a, newAssertionKeyPair()]))
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const PEPPER = 'p'.repeat(40)
@@ -56,7 +60,7 @@ function world({ serviceCeiling = 2 } = {}) {
       if (!agents[acting]) return { service: s, acting_status: 'unknown_agent', agent: null }
       if (!(acting in delegates)) return { service: s, acting_status: 'not_delegated', agent: null }
       if (!delegates[acting]) return { service: s, acting_status: 'delegate_disabled', agent: null }
-      return { service: s, acting_status: 'ok', agent: { ...agents[acting] } }
+      return { service: s, acting_status: 'ok', agent: { ...agents[acting] }, assertion_key: KEYS[acting].publicKey }
     },
     async audit(ev) { audits.push(ev); return true },
     async openIntent(row) {
@@ -69,9 +73,14 @@ function world({ serviceCeiling = 2 } = {}) {
   const reads = {
     async thread(id) { return id === '11111111-1111-4111-8111-111111111111' ? { id, thread_key: '+13125550150', property_id: '2128263281', market: 'Chicago' } : null },
     async properties(ids) { return ids.filter((x) => ['2128263281', 'p150'].includes(x)).map((property_id) => ({ property_id })) },
+    async audienceEligibility(ids) { return ids.map((property_id) => ({ property_id, thread_id: null, reasons: [] })) },
+    async permission() { return { blocked: false, reasons: [] } },
     async campaign(id) { return id === CAMPAIGN ? { id, name: 'Oak St pinned', status: 'draft', created_at: past(), metadata: { template_use_case: 'ownership_check', stage_code: 'S1', target_filters: { properties: [{ field_key: 'properties.property_id', operator: 'is_any_of', value: ['2128263281'] }] }, composer_source: { kind: 'action_gateway', agent_id: 'agt_sterling' } } } : null },
   }
-  const gateway = createActionGateway({ store, reads, services: { holdCheck: async () => ({ held: false }) }, pepper: PEPPER, dataOrgId: ORG })
+  const raw = createActionGateway({ store, reads, services: { holdCheck: async () => ({ held: false }) }, pepper: PEPPER, dataOrgId: ORG })
+  // the integration's side: a service call naming a delegate is signed with that delegate's key over the exact call
+  const gateway = { ...raw, call: (o) => raw.call(o.credential === svc.token && typeof o.actingAgent === 'string' && KEYS[o.actingAgent] && o.actingAssertion === undefined
+    ? { ...o, actingAssertion: signActingAssertion({ privateKey: KEYS[o.actingAgent].privateKey, agent: o.actingAgent, tool: o.tool, args: o.args }) } : o) }
   return { gateway, svc: svc.token, own: own.token, agents, service, delegates, audits, intents }
 }
 const READ = { tool: 'get_campaign', args: { campaign_id: CAMPAIGN } }

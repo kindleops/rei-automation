@@ -19,6 +19,7 @@ import path from 'node:path'
 
 import { pgAvailable, skipReason, applyInTransaction } from '../pg/agent-pg-harness.mjs'
 import { servicePrincipalDb, registerService, SP_ROLLBACK, SP_LINK, assertionFor, keyFor, delegateKeys } from '../helpers/service-principal-pg.mjs'
+import { audienceDigest } from '../../src/lib/domain/action-gateway/actions/campaigns/index.js'
 import { newAssertionKeyPair } from '../../src/lib/domain/action-gateway/acting-assertion.js'
 import { makeGateway, seedThread, sel, registerAgent, PEPPER, ORG, OWNER, OPERATOR } from '../helpers/action-gateway-pg.mjs'
 import { seedT34, setControls, crypto } from '../helpers/action-gateway-t34-world.mjs'
@@ -213,6 +214,10 @@ test('PG campaign draft: create_campaign_draft (through the service) makes ONE d
     assert.deepEqual([back.result.campaign.campaign_id, back.result.campaign.status, back.result.campaign.is_draft, back.result.campaign.pinned_properties, back.result.campaign.drafted_by_agent, back.result.campaign.launch],
       [id, 'draft', true, 3, 'agt_sterling', 'human_only'])
     assert.equal((await sterling('get_campaign', { campaign_id: crypto.randomUUID() })).error.code, 'CAMPAIGN_NOT_FOUND')
+    // the audience read-back: the exact pinned set (as a digest, no ids returned) and how many may not be contacted now
+    assert.deepEqual([back.result.campaign.audience.pinned_properties, back.result.campaign.audience.digest, back.result.campaign.audience.ineligible_now],
+      [3, audienceDigest(['2128263281', '2128263282', 'p150']), 0])
+    assert.ok(!JSON.stringify(back).includes('2128263281'), 'the read-back carries no property id')
     // refusals: an unknown property, no audience, custom size without a number
     assert.equal((await sterling('create_campaign_draft', { client_request_id: key('draft'), name: 'Nope list', property_ids: ['9999999999'] })).error.code, 'PROPERTY_NOT_FOUND')
     assert.equal((await sterling('create_campaign_draft', { client_request_id: key('draft'), name: 'Nope list' })).error.code, 'AUDIENCE_REQUIRED')
@@ -224,6 +229,32 @@ test('PG campaign draft: create_campaign_draft (through the service) makes ONE d
     // a T1 draft writer, recorded; the outcome stores ids and counts only (no property ids, no phones)
     const out = (await sel(env.owner, 'select result from action_gateway.action_outcomes where intent_id = $1', [r.intent_id]))[0].result
     assert.ok(!JSON.stringify(out).includes('2128263281'))
+  } finally { await env.db.drop() }
+})
+
+test('PG campaign audience: a suppressed, opted-out or do-not-contact lead never enters a draft (named by lead or by property); the read-back reports a contact that became ineligible after the draft', { skip }, async () => {
+  const { env, svc, t, gateway } = await world()
+  try {
+    const sterling = as(gateway, svc, 'agt_sterling')
+    const d = await sterling('create_campaign_draft', { client_request_id: key('draft'), name: 'Audience check', property_ids: ['2128263281'], thread_ids: [t.thread_id] })
+    assert.equal(d.status, 'succeeded', JSON.stringify(d))
+    const id = d.result.campaign_id
+    // a pinned lead opts out AFTER the draft: the read-back says so (the draft is still never sent by the gateway)
+    await env.owner.query(`update public.inbox_thread_state set contactability_status = 'opted_out' where id = $1`, [t.thread_id])
+    const later = await sterling('get_campaign', { campaign_id: id })
+    assert.deepEqual([later.result.campaign.audience.ineligible_now, later.result.campaign.audience.ineligible_reasons], [1, ['contactability_opted_out']])
+    // ... and a NEW draft naming that lead (or its property) is refused: an ineligible contact never enters an audience
+    const before = Number((await sel(env.owner, 'select count(*) n from public.campaigns'))[0].n)
+    for (const pins of [{ thread_ids: [t.thread_id] }, { property_ids: ['p150'] }]) {
+      const no = await sterling('create_campaign_draft', { client_request_id: key('draft'), name: 'Includes an opted-out lead', ...pins })
+      assert.equal(no.error?.code ?? no.code, 'AUDIENCE_NOT_ELIGIBLE', JSON.stringify(no))
+    }
+    // a suppressed phone and a suppressed thread are refused the same way
+    const t2 = await seedThread(env.owner, { phone: '+13125550177', property: 'p177' })
+    await env.owner.query(`update public.inbox_thread_state set is_suppressed = true where id = $1`, [t2.thread_id])
+    assert.equal((await sterling('create_campaign_draft', { client_request_id: key('draft'), name: 'Suppressed thread', thread_ids: [t2.thread_id] })).error?.code, 'AUDIENCE_NOT_ELIGIBLE')
+    assert.equal(Number((await sel(env.owner, 'select count(*) n from public.campaigns'))[0].n), before, 'no draft was made for an ineligible audience')
+    await env.owner.query(`update public.inbox_thread_state set contactability_status = null where id = $1`, [t.thread_id])
   } finally { await env.db.drop() }
 })
 

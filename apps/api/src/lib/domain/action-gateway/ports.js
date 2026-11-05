@@ -103,6 +103,27 @@ export function createGatewayReads({ db }) {
       const [m] = await rows(db.from('message_events').select('id,provider_message_sid,message_body,created_at,direction').eq('thread_key', thread_key).eq('direction', 'inbound').order('created_at', { ascending: false }).limit(1), 'latest_inbound')
       return m || null
     },
+    /**
+     * Contact eligibility of EVERY lead on these properties (codes only, never a phone): thread suppression,
+     * opted out / do not text / do not contact, an active phone suppression row. A campaign audience is checked with it
+     * when a draft is made and when it is read back.
+     */
+    async audienceEligibility(propertyIds) {
+      const list = [...new Set((propertyIds || []).map(String))].slice(0, 500)
+      if (!list.length) return []
+      const threads = await rows(db.from('inbox_thread_state').select('id,thread_key,property_id,is_suppressed,contactability_status').in('property_id', list).limit(2000), 'audience_threads')
+      const phones = [...new Set(threads.map((t) => t.thread_key).filter(Boolean))]
+      const sup = phones.length ? await rows(db.from('sms_suppression_list').select('phone_e164,is_active').in('phone_e164', phones).limit(5000), 'audience_suppression') : []
+      const suppressed = new Set(sup.filter((s) => s.is_active !== false).map((s) => s.phone_e164))
+      return threads.map((t) => {
+        const contact = String(t.contactability_status || '').toLowerCase()
+        const reasons = []
+        if (t.is_suppressed === true) reasons.push('thread_suppressed')
+        if (['opted_out', 'do_not_text', 'do_not_contact'].includes(contact)) reasons.push(`contactability_${contact}`)
+        if (suppressed.has(t.thread_key)) reasons.push('phone_suppressed')
+        return { property_id: String(t.property_id), thread_id: t.id, reasons }
+      })
+    },
     /** Permission state of a thread (codes only): STOP on the latest inbound, thread suppression / opt-out, an active suppression row. */
     async permission(thread) {
       const latest = await this.latestInbound(thread.thread_key)

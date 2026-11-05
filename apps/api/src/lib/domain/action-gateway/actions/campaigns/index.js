@@ -16,6 +16,7 @@
 //                          are pinned and who drafted it. The read-back agntei uses after create_campaign_draft.
 import { UUID, str, int, enumOf, list, obj } from '../../../../agent/capabilities/defs/_schema.js'
 import { STRATEGIES } from '../../../../agent/capabilities/defs/campaigns.js'
+import crypto from 'node:crypto'
 import { encodePropertyRef } from '../../../../agent/missions/mission-codec.js'
 import { TIERS } from '../../constants.js'
 import { gwErr } from '../../errors.js'
@@ -100,6 +101,10 @@ export const CAMPAIGN_LOGIC = Object.freeze({
       const found = new Set((await reads.properties([...ids])).map((p) => String(p.property_id)))
       const missing = [...ids].filter((id) => !found.has(id))
       if (missing.length) throw gwErr('not_found', 'PROPERTY_NOT_FOUND', `${missing.length} of the named properties do not exist`)
+      // an audience never includes a contact LeadCommand says may not be contacted: a suppressed, opted-out or
+      // do-not-contact lead on any pinned property (and a STOP on a named lead) refuses the whole draft; nothing is pinned
+      const blocked = await ineligiblePins([...ids], input.thread_ids || [], reads)
+      if (blocked.count) throw gwErr('forbidden', 'AUDIENCE_NOT_ELIGIBLE', `${blocked.count} of the named properties have a contact that may not be contacted (${blocked.reasons.join(', ')}); leave them out`, { ineligible: blocked.count, reasons: blocked.reasons })
       return { type: 'system', id: 'campaign_draft', refs: { property_ids: [...ids].sort(), lead_count: (input.thread_ids || []).length } }
     },
     params(input, resource) {
@@ -135,10 +140,32 @@ export const CAMPAIGN_LOGIC = Object.freeze({
       const row = await reads.campaign(input.campaign_id)
       if (!row) throw gwErr('not_found', 'CAMPAIGN_NOT_FOUND', 'no campaign with this id')
       coverResource({ type: 'campaign', id: String(row.id), refs: { market: row.market || null } })
-      return { resource_type: 'campaign', campaign: campaignView(row) }
+      // the audience read-back: how many properties are pinned, a digest of exactly which (so the caller can match its own
+      // list without LeadCommand returning property ids), and how many of them may NOT be contacted right now
+      const pinned = pinnedIdsOf(row).map(String)
+      const now = await ineligiblePins(pinned, [], reads)
+      return { resource_type: 'campaign', campaign: { ...campaignView(row), audience: { pinned_properties: pinned.length, digest: audienceDigest(pinned), ineligible_now: now.count, ineligible_reasons: now.reasons } } }
     },
   },
 })
+
+/** sha256 over the sorted, de-duplicated property ids joined by newlines: the audience's identity without the ids. */
+export function audienceDigest(ids) {
+  return crypto.createHash('sha256').update([...new Set((ids || []).map(String))].sort().join('\n')).digest('hex')
+}
+/** Pinned properties with a contact that may not be contacted (and STOP on a named lead): count + reason codes. */
+async function ineligiblePins(propertyIds, threadIds, reads) {
+  if (typeof reads.audienceEligibility !== 'function') throw gwErr('unavailable', 'AUDIENCE_CHECK_UNAVAILABLE', 'the audience eligibility read is not available; no draft is made without it')
+  const rowsOf = await reads.audienceEligibility(propertyIds)
+  const bad = new Set(); const reasons = new Set()
+  for (const r of rowsOf) if (r.reasons.length) { bad.add(r.property_id); r.reasons.forEach((x) => reasons.add(x)) }
+  for (const tid of threadIds) {
+    const t = await reads.thread(tid)
+    const p = t && typeof reads.permission === 'function' ? await reads.permission(t) : null
+    if (p?.blocked) { bad.add(String(t.property_id)); p.reasons.forEach((x) => reasons.add(x)) }
+  }
+  return { count: bad.size, reasons: [...reasons].sort() }
+}
 
 export const CAMPAIGN_ACTIONS = Object.freeze([CREATE_DRAFT_SPEC])
 export const CAMPAIGN_READS = Object.freeze([GET_CAMPAIGN_SPEC])
