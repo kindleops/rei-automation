@@ -1,0 +1,9 @@
+# STAND-IN for Supabase's pg_net on a local staging server (scripts/agntei-launch/staging-rehearsal.mjs installs it).
+# Same name, version, schema, object inventory and grants as production's pg_net 0.20.0 (the fingerprint
+# supabase_pg_net_default_acl.v1 in PROPOSED_20261019160000_action_gateway.sql), but it sends NOTHING: every call is
+# recorded in net.http_request_queue and never leaves the database. Never install this on a real Supabase database.
+comment = 'stand-in for pg_net: records HTTP calls, sends nothing (staging only)'
+default_version = '0.20.0'
+relocatable = false
+# no 'schema =' line: the script creates schema net itself, so the schema is a member of the extension (as the
+# gateway migration's platform exception pins it: every object in net, the schema included, belongs to pg_net)
