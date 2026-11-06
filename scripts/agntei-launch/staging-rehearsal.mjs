@@ -410,6 +410,8 @@ async function cmdGateway(ctx) {
       ctx.log('gateway', `MCP initialize ${init.status}${res.mcp.tools_list ? `; tools/list ${res.mcp.tools_list.status} (${res.mcp.tools_list.count} tools)` : ''}`)
       if (init.status !== 200) throw new Error(`MCP initialize answered ${init.status}: ${init.text.slice(0, 200)}`)
       res.audit_lines = fs.existsSync(path.join(dir, 'gateway-audit.jsonl')) ? fs.readFileSync(path.join(dir, 'gateway-audit.jsonl'), 'utf8').split('\n').filter(Boolean).length : 0
+      res.isolation_after_gateway = isolationFacts(ctx)
+      ctx.log('gateway', `dispatch isolation after apply, probes and the gateway: pg_net requests ${res.isolation_after_gateway.pg_net_requests_recorded}, cron jobs ${res.isolation_after_gateway.cron_jobs_recorded}, rows created here ${res.isolation_after_gateway.rows_created_here} of which reached sent ${res.isolation_after_gateway.rows_created_here_that_reached_sent}, send switch ${res.isolation_after_gateway.ai_conversation_send_enabled}`)
       return res
     } finally {
       if (gw) gw.kill('SIGTERM')
@@ -464,6 +466,23 @@ async function cmdReapply(ctx) {
   }, ['rollback'])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────── dispatch isolation
+/** Staging has no provider, no credential and no path to production sending; these facts say so, from the database itself. */
+function isolationFacts(ctx) {
+  const iso = { measured_at: new Date().toISOString() }
+  try {
+    iso.pg_net_requests_recorded = Number(q(ctx.url, 'select count(*) from net.http_request_queue'))
+    iso.cron_jobs_recorded = Number(q(ctx.url, 'select count(*) from cron.job'))
+    // every row the rehearsal itself created (the workload's wl-*, the probes' probe-*) must still be queued or cancelled: nothing sends on staging
+    iso.rows_created_here = Number(q(ctx.url, "select count(*) from public.send_queue where queue_key not like 'seed-q-%'"))
+    iso.rows_created_here_that_reached_sent = Number(q(ctx.url, "select count(*) from public.send_queue where queue_key not like 'seed-q-%' and queue_status in ('sent','delivered','sending')"))
+    iso.ai_conversation_send_enabled = q(ctx.url, "select coalesce((select value from public.system_control where key = 'ai_conversation_send_enabled'), 'absent')")
+    iso.provider_env_present = Object.keys(process.env).filter((k) => /TEXTGRID|TWILIO|TELNYX|SMS_PROVIDER|SUPABASE_SERVICE_ROLE/i.test(k))
+    iso.server_listens_on = q(ctx.adminUrl, "select coalesce(host(inet_server_addr()), 'unix socket')")
+  } catch (e) { iso.error = String(e.message).slice(0, 200) }
+  return iso
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────── report
 async function cmdReport(ctx) {
   return runStep(ctx, 'report', async () => writeReport(ctx))
@@ -482,7 +501,7 @@ function writeReport(ctx) {
       case 'snapshot': return `${r.bytes} bytes in ${r.dump_ms} ms; fingerprint ${r.fingerprint}`
       case 'review': return `${(r.rows ?? []).filter((x) => x.status === 'applied').length} applied, ${(r.pending ?? []).length} pending, ${(r.superseded ?? []).length} superseded, drift ${(r.drift ?? []).length}`
       case 'apply': case 'reapply': return `${(r.links ?? []).length} links in ${r.total_ms} ms; fingerprint ${r.fingerprint}${s.step === 'reapply' ? `; equals first apply: ${r.equals_first_apply}` : ''}`
-      case 'probes': return `${(r.probes ?? s.results?.probes ?? []).filter((p) => p.ok).length} / ${(r.probes ?? []).length} production-shaped writes ok`
+      case 'probes': { const ps = r.probes ?? []; const na = ps.filter((p) => p.not_applicable).length; return `${ps.filter((p) => p.ok && !p.not_applicable).length} ok, ${ps.filter((p) => !p.ok).length} failed${na ? `, ${na} n/a on the synthetic baseline` : ''} of ${ps.length} production-shaped writes` }
       case 'gateway': return r.skipped ? r.skipped : `boot 401: ${r.gateway?.boot?.answered_401_without_credential}; grants exit ${r.grants?.exit}; credential minted: ${r.mint?.minted}; MCP initialize ${r.mcp?.initialize?.status}; tools ${r.mcp?.tools_list?.count ?? '-'}`
       case 'rollback': return `physical recovery ${r.physical?.ms} ms, identical: ${r.physical?.identical}, rows equal: ${r.physical?.row_counts_equal}; logical pg_restore path: ${r.logical?.identical_after_normalising ? 'identical' : `drifts (${r.logical?.drift_lines?.missing} missing / ${r.logical?.drift_lines?.extra} extra lines)`}`
       default: return ''
@@ -495,21 +514,14 @@ function writeReport(ctx) {
     links.forEach((l, i) => L.push(`| ${i + 1} | \`${l.name}\` | ${l.ms} | ${(l.hot_tables ?? []).join(', ') || ''} | ${l.workload?.ops ?? ''} | ${l.workload?.errors ?? ''} | ${l.workload?.max_stmt_ms ?? ''} | ${l.workload?.max_lock_wait_ms ?? ''} |`))
   }
   const probes = docs.probes?.results?.probes ?? docs.probes?.error ? (docs.probes?.results?.probes ?? []) : []
-  if (probes.length) { L.push('', '## Production-shaped writes after the chain', '', '| Probe | Table | Shape | Result | Side effects |', '|---|---|---|---|---|'); for (const p of probes) L.push(`| ${p.name} | ${p.table} | ${p.shape} | ${p.ok ? 'ok' : `FAIL ${p.error?.code ?? ''} ${p.error?.message?.slice(0, 100) ?? ''}`} | ${JSON.stringify(p.side_effects)} |`) }
+  if (probes.length) { L.push('', '## Production-shaped writes after the chain', '', '| Probe | Table | Shape | Result | Side effects |', '|---|---|---|---|---|'); for (const p of probes) L.push(`| ${p.name} | ${p.table} | ${p.shape} | ${p.not_applicable ? `n/a on the synthetic baseline (${p.error?.message?.slice(0, 80) ?? 'column absent'}); decided by the production-schema run` : p.ok ? 'ok' : `FAIL ${p.error?.code ?? ''} ${p.error?.message?.slice(0, 100) ?? ''}`} | ${JSON.stringify(p.side_effects)} |`) }
   L.push('', '## What this does and does not prove', '', '- Proves: the reviewed chain applies in order on this schema, how long each link takes, what the concurrent workload saw on the hot tables, that production-shaped writes still succeed afterwards, that the real gateway binary boots and answers the MCP handshake against the migrated schema, that recovery is a restore of the pre-apply backup (timed, fingerprint-identical), and that a second apply is identical.', '- Does not prove: production data volume (schema only or invented rows), production\'s web workers (the workload is a stand-in for their write shapes), or anything about sending: nothing was sent.')
-  // dispatch isolation: staging has no provider, no credential and no path to production sending
-  const iso = {}
-  try {
-    iso.pg_net_requests_recorded = Number(q(ctx.url, 'select count(*) from net.http_request_queue'))
-    iso.cron_jobs_recorded = Number(q(ctx.url, 'select count(*) from cron.job'))
-    iso.send_queue_sent_or_delivered_after_seed = Number(q(ctx.url, "select count(*) from public.send_queue where queue_status in ('sent','delivered','sending') and (sent_at > (select min(created_at) from public.send_queue where queue_key like 'seed-q-%') + interval '1 minute' or queue_key not like 'seed-q-%' and queue_status in ('sent','delivered','sending'))"))
-    iso.ai_conversation_send_enabled = q(ctx.url, "select coalesce((select value from public.system_control where key = 'ai_conversation_send_enabled'), 'absent')")
-    iso.provider_env_present = Object.keys(process.env).filter((k) => /TEXTGRID|TWILIO|TELNYX|SMS_PROVIDER|SUPABASE_SERVICE_ROLE/i.test(k))
-    iso.server_listens_on = q(ctx.adminUrl, "select coalesce(host(inet_server_addr()), 'unix socket')")
-  } catch (e) { iso.error = String(e.message).slice(0, 200) }
+  // dispatch isolation: the facts recorded at the end of the gateway step (after apply, probes and the gateway, before the
+  // rollback replaced the database), else as the database stands now
+  const iso = docs.gateway?.results?.isolation_after_gateway ?? isolationFacts(ctx)
   L.push('', '## Dispatch isolation (nothing can reach production sending from here)', '', '| Check | Value |', '|---|---|')
   for (const [k, v] of Object.entries(iso)) L.push(`| ${k} | ${Array.isArray(v) ? (v.length ? v.join(', ') : 'none') : v} |`)
-  L.push('', `Expected: 0 pg_net requests, 0 cron jobs run, 0 rows sent after the seed, send switch false, no provider variable, loopback only. ${iso.pg_net_requests_recorded === 0 && iso.cron_jobs_recorded === 0 && iso.send_queue_sent_or_delivered_after_seed === 0 && iso.ai_conversation_send_enabled === 'false' && (iso.provider_env_present ?? []).length === 0 ? '**All as expected.**' : '**Review the values above.**'}`)
+  L.push('', `Expected: 0 pg_net requests, 0 cron jobs run, 0 rows created here that reached sent, send switch false, no provider variable, loopback only. ${iso.pg_net_requests_recorded === 0 && iso.cron_jobs_recorded === 0 && iso.rows_created_here_that_reached_sent === 0 && iso.ai_conversation_send_enabled === 'false' && (iso.provider_env_present ?? []).length === 0 ? '**All as expected.**' : '**Review the values above.**'}`)
   fs.writeFileSync(ctx.evidence('REPORT.md'), `${L.join('\n')}\n`, { mode: 0o600 })
   fs.writeFileSync(ctx.evidence('isolation.json'), `${JSON.stringify(iso, null, 2)}\n`, { mode: 0o600 })
   ctx.log('report', `wrote ${ctx.evidence('REPORT.md')}`)
