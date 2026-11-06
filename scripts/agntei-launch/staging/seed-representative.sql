@@ -3,8 +3,16 @@
 -- Idempotent: fixed ids, ON CONFLICT DO NOTHING. Switches that could send anything stay OFF.
 set local client_min_messages = warning;
 
+-- Rows the APPLIED links inserted in production (a schema-only dump carries no rows; the pending links' pretests and
+-- bodies read them): the singletons of agent_s3_persistence (store_head, retention_policy, runtime_limits, the LeadCommand
+-- org row) and of agent_research_ro (research_limits), at the migrations' own defaults. Production's tuned values, if any,
+-- are not reproduced: the rehearsal proves the chain's mechanics, not the limits.
+insert into agent.store_head (id) values (1) on conflict do nothing;
+insert into agent.retention_policy (id) values (1) on conflict do nothing;
+insert into agent.runtime_limits (id) values (1) on conflict do nothing;
+insert into agent.research_limits (id) values (1) on conflict do nothing;
 -- the org and its owner (the same user the launch verified in production; here it is just a row in a staging database)
-insert into agent.org (org_id, name) values ('00000000-0000-4000-8000-00000000a001', 'staging rehearsal org') on conflict do nothing;
+insert into agent.org (org_id, name) values ('00000000-0000-4000-8000-00000000a001', 'LeadCommand') on conflict do nothing;
 insert into agent.operator_membership (org_id, user_id, role, added_by)
 values ('00000000-0000-4000-8000-00000000a001', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6', 'owner', 'staging-seed')
 on conflict do nothing;
@@ -16,32 +24,32 @@ insert into public.system_control (key, value) values
   ('action_gateway_tiers', 'T1,T2')
 on conflict (key) do update set value = excluded.value, updated_at = now();
 
-insert into public.master_owners (master_owner_id, display_name) values
-  ('mo_seed_1', 'Pat Example'), ('mo_seed_2', 'Sam Sample'), ('mo_seed_3', 'Lee Placeholder'), ('mo_seed_4', 'Dana Optout'), ('mo_seed_5', 'Robin Longago')
+insert into public.master_owners (master_owner_id, master_key, upsert_key, display_name) values
+  ('mo_seed_1', 'mk_seed_1', 'mo_seed_1', 'Pat Example'), ('mo_seed_2', 'mk_seed_2', 'mo_seed_2', 'Sam Sample'), ('mo_seed_3', 'mk_seed_3', 'mo_seed_3', 'Lee Placeholder'), ('mo_seed_4', 'mk_seed_4', 'mo_seed_4', 'Dana Optout'), ('mo_seed_5', 'mk_seed_5', 'mo_seed_5', 'Robin Longago')
 on conflict do nothing;
 
-insert into public.prospects (prospect_id, master_owner_id, full_name, first_name, timezone) values
-  ('pr_seed_1', 'mo_seed_1', 'Pat Example', 'Pat', 'America/Chicago'),
-  ('pr_seed_2', 'mo_seed_2', 'Sam Sample', 'Sam', 'America/Chicago'),
-  ('pr_seed_3', 'mo_seed_3', 'Lee Placeholder', 'Lee', 'America/Chicago'),
-  ('pr_seed_4', 'mo_seed_4', 'Dana Optout', 'Dana', 'America/Chicago'),
-  ('pr_seed_5', 'mo_seed_5', 'Robin Longago', 'Robin', 'America/Chicago')
+insert into public.prospects (prospect_id, master_owner_id, master_key, upsert_key, canonical_prospect_id, source_slot, full_name, first_name, timezone) values
+  ('pr_seed_1', 'mo_seed_1', 'mk_seed_1', 'pr_seed_1', 'pr_seed_1', 0, 'Pat Example', 'Pat', 'America/Chicago'),
+  ('pr_seed_2', 'mo_seed_2', 'mk_seed_2', 'pr_seed_2', 'pr_seed_2', 0, 'Sam Sample', 'Sam', 'America/Chicago'),
+  ('pr_seed_3', 'mo_seed_3', 'mk_seed_3', 'pr_seed_3', 'pr_seed_3', 0, 'Lee Placeholder', 'Lee', 'America/Chicago'),
+  ('pr_seed_4', 'mo_seed_4', 'mk_seed_4', 'pr_seed_4', 'pr_seed_4', 0, 'Dana Optout', 'Dana', 'America/Chicago'),
+  ('pr_seed_5', 'mo_seed_5', 'mk_seed_5', 'pr_seed_5', 'pr_seed_5', 0, 'Robin Longago', 'Robin', 'America/Chicago')
 on conflict do nothing;
 
-insert into public.phones (phone_id, master_owner_id, canonical_e164, phone, phone_raw, phone_contact_status, wrong_number_at, primary_prospect_id, canonical_prospect_id, activity_status) values
-  ('ph_seed_1', 'mo_seed_1', '+18175550101', '+18175550101', '(817) 555-0101', 'active', null, 'pr_seed_1', 'pr_seed_1', 'active'),
-  ('ph_seed_2', 'mo_seed_2', '+18175550102', '+18175550102', '(817) 555-0102', 'active', null, 'pr_seed_2', 'pr_seed_2', 'active'),
-  ('ph_seed_3', 'mo_seed_3', '+18175550103', '+18175550103', '(817) 555-0103', 'wrong_number', now() - interval '30 days', 'pr_seed_3', 'pr_seed_3', 'inactive'),
-  ('ph_seed_4', 'mo_seed_4', '+18175550104', '+18175550104', '(817) 555-0104', 'opted_out', null, 'pr_seed_4', 'pr_seed_4', 'inactive'),
-  ('ph_seed_5', 'mo_seed_5', '+18175550105', '+18175550105', '(817) 555-0105', 'active', null, 'pr_seed_5', 'pr_seed_5', 'dormant')
+insert into public.phones (phone_id, master_owner_id, master_key, upsert_key, canonical_e164, phone, phone_raw, phone_contact_status, wrong_number_at, primary_prospect_id, canonical_prospect_id, activity_status) values
+  ('ph_seed_1', 'mo_seed_1', 'mk_seed_1', 'ph_seed_1', '+18175550101', '+18175550101', '(817) 555-0101', 'active', null, 'pr_seed_1', 'pr_seed_1', 'active'),
+  ('ph_seed_2', 'mo_seed_2', 'mk_seed_2', 'ph_seed_2', '+18175550102', '+18175550102', '(817) 555-0102', 'active', null, 'pr_seed_2', 'pr_seed_2', 'active'),
+  ('ph_seed_3', 'mo_seed_3', 'mk_seed_3', 'ph_seed_3', '+18175550103', '+18175550103', '(817) 555-0103', 'wrong_number', now() - interval '30 days', 'pr_seed_3', 'pr_seed_3', 'inactive'),
+  ('ph_seed_4', 'mo_seed_4', 'mk_seed_4', 'ph_seed_4', '+18175550104', '+18175550104', '(817) 555-0104', 'opted_out', null, 'pr_seed_4', 'pr_seed_4', 'inactive'),
+  ('ph_seed_5', 'mo_seed_5', 'mk_seed_5', 'ph_seed_5', '+18175550105', '+18175550105', '(817) 555-0105', 'active', null, 'pr_seed_5', 'pr_seed_5', 'dormant')
 on conflict do nothing;
 
-insert into public.properties (property_id, master_owner_id, property_address_full, property_address, property_address_city, property_address_state, property_address_zip, market, timezone, owner_name, owner_1_name, estimated_value, arv_estimate, property_type, beds, baths, sqft, year_built) values
-  ('prop_seed_1', 'mo_seed_1', '100 Main St, Fort Worth, TX 76106', '100 Main St', 'Fort Worth', 'TX', '76106', 'Fort Worth, TX', 'America/Chicago', 'Pat Example', 'Pat Example', 150000, 210000, 'SFR', 3, 2, 1450, 1962),
-  ('prop_seed_2', 'mo_seed_2', '200 Oak Ave, Fort Worth, TX 76110', '200 Oak Ave', 'Fort Worth', 'TX', '76110', 'Fort Worth, TX', 'America/Chicago', 'Sam Sample', 'Sam Sample', 120000, 175000, 'SFR', 2, 1, 1100, 1955),
-  ('prop_seed_3', 'mo_seed_3', '300 Pine Rd, Arlington, TX 76010', '300 Pine Rd', 'Arlington', 'TX', '76010', 'Fort Worth, TX', 'America/Chicago', 'Lee Placeholder', 'Lee Placeholder', 98000, 140000, 'SFR', 3, 1, 1200, 1971),
-  ('prop_seed_4', 'mo_seed_4', '400 Elm Ct, Dallas, TX 75216', '400 Elm Ct', 'Dallas', 'TX', '75216', 'Dallas, TX', 'America/Chicago', 'Dana Optout', 'Dana Optout', 110000, 160000, 'SFR', 3, 2, 1300, 1968),
-  ('prop_seed_5', 'mo_seed_5', '500 Cedar Ln, Dallas, TX 75227', '500 Cedar Ln', 'Dallas', 'TX', '75227', 'Dallas, TX', 'America/Chicago', 'Robin Longago', 'Robin Longago', 90000, 130000, 'SFR', 2, 1, 950, 1950)
+insert into public.properties (property_id, property_export_id, upsert_key, master_owner_id, property_address_full, property_address, property_address_city, property_address_state, property_address_zip, market, timezone, owner_name, owner_1_name, estimated_value, arv_estimate, property_type, total_bedrooms, total_baths, building_square_feet, year_built) values
+  ('prop_seed_1', 'prop_seed_1', 'prop_seed_1', 'mo_seed_1', '100 Main St, Fort Worth, TX 76106', '100 Main St', 'Fort Worth', 'TX', '76106', 'Fort Worth, TX', 'America/Chicago', 'Pat Example', 'Pat Example', 150000, 210000, 'SFR', 3, 2, 1450, 1962),
+  ('prop_seed_2', 'prop_seed_2', 'prop_seed_2', 'mo_seed_2', '200 Oak Ave, Fort Worth, TX 76110', '200 Oak Ave', 'Fort Worth', 'TX', '76110', 'Fort Worth, TX', 'America/Chicago', 'Sam Sample', 'Sam Sample', 120000, 175000, 'SFR', 2, 1, 1100, 1955),
+  ('prop_seed_3', 'prop_seed_3', 'prop_seed_3', 'mo_seed_3', '300 Pine Rd, Arlington, TX 76010', '300 Pine Rd', 'Arlington', 'TX', '76010', 'Fort Worth, TX', 'America/Chicago', 'Lee Placeholder', 'Lee Placeholder', 98000, 140000, 'SFR', 3, 1, 1200, 1971),
+  ('prop_seed_4', 'prop_seed_4', 'prop_seed_4', 'mo_seed_4', '400 Elm Ct, Dallas, TX 75216', '400 Elm Ct', 'Dallas', 'TX', '75216', 'Dallas, TX', 'America/Chicago', 'Dana Optout', 'Dana Optout', 110000, 160000, 'SFR', 3, 2, 1300, 1968),
+  ('prop_seed_5', 'prop_seed_5', 'prop_seed_5', 'mo_seed_5', '500 Cedar Ln, Dallas, TX 75227', '500 Cedar Ln', 'Dallas', 'TX', '75227', 'Dallas, TX', 'America/Chicago', 'Robin Longago', 'Robin Longago', 90000, 130000, 'SFR', 2, 1, 950, 1950)
 on conflict do nothing;
 
 insert into public.eg_property_facts (property_id, market, zip_code) values
@@ -49,21 +57,21 @@ insert into public.eg_property_facts (property_id, market, zip_code) values
 on conflict do nothing;
 
 insert into public.property_acquisition_scores (id, property_id, valuation_mid, investor_ceiling_mid, recommended_cash_offer, minimum_acceptable_offer, computed_at, decision_tier, comp_count) values
-  ('11111111-0000-4000-8000-000000000001', 'prop_seed_1', 150000, 105000, 92000, 85000, now() - interval '5 days', 'pursue', 6),
-  ('11111111-0000-4000-8000-000000000002', 'prop_seed_2', 120000, 84000, 74000, 68000, now() - interval '12 days', 'pursue', 5),
-  ('11111111-0000-4000-8000-000000000003', 'prop_seed_3', 98000, 68000, 60000, 55000, now() - interval '40 days', 'review', 4)
+  ('11111111-0000-4000-8000-000000000001', 'prop_seed_1', 150000, 105000, 92000, 85000, now() - interval '5 days', 'AUTO_RANGE_OFFER', 6),
+  ('11111111-0000-4000-8000-000000000002', 'prop_seed_2', 120000, 84000, 74000, 68000, now() - interval '12 days', 'AUTO_RANGE_OFFER', 5),
+  ('11111111-0000-4000-8000-000000000003', 'prop_seed_3', 98000, 68000, 60000, 55000, now() - interval '40 days', 'REVIEW_REQUIRED', 4)
 on conflict do nothing;
 
 insert into public.contact_property_resolution (id, property_id, contact_phone_e164, master_owner_id, prospect_id, contact_property_role, contact_origin) values
-  ('22222222-0000-4000-8000-000000000001', 'prop_seed_1', '+18175550101', 'mo_seed_1', 'pr_seed_1', 'confirmed_owner', 'staging-seed'),
-  ('22222222-0000-4000-8000-000000000002', 'prop_seed_2', '+18175550102', 'mo_seed_2', 'pr_seed_2', 'confirmed_owner', 'staging-seed'),
-  ('22222222-0000-4000-8000-000000000003', 'prop_seed_3', '+18175550103', 'mo_seed_3', 'pr_seed_3', 'confirmed_owner', 'staging-seed'),
-  ('22222222-0000-4000-8000-000000000004', 'prop_seed_4', '+18175550104', 'mo_seed_4', 'pr_seed_4', 'confirmed_owner', 'staging-seed'),
-  ('22222222-0000-4000-8000-000000000005', 'prop_seed_5', '+18175550105', 'mo_seed_5', 'pr_seed_5', 'confirmed_owner', 'staging-seed')
+  ('22222222-0000-4000-8000-000000000001', 'prop_seed_1', '+18175550101', 'mo_seed_1', 'pr_seed_1', 'confirmed_owner', 'contact_graph'),
+  ('22222222-0000-4000-8000-000000000002', 'prop_seed_2', '+18175550102', 'mo_seed_2', 'pr_seed_2', 'confirmed_owner', 'contact_graph'),
+  ('22222222-0000-4000-8000-000000000003', 'prop_seed_3', '+18175550103', 'mo_seed_3', 'pr_seed_3', 'confirmed_owner', 'contact_graph'),
+  ('22222222-0000-4000-8000-000000000004', 'prop_seed_4', '+18175550104', 'mo_seed_4', 'pr_seed_4', 'confirmed_owner', 'contact_graph'),
+  ('22222222-0000-4000-8000-000000000005', 'prop_seed_5', '+18175550105', 'mo_seed_5', 'pr_seed_5', 'confirmed_owner', 'contact_graph')
 on conflict do nothing;
 
 insert into public.textgrid_numbers (id, phone_number, status, health_state, market) values
-  ('33333333-0000-4000-8000-000000000001', '+18175550100', 'active', 'healthy', 'Fort Worth, TX')
+  ('33333333-0000-4000-8000-000000000001', '+18175550100', 'active', 'active_healthy', 'Fort Worth, TX')
 on conflict do nothing;
 
 -- five conversations: an active negotiation, an overlooked reply, a wrong number, an opt-out, and one 400 days old
@@ -131,12 +139,12 @@ insert into public.campaign_target_graph (graph_id, property_id, canonical_e164,
   ('g_seed_5', 'prop_seed_5', '+18175550105', 'Dallas, TX', 'TX', true, false, false, true, true, null)
 on conflict do nothing;
 
-insert into public.seller_offers (id, offer_id, thread_key, purchase_price, status, created_at, sent_at, property_id, master_owner_id, offer_version, offer_type, direction, recommended_offer, strategy, send_queue_row_id, source_message_event_id) values
-  ('aaaaaaaa-0000-4000-8000-000000000001', 'offer_seed_1', '+18175550101', 90000, 'sent', now() - interval '3 days', now() - interval '3 days', 'prop_seed_1', 'mo_seed_1', 1, 'cash', 'outbound', 92000, 'cash_close_30', '66666666-0000-4000-8000-000000000002', '55555555-0000-4000-8000-000000000015')
+insert into public.seller_offers (id, offer_id, thread_key, purchase_price, terms_hash, status, created_at, sent_at, property_id, master_owner_id, offer_version, offer_type, direction, recommended_offer, strategy, send_queue_row_id, source_message_event_id) values
+  ('aaaaaaaa-0000-4000-8000-000000000001', 'offer_seed_1', '+18175550101', 90000, 'seed-terms-1', 'active', now() - interval '3 days', now() - interval '3 days', 'prop_seed_1', 'mo_seed_1', 1, 'cash', 'outbound', 92000, 'cash_close_30', '66666666-0000-4000-8000-000000000002', '55555555-0000-4000-8000-000000000015')
 on conflict do nothing;
 
 insert into public.acquisition_opportunities (id, dedupe_key, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status, priority, temperature, estimated_value, arv, asking_price, current_offer, next_action, next_action_due, latest_intent, market, stage_entered_at, last_activity_at, last_contact_at, master_owner_id, active_offer_id) values
   ('bbbbbbbb-0000-4000-8000-000000000001', 'seed-opp-1', 'prop_seed_1', '+18175550101', 'offer', 'active', 'high', 'hot', 150000, 210000, 110000, 90000, 'answer the counter at 110', now() + interval '1 day', 'need_more_money', 'Fort Worth, TX', now() - interval '3 days', now() - interval '2 days', now() - interval '2 days', 'mo_seed_1', 'offer_seed_1'),
-  ('bbbbbbbb-0000-4000-8000-000000000002', 'seed-opp-2', 'prop_seed_2', '+18175550102', 'ownership_check', 'active', 'medium', 'warm', 120000, 175000, null, null, 'reply to the roof question', now() - interval '10 days', 'ownership_confirmed', 'Fort Worth, TX', now() - interval '12 days', now() - interval '11 days', now() - interval '11 days', 'mo_seed_2', null),
-  ('bbbbbbbb-0000-4000-8000-000000000003', 'seed-opp-3', 'prop_seed_5', '+18175550105', 'asking_price', 'stale', 'low', 'cold', 90000, 130000, 95000, null, 'old conversation: resume as old', null, 'asking_price', 'Dallas, TX', now() - interval '401 days', now() - interval '400 days', now() - interval '400 days', 'mo_seed_5', null)
+  ('bbbbbbbb-0000-4000-8000-000000000002', 'seed-opp-2', 'prop_seed_2', '+18175550102', 'ownership_confirmation', 'active', 'medium', 'warm', 120000, 175000, null, null, 'reply to the roof question', now() - interval '10 days', 'ownership_confirmed', 'Fort Worth, TX', now() - interval '12 days', now() - interval '11 days', now() - interval '11 days', 'mo_seed_2', null),
+  ('bbbbbbbb-0000-4000-8000-000000000003', 'seed-opp-3', 'prop_seed_5', '+18175550105', 'asking_price', 'nurture', 'low', 'cold', 90000, 130000, 95000, null, 'old conversation: resume as old', null, 'asking_price', 'Dallas, TX', now() - interval '401 days', now() - interval '400 days', now() - interval '400 days', 'mo_seed_5', null)
 on conflict do nothing;

@@ -59,3 +59,51 @@ nothing left the database (no pg_net request recorded, no cron job run, no row s
 
 Does not prove: production data volume (schema only, or invented rows); production's web workers themselves (the workload
 is a stand-in for their write shapes); anything about sending.
+
+## Production-schema run, 2026-11-06 (evidence `~/agntei-staging/evidence-prod/`)
+
+The owner's schema-only dump (`prod-schema-20261106-0139.dump`, 4.5 MB, 6,400 archive entries, 493 tables in 23 schemas, no
+table data, verified by `verify-schema-dump.py`) restored into the stand-ins: 500 tables, 1,277 functions, 126 triggers,
+247 policies. Six archive entries do not restore and are recorded: the platform's own event triggers (`pgrst_ddl_watch`,
+`pgrst_drop_watch`, `issue_pg_net_access`, `issue_pg_graphql_access`, `issue_pg_cron_access`, `issue_graphql_placeholder`),
+whose functions live in the excluded `extensions` schema. The ACL pass reports 15 entries for PostGIS 3.3 functions that
+3.5 no longer ships (`lockrow`, `unlockrows`, `enablelongtransactions`, ...), harmless.
+
+| Step | Result |
+|---|---|
+| review (before) | 4 applied (`durable_run_locks`, `agent_s3_persistence`, `agent_research_ro`, `intel_runtime`), 24 pending, 0 superseded, no drift, order intact. Identical to the read-only review of production itself the same morning. |
+| apply | 24 links in 55.5 s through `apply-one` (pretest read-only, one transaction, read back). Hot links under the production-shaped workload (two connections, 0 errors): `action_gateway_t34` 3.6 s, max statement 2.95 s, max lock wait 2.87 s on `seller_offers`; `record_sync` 4.0 s, max statement 3.23 s, max lock wait 3.14 s on `inbox_thread_state` / `acquisition_opportunities` / `seller_offers`; the other four hot links 0 ms lock wait, statements under 35 ms. |
+| probes | 9 of 11 production write shapes ok, 0 failed, 2 gated off (below) |
+| gateway | the real `leadcommand-action-mcp` booted against the migrated production schema (boot self-check passed, 401 without a credential); `grants.mjs --apply` 0; credential minted; MCP initialize 200, tools/list 3 |
+| isolation | pg_net requests 0, cron jobs 0, 599 rows created by the workload and probes, 0 reached sent, send switch false, no provider variable, loopback only |
+| rollback | physical recovery 6.6 s, fingerprint identical; logical `pg_restore` into the stand-ins: identical after normalising (28 restore errors, the platform entries above) |
+| reapply | 24 links in 34.6 s, fingerprint equal to the first apply |
+
+### What the production schema taught the chain (all committed with this run)
+
+1. **Chain order reconciled to production.** Production carries `agent_research_ro` and `intel_runtime` without
+   `payload_clean_opaque_ids`, which the manifest listed before them; its header requires only `agent_s3_persistence`.
+   `chain.mjs` now places it after `intel_runtime`; the manifest was regenerated; the chain tests pass (7/7). Without this the
+   reviewer reported a broken order and `apply-one` refused, on staging and on production alike.
+2. **Link 20 read "partial 2/232".** Its two egress functions (`lc_reachable_egress_indirect`, `lc_egress_platform_allowlists`)
+   are already live in production, byte-identical, from the reader migration `PROPOSED_20261019150000_lc_mcp_reader`. The
+   reviewer now names them as pre-existing (`PRE_EXISTING_BODIES`) and reads the link as absent; the link re-creates them with
+   `CREATE OR REPLACE`.
+3. **Link 6's pretest wrote.** `runtime_kind_limits_event_budget_pretest.sql` reproduced its defect with an UPDATE, which the
+   launch's read-only pretest refuses (`25006`). The pretest now skips the reproduction under a read-only transaction with a
+   notice; the migration test runner still reproduces it. The only pending pretest with a write.
+4. **Rows the applied links seeded.** A schema-only dump carries no rows, but the pending pretests read the singletons the
+   applied links inserted (`agent.runtime_limits` row 1, and the chain's bodies read `store_head`, `retention_policy`,
+   `research_limits`, the LeadCommand org row). The seed inserts them at the migrations' defaults.
+5. **Two more stand-ins.** `auth.users` and `auth.role()` (13 foreign keys and 2 policies in `public` depend on them), and
+   `supabase_functions.http_request()` with its `hooks` table, because production's `message_events` carries the Database
+   Webhook trigger `message_events_to_podio_sync` (a POST to the Vercel app on insert). The dump restores that trigger
+   **disabled**, exactly as production has it (`tgenabled = D`), so no request is recorded on staging either.
+6. **The three previously undecidable write checks, decided.** `acquisition_opportunities` archive and unarchive: production's
+   code names `archived_*` only after `lead-visibility-gate.js` finds the columns; they come from
+   `PROPOSED_20261005120000_lead_visibility`, which is not applied in production and is outside the chain. Absent before and
+   after the chain: gated off on staging exactly as in production, reported as such. The `seller_offers` insert probe was
+   dropped: no production code path inserts `seller_offers` (release/cloudflare-production reads them only; rows come through
+   the chain's gateway offer path, covered by its own tests).
+
+Not proven here, unchanged: production data volume; production's own workers; anything about sending.

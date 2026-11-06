@@ -47,6 +47,49 @@ set role supabase_admin;
 create extension if not exists pg_net;
 reset role;
 
+-- auth.users and auth.role(): production's public schema carries 13 foreign keys to auth.users(id) (billing, profiles,
+-- organizations, operators, ...) and two policies call auth.role(); the test shim has auth.uid() only. No rows.
+create table if not exists auth.users (id uuid primary key, email text, created_at timestamptz not null default now());
+create or replace function auth.role() returns text language sql stable as $$
+  select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+$$;
+grant execute on function auth.role() to anon, authenticated, service_role;
+
+-- supabase_functions (Supabase Database Webhooks): production's message_events carries the trigger
+-- message_events_to_podio_sync AFTER INSERT -> supabase_functions.http_request(<vercel url>, 'POST', ...). The gateway
+-- migration's egress self-check classifies that function as an egress leaf (its name) and reports any role that can
+-- write a table it fires on; staging must carry it so the production-schema run judges the same facts. The stand-in has
+-- the platform's shape (owner supabase_functions_admin, SECURITY DEFINER, enqueues through net.http_post, records the
+-- hook) and, with the pg_net stand-in, every request stays in net.http_request_queue: nothing leaves.
+create schema if not exists supabase_functions authorization supabase_functions_admin;
+grant usage on schema supabase_functions to postgres, anon, authenticated, service_role;
+set role supabase_functions_admin;
+create table if not exists supabase_functions.hooks (id bigserial primary key, hook_table_id integer not null, hook_name text not null, created_at timestamptz not null default now(), request_id bigint);
+create or replace function supabase_functions.http_request() returns trigger language plpgsql security definer set search_path to 'supabase_functions' as $f$
+declare
+  request_id bigint; payload jsonb; url text := TG_ARGV[0]::text; method text := TG_ARGV[1]::text;
+  headers jsonb default '{}'::jsonb; params jsonb default '{}'::jsonb; timeout_ms integer default 1000;
+begin
+  if url is null or url = 'null' then raise exception 'url argument is missing'; end if;
+  if method is null or method = 'null' then raise exception 'method argument is missing'; end if;
+  if TG_ARGV[2] is null or TG_ARGV[2] = 'null' then headers = '{"Content-Type": "application/json"}'::jsonb; else headers = TG_ARGV[2]::jsonb; end if;
+  if TG_ARGV[3] is null or TG_ARGV[3] = 'null' then params = '{}'::jsonb; else params = TG_ARGV[3]::jsonb; end if;
+  if TG_ARGV[4] is null or TG_ARGV[4] = 'null' then timeout_ms = 1000; else timeout_ms = TG_ARGV[4]::integer; end if;
+  case
+    when method = 'GET' then select net.http_get(url, params, headers, timeout_ms) into request_id;
+    when method = 'POST' then
+      payload = jsonb_build_object('old_record', OLD, 'record', NEW, 'type', TG_OP, 'table', TG_TABLE_NAME, 'schema', TG_TABLE_SCHEMA);
+      select net.http_post(url, payload, params, headers, timeout_ms) into request_id;
+    else raise exception 'method argument % is invalid', method;
+  end case;
+  insert into supabase_functions.hooks (hook_table_id, hook_name, request_id) values (TG_RELID, TG_NAME, request_id);
+  return new;
+end $f$;
+reset role;
+grant all on table supabase_functions.hooks to postgres, anon, authenticated, service_role;
+grant usage, select, update on sequence supabase_functions.hooks_id_seq to postgres, anon, authenticated, service_role;
+grant execute on function supabase_functions.http_request() to postgres, anon, authenticated, service_role;
+
 -- pg_cron (schema cron): the stand-in records schedules and runs nothing; its functions are not executable by PUBLIC
 create schema if not exists cron;
 create table if not exists cron.job (jobid bigserial primary key, jobname text, schedule text, command text, nodename text default 'localhost', nodeport int default 5432, database text default current_database(), username text default current_user, active boolean default true);

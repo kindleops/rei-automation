@@ -164,6 +164,7 @@ function restoreSchemaDump(ctx, url, file, excluded) {
   const a0 = Date.now()
   const ra = spawnSync(tool('pg_restore'), ['--no-owner', '-L', aclFile, '-d', url, file], { encoding: 'utf8', env: env(), maxBuffer: 1024 * 1024 * 1024 })
   fs.rmSync(aclFile, { force: true })
+  fs.writeFileSync(ctx.evidence('restore.acl.stderr.log'), ra.stderr || '', { mode: 0o600 })
   const aclPass = { entries: acl.length, ms: ms(a0), exit: ra.status, ...summarizeRestoreErrors(ra.stderr) }
   ctx.log('create', `ACL pass: ${acl.length} entries, ${aclPass.errors} error(s)`)
   return { toc_entries: toc.entries.length, roles_named_by_archive: grantees, roles_created: created, restore: data, acl_pass: aclPass }
@@ -338,6 +339,10 @@ async function cmdProbes(ctx) {
       const counts = async () => { const o = {}; for (const t of SIDE_EFFECT_TABLES) if (present[t]) o[t] = Number((await c.query(`select count(*) from ${t}`)).rows[0].count); return o }
       for (const p of PROBES) {
         const before = await counts(); const t0 = Date.now(); let error = null; let rows = null
+        // a probe gated in production's own code on columns a migration outside the chain adds: absent before and after the chain, it is gated off here as there
+        const missing = []
+        for (const col of p.requires ?? []) { const [sch, tbl, name] = col.split('.'); if (!(await c.query('select 1 from information_schema.columns where table_schema = $1 and table_name = $2 and column_name = $3', [sch, tbl, name])).rowCount) missing.push(col) }
+        if (missing.length) { results.push({ name: p.name, shape: p.shape, table: p.table, ok: true, gated: { missing, by: p.gatedBy ?? null }, ms: ms(t0), rows: null, error: null, side_effects: {}, expect: p.expect ?? 'ok' }); ctx.log('probes', `gated ${p.name}: ${missing.join(', ')} absent before and after the chain (${p.gatedBy ?? 'gated in code'})`); continue }
         try { await c.query('begin'); const r = await c.query(p.sql, p.params ?? []); rows = r.rowCount; await c.query('commit') } catch (e) { await c.query('rollback').catch(() => {}); error = { code: e.code, message: String(e.message).slice(0, 300) } }
         const after = await counts()
         const sideEffects = Object.fromEntries(Object.keys(after).filter((t) => after[t] !== before[t]).map((t) => [t, after[t] - before[t]]))
@@ -501,7 +506,7 @@ function writeReport(ctx) {
       case 'snapshot': return `${r.bytes} bytes in ${r.dump_ms} ms; fingerprint ${r.fingerprint}`
       case 'review': return `${(r.rows ?? []).filter((x) => x.status === 'applied').length} applied, ${(r.pending ?? []).length} pending, ${(r.superseded ?? []).length} superseded, drift ${(r.drift ?? []).length}`
       case 'apply': case 'reapply': return `${(r.links ?? []).length} links in ${r.total_ms} ms; fingerprint ${r.fingerprint}${s.step === 'reapply' ? `; equals first apply: ${r.equals_first_apply}` : ''}`
-      case 'probes': { const ps = r.probes ?? []; const na = ps.filter((p) => p.not_applicable).length; return `${ps.filter((p) => p.ok && !p.not_applicable).length} ok, ${ps.filter((p) => !p.ok).length} failed${na ? `, ${na} n/a on the synthetic baseline` : ''} of ${ps.length} production-shaped writes` }
+      case 'probes': { const ps = r.probes ?? []; const na = ps.filter((p) => p.not_applicable).length; const g = ps.filter((p) => p.gated).length; return `${ps.filter((p) => p.ok && !p.not_applicable && !p.gated).length} ok, ${ps.filter((p) => !p.ok).length} failed${na ? `, ${na} n/a on the synthetic baseline` : ''}${g ? `, ${g} gated off in production's code (columns of a migration outside the chain)` : ''} of ${ps.length} production-shaped writes` }
       case 'gateway': return r.skipped ? r.skipped : `boot 401: ${r.gateway?.boot?.answered_401_without_credential}; grants exit ${r.grants?.exit}; credential minted: ${r.mint?.minted}; MCP initialize ${r.mcp?.initialize?.status}; tools ${r.mcp?.tools_list?.count ?? '-'}`
       case 'rollback': return `physical recovery ${r.physical?.ms} ms, identical: ${r.physical?.identical}, rows equal: ${r.physical?.row_counts_equal}; logical pg_restore path: ${r.logical?.identical_after_normalising ? 'identical' : `drifts (${r.logical?.drift_lines?.missing} missing / ${r.logical?.drift_lines?.extra} extra lines)`}`
       default: return ''
@@ -514,7 +519,7 @@ function writeReport(ctx) {
     links.forEach((l, i) => L.push(`| ${i + 1} | \`${l.name}\` | ${l.ms} | ${(l.hot_tables ?? []).join(', ') || ''} | ${l.workload?.ops ?? ''} | ${l.workload?.errors ?? ''} | ${l.workload?.max_stmt_ms ?? ''} | ${l.workload?.max_lock_wait_ms ?? ''} |`))
   }
   const probes = docs.probes?.results?.probes ?? docs.probes?.error ? (docs.probes?.results?.probes ?? []) : []
-  if (probes.length) { L.push('', '## Production-shaped writes after the chain', '', '| Probe | Table | Shape | Result | Side effects |', '|---|---|---|---|---|'); for (const p of probes) L.push(`| ${p.name} | ${p.table} | ${p.shape} | ${p.not_applicable ? `n/a on the synthetic baseline (${p.error?.message?.slice(0, 80) ?? 'column absent'}); decided by the production-schema run` : p.ok ? 'ok' : `FAIL ${p.error?.code ?? ''} ${p.error?.message?.slice(0, 100) ?? ''}`} | ${JSON.stringify(p.side_effects)} |`) }
+  if (probes.length) { L.push('', '## Production-shaped writes after the chain', '', '| Probe | Table | Shape | Result | Side effects |', '|---|---|---|---|---|'); for (const p of probes) L.push(`| ${p.name} | ${p.table} | ${p.shape} | ${p.not_applicable ? `n/a on the synthetic baseline (${p.error?.message?.slice(0, 80) ?? 'column absent'}); decided by the production-schema run` : p.gated ? `gated off, as in production: ${p.gated.missing.join(', ')} absent before and after the chain (${p.gated.by})` : p.ok ? 'ok' : `FAIL ${p.error?.code ?? ''} ${p.error?.message?.slice(0, 100) ?? ''}`} | ${JSON.stringify(p.side_effects)} |`) }
   L.push('', '## What this does and does not prove', '', '- Proves: the reviewed chain applies in order on this schema, how long each link takes, what the concurrent workload saw on the hot tables, that production-shaped writes still succeed afterwards, that the real gateway binary boots and answers the MCP handshake against the migrated schema, that recovery is a restore of the pre-apply backup (timed, fingerprint-identical), and that a second apply is identical.', '- Does not prove: production data volume (schema only or invented rows), production\'s web workers (the workload is a stand-in for their write shapes), or anything about sending: nothing was sent.')
   // dispatch isolation: the facts recorded at the end of the gateway step (after apply, probes and the gateway, before the
   // rollback replaced the database), else as the database stands now

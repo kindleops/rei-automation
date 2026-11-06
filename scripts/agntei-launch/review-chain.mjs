@@ -22,6 +22,16 @@ export const ALTERNATIVE_BODIES = Object.freeze({
     { source: 'PROPOSED_20261020120000_research_event_budget_ceilings (Package A, production)', md5: '5d8d3c3c88987a43bf72d2929467a7f4' },
   ],
 })
+// Two of the gateway migration's function bodies are ALREADY LIVE in production, byte-identical, from the reader migration
+// PROPOSED_20261019150000_lc_mcp_reader (the only other reviewed file that defines them; applied for the LeadCommand reader).
+// Read-only review 2026-11-06: link 20 showed "partial 2/232" with none of its objects present. A body that a reviewed
+// migration outside the chain produced identically is not evidence of a half-applied link: when NONE of a link's objects
+// exist and every present body is one of these, the link reads absent (and the bodies are listed as preexisting).
+// The link re-creates them with CREATE OR REPLACE, so applying it is unaffected.
+export const PRE_EXISTING_BODIES = Object.freeze({
+  'public.lc_reachable_egress_indirect(p_role oid)': { source: 'PROPOSED_20261019150000_lc_mcp_reader', md5: '062cbd3dc6f315f8ac3aec0be8bf61e8' },
+  'public.lc_egress_platform_allowlists()': { source: 'PROPOSED_20261019150000_lc_mcp_reader', md5: '84d5ddeeab838c97a208acbcf2bdb82d' },
+})
 export const SUPERSEDED = Object.freeze({
   PROPOSED_20261013161000_conversation_decide_event_budget: { when: PACKAGE_A_CEILING_FN, by: 'PROPOSED_20261020120000_research_event_budget_ceilings (Package A)' },
 })
@@ -46,9 +56,11 @@ export function review(manifest, live) {
     const total = objs.length + fns.length; const ok = present.length + fnOk
     const drift = fns.filter((f) => f.state === 'drift').map((f) => f.fn)
     let status = total === 0 ? 'nothing-to-check' : ok === total ? 'applied' : ok === 0 ? 'absent' : 'partial'
+    const preexisting = fns.filter((f) => f.state === 'at-or-after' && PRE_EXISTING_BODIES[f.fn]?.md5 === live.get(`function:${f.fn}`)).map((f) => f.fn)
+    if (status === 'partial' && present.length === 0 && fnOk === preexisting.length) status = 'absent'
     const sup = SUPERSEDED[m.name]
     if (sup && live.has(sup.when)) status = 'superseded'
-    return { name: m.name, status, checked: total, present: ok, drift, missing: [...objs.filter((k) => !live.has(k)), ...fns.filter((f) => f.state !== 'at-or-after').map((f) => `function:${f.fn} (${f.state}${f.live ? `, live version from ${f.live}` : ''})`)].slice(0, 12), roles: m.roles, rollback: m.rollback }
+    return { name: m.name, status, checked: total, present: ok, preexisting, drift, missing: [...objs.filter((k) => !live.has(k)), ...fns.filter((f) => f.state !== 'at-or-after').map((f) => `function:${f.fn} (${f.state}${f.live ? `, live version from ${f.live}` : ''})`)].slice(0, 12), roles: m.roles, rollback: m.rollback }
   })
   const done = (r) => r.status === 'applied' || r.status === 'superseded'
   const firstGap = rows.findIndex((r) => !done(r))

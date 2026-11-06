@@ -8,7 +8,6 @@ export const CHAIN = [
   { kind: 'migration', file: 'apps/api/supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql' },
   { kind: 'pretest', file: 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence_pretest.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261010120000_agent_s3_persistence.sql' },
-  { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261019120000_payload_clean_opaque_ids.sql' },
   { kind: 'pretest', file: 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro_pretest.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261010130000_agent_research_ro.sql' },
   { kind: 'baseline', file: 'scripts/db/fixtures/send_queue_live_baseline.sql' },
@@ -16,6 +15,9 @@ export const CHAIN = [
   { kind: 'baseline', file: 'scripts/db/fixtures/automation_holds_public_baseline.sql' },
   { kind: 'baseline', file: 'scripts/db/fixtures/legacy_conversation_turns_baseline.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql' },
+  // payload_clean_opaque_ids replaces one function body and requires only agent_s3_persistence (its header). Production
+  // (read-only review 2026-11-06) carries agent_research_ro and intel_runtime without it, so it follows them here.
+  { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261019120000_payload_clean_opaque_ids.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261013161000_conversation_decide_event_budget.sql' },
   { kind: 'migration', file: 'supabase/migrations/PROPOSED_20261013120000_agent_capabilities.sql' },
