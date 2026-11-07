@@ -210,7 +210,7 @@ async function cmdCreate(ctx) {
     q(ctx.adminUrl, `create database ${ctx.db} template template0 encoding 'UTF8'`)
     const url = ctx.url
     platformStubs(ctx, url)
-    const res = { source: ctx.schemaDump ? { kind: 'schema-dump', file: ctx.schemaDump, sha256: sha256(fs.readFileSync(ctx.schemaDump)), bytes: fs.statSync(ctx.schemaDump).size } : { kind: 'synthetic' } }
+    const res = { source: ctx.schemaDump ? { kind: 'schema-dump', file: ctx.schemaDump, sha256: sha256(fs.readFileSync(fs.statSync(ctx.schemaDump).isDirectory() ? path.join(ctx.schemaDump, 'toc.dat') : ctx.schemaDump)), bytes: fs.statSync(ctx.schemaDump).isDirectory() ? fs.readdirSync(ctx.schemaDump).reduce((n, f) => n + fs.statSync(path.join(ctx.schemaDump, f)).size, 0) : fs.statSync(ctx.schemaDump).size, format: fs.statSync(ctx.schemaDump).isDirectory() ? 'directory' : 'file' } : { kind: 'synthetic' } }
     if (ctx.schemaDump) Object.assign(res, restoreSchemaDump(ctx, url, ctx.schemaDump, [...DEFAULT_EXCLUDED_SCHEMAS, 'cron', 'extensions']))
     else Object.assign(res, buildSynthetic(ctx, url))
     res.schemas = q(url, "select coalesce(string_agg(nspname, ',' order by nspname), '') from pg_namespace where nspname !~ '^pg_' and nspname <> 'information_schema'").split(',').filter(Boolean)

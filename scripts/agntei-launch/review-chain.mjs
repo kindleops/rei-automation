@@ -32,6 +32,12 @@ export const PRE_EXISTING_BODIES = Object.freeze({
   'public.lc_reachable_egress_indirect(p_role oid)': { source: 'PROPOSED_20261019150000_lc_mcp_reader', md5: '062cbd3dc6f315f8ac3aec0be8bf61e8' },
   'public.lc_egress_platform_allowlists()': { source: 'PROPOSED_20261019150000_lc_mcp_reader', md5: '84d5ddeeab838c97a208acbcf2bdb82d' },
 })
+// Columns a link's REVIEWED ROLLBACK keeps on purpose (its header: "the canonical columns it added STAY when any row holds
+// a value (business data)"). After that rollback the link has none of its other objects: when every object still present
+// is one of these, the link reads absent (the kept columns are listed). Re-applying it uses ADD COLUMN IF NOT EXISTS.
+export const ROLLBACK_KEPT_COLUMNS = Object.freeze({
+  PROPOSED_20261101120000_record_sync: ['column:public.acquisition_opportunities.archived_at', 'column:public.acquisition_opportunities.archive_reason'],
+})
 export const SUPERSEDED = Object.freeze({
   PROPOSED_20261013161000_conversation_decide_event_budget: { when: PACKAGE_A_CEILING_FN, by: 'PROPOSED_20261020120000_research_event_budget_ceilings (Package A)' },
 })
@@ -58,6 +64,8 @@ export function review(manifest, live) {
     let status = total === 0 ? 'nothing-to-check' : ok === total ? 'applied' : ok === 0 ? 'absent' : 'partial'
     const preexisting = fns.filter((f) => f.state === 'at-or-after' && PRE_EXISTING_BODIES[f.fn]?.md5 === live.get(`function:${f.fn}`)).map((f) => f.fn)
     if (status === 'partial' && present.length === 0 && fnOk === preexisting.length) status = 'absent'
+    const kept = ROLLBACK_KEPT_COLUMNS[m.name] ?? []
+    if (status === 'partial' && present.length > 0 && present.every((k) => kept.includes(k)) && fnOk === preexisting.length) status = 'absent'
     const sup = SUPERSEDED[m.name]
     if (sup && live.has(sup.when)) status = 'superseded'
     return { name: m.name, status, checked: total, present: ok, preexisting, drift, missing: [...objs.filter((k) => !live.has(k)), ...fns.filter((f) => f.state !== 'at-or-after').map((f) => `function:${f.fn} (${f.state}${f.live ? `, live version from ${f.live}` : ''})`)].slice(0, 12), roles: m.roles, rollback: m.rollback }
