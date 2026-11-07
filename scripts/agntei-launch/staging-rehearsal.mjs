@@ -368,6 +368,9 @@ const waitHttp = async (url, { method = 'GET', ok = (s) => s < 500, tries = 100 
 async function cmdGateway(ctx) {
   return runStep(ctx, 'gateway', async (doc) => {
     if (!ctx.postgrest) { doc.status = 'skipped'; ctx.log('gateway', 'no PostgREST binary (--postgrest): skipped'); return { skipped: 'no PostgREST binary' } }
+    // --chain-applied-live (the guided cutover's rehearsal applied the chain itself): the precondition is read from the
+    // database now instead of this tool's own apply evidence: every link applied, no drift, order intact
+    if (flag('chain-applied-live')) { const r = await reviewNow(ctx); if (r.pending.length || r.drift.length || r.orderBroken) throw new Error(`gateway: the chain is not fully applied in ${ctx.db} (pending ${r.pending.length}, drift ${r.drift.length}${r.orderBroken ? ', order broken' : ''})`); ctx.log('gateway', `chain read live: ${r.rows.filter((x) => x.status === 'applied').length} applied, none pending, no drift`) }
     // the repository's own Supabase edge stand-in (tests): a real PostgREST as authenticator, /rest/v1 and /graphql/v1 routed as Supabase routes them
     const { startSupabaseEdge, mintJwt } = await import(path.join(ROOT, 'mcp/leadcommand-mcp/test/support/supabase-edge.mjs'))
     const u = new URL(ctx.url); const dbName = u.pathname.slice(1); const pgHost = u.hostname; const pgPort = u.port || '5432'
@@ -423,7 +426,7 @@ async function cmdGateway(ctx) {
       await edge.stop().catch(() => {})
       await new Promise((r) => setTimeout(r, 500))
     }
-  }, ['apply'])
+  }, flag('chain-applied-live') ? [] : ['apply'])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────── rollback (recovery = restore the pre-apply backup) and re-apply

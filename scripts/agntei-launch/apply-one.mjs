@@ -33,6 +33,11 @@ export async function applyOne(connectionString, name, { manifest = JSON.parse(f
       try { await c.query(driverSql(fs.readFileSync(path.join(ROOT, m.pretest), 'utf8'), m.pretest)); log(`pretest ${path.basename(m.pretest)}: passed (read-only)`) } finally { await c.query('rollback') }
     }
     await c.query('begin')
+    // a production cutover never queues writes behind a lock it cannot get: within this transaction only, a lock wait
+    // longer than LC_APPLY_LOCK_TIMEOUT_MS (default 15 s, about five times the worst wait rehearsed on the hot tables)
+    // fails the migration, which rolls back whole; statements are bounded too
+    const lockMs = Math.max(1000, Number(process.env.LC_APPLY_LOCK_TIMEOUT_MS ?? 15000) || 15000)
+    await c.query(`set local lock_timeout = ${lockMs}`); await c.query(`set local statement_timeout = ${Math.max(60000, lockMs * 8)}`)
     try { await c.query(driverSql(sql.toString('utf8'), m.file)); await c.query('commit'); log(`applied ${name} in one transaction`) } catch (e) { await c.query('rollback'); throw new Error(`${name} rolled back: ${e.message}`) }
   } finally { await c.end() }
   const after = review(manifest, (await liveCatalog(connectionString)).live)
