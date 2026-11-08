@@ -113,8 +113,9 @@ const REQUIRED_ENV = {
   PODIO_PASSWORD,
 };
 
+// An explicitly disabled integration is not missing credentials: say nothing (the Action Gateway runs this way).
 for (const [key, value] of Object.entries(REQUIRED_ENV)) {
-  if (!value) {
+  if (!value && !isPodioExplicitlyDisabled()) {
     console.warn(`[Podio] Missing required env var: ${key}. Podio integration will be disabled.`);
   }
 }
