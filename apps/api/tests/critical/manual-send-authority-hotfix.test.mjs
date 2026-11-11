@@ -13,6 +13,12 @@
  *   authenticated human manual SMS    -> manual_send_mode=enabled + a SERVER-SIDE operator principal
  *   true global shutdown              -> global_send_shutdown_at denies BOTH
  *
+ * REVISED 2026-11-11 (send-authorization fix, founder decision): the emergency
+ * stop (queue_emergency_stop_at) now denies the authenticated operator too, in
+ * the manual authority AND at the textgrid last hop. Paused automation without
+ * a stop (processor off, execution stopped, campaigns paused) still lets the
+ * operator reply.
+ *
  * and the adversarial half: nothing a request can carry manufactures a principal,
  * the adapter no longer excuses the brake on metadata, compliance still blocks,
  * duplicates still collapse to one provider call, and failures are recorded as
@@ -89,6 +95,17 @@ const AUTOMATION_HEALTHY = Object.freeze({
   campaign_mode: "live_limited",
   manual_send_mode: "enabled",
   global_send_shutdown_at: null,
+});
+
+/**
+ * Automation paused WITHOUT the emergency stop: processor off, execution
+ * stopped, campaigns paused, operator sends enabled. Since the 2026-11-11
+ * send-authorization fix this is the posture in which an operator can still
+ * reply; an active queue_emergency_stop_at now stops the operator as well.
+ */
+const AUTOMATION_PAUSED_MANUAL_ENABLED = Object.freeze({
+  ...AUTOMATION_STOPPED_MANUAL_ENABLED,
+  queue_emergency_stop_at: null,
 });
 
 const controlPlane = (values) => async (key) =>
@@ -188,7 +205,7 @@ function makeClaimableSupabase(queue_row, { suppressed = false } = {}) {
 function makeHarness({
   queue_row_id = "hotfix-row-1",
   suppressed = false,
-  values = AUTOMATION_STOPPED_MANUAL_ENABLED,
+  values = AUTOMATION_PAUSED_MANUAL_ENABLED,
   provider = null,
   store = createMemoryS11Store(),
   action_id = "op-action-hotfix-1",
@@ -253,10 +270,10 @@ afterEach(async () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 1 + 9. THE FIX: an authenticated manual send under an active emergency stop
+// 1 + 9. An authenticated manual send while automation is paused (no stop)
 // ═════════════════════════════════════════════════════════════════════════════
 
-test("1. an authenticated manual send is AUTHORIZED under an active queue emergency stop and reaches the provider", async () => {
+test("1. an authenticated manual send is AUTHORIZED while automation is paused (processor off, execution stopped) and reaches the provider", async () => {
   const h = makeHarness();
   const result = await executeManualInboxSendNow(PAYLOAD, { ...h.deps, operator: OPERATOR });
 
@@ -277,6 +294,43 @@ test("1. an authenticated manual send is AUTHORIZED under an active queue emerge
   assert.equal(row.metadata.send_authority, "manual_operator");
   assert.equal(row.metadata.send_authority_version, MANUAL_SEND_AUTHORITY_VERSION);
   assert.equal(row.metadata.operator_id, OPERATOR.id);
+});
+
+test("1b. (2026-11-11) the emergency stop DENIES an authenticated manual send: authority, service, and an unreadable stop", async () => {
+  const authority = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED), operator: OPERATOR });
+  assert.equal(authority.ok, false);
+  assert.equal(authority.reason, "queue_emergency_stop_active");
+  assert.equal(authority.status, 423);
+  assert.equal(isManualSendAuthorityVerdict(authority), false);
+
+  // The marker system-control.js returns when a stop key cannot be read.
+  const unreadable = await evaluateManualSendAuthority({
+    getSystemValue: controlPlane({ ...AUTOMATION_PAUSED_MANUAL_ENABLED, queue_emergency_stop_at: "control_plane_unreadable" }),
+    operator: OPERATOR,
+  });
+  assert.equal(unreadable.ok, false);
+  assert.equal(unreadable.reason, "queue_emergency_stop_active");
+
+  const h = makeHarness({ values: AUTOMATION_STOPPED_MANUAL_ENABLED });
+  const result = await executeManualInboxSendNow(PAYLOAD, { ...h.deps, operator: OPERATOR });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "queue_emergency_stop_active");
+  assert.equal(result.status, 423);
+  assert.equal(h.provider_args.length, 0, "no provider call under the emergency stop");
+  assert.equal(h.supabase.calls.updates, 0, "no claim under the emergency stop");
+
+  // The §11 dispatch seam re-evaluates the same authority: denied there too.
+  let provider_calls = 0;
+  const seam = await dispatchManualOperatorSend({
+    operator_action_id: "op-under-stop-1",
+    store: createMemoryS11Store(),
+    operator: OPERATOR,
+    getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED),
+    sendProvider: async () => { provider_calls += 1; return { sid: "SMnope" }; },
+    message: { to: THREAD, from: FROM, body: "blocked" },
+  });
+  assert.equal(seam.provider_invoked, false);
+  assert.equal(provider_calls, 0);
 });
 
 test("9. a successful manual send produces the provider result AND the outbound message event, in order", async () => {
@@ -315,7 +369,7 @@ test("2. AI / canonical automation stays denied by the emergency stop, processor
 
   // The same service, WITHOUT a server principal (internal route, agent
   // approval, workflow), is still automation and still stops dead.
-  const h = makeHarness();
+  const h = makeHarness({ values: AUTOMATION_STOPPED_MANUAL_ENABLED });
   const result = await executeManualInboxSendNow(PAYLOAD, h.deps);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "queue_emergency_stop_active");
@@ -380,7 +434,7 @@ test("4. global_send_shutdown_at denies the manual authority, the canonical auth
 
   // The same truthiness rule as the emergency stop: clear markers are clear.
   for (const cleared of ["", "0", "false", "off", "none", "null", "cleared", "clear", null, undefined]) {
-    const r = await evaluateManualSendAuthority({ getSystemValue: controlPlane({ ...AUTOMATION_STOPPED_MANUAL_ENABLED, global_send_shutdown_at: cleared }), operator: OPERATOR });
+    const r = await evaluateManualSendAuthority({ getSystemValue: controlPlane({ ...AUTOMATION_PAUSED_MANUAL_ENABLED, global_send_shutdown_at: cleared }), operator: OPERATOR });
     assert.equal(r.ok, true, `global_send_shutdown_at=${JSON.stringify(cleared)} must be clear`);
   }
 });
@@ -433,7 +487,7 @@ test("6a. request fields cannot manufacture a manual principal: without deps.ope
     { created_from: "leadcommand_inbox", action: "send_now", send_source: "map_command" },
   ];
   for (const extra of forged) {
-    const h = makeHarness();
+    const h = makeHarness({ values: AUTOMATION_STOPPED_MANUAL_ENABLED });
     const result = await executeManualInboxSendNow({ ...PAYLOAD, ...extra }, h.deps);
     assert.equal(result.ok, false, JSON.stringify(extra));
     assert.equal(result.reason, "queue_emergency_stop_active", JSON.stringify(extra));
@@ -547,7 +601,7 @@ test("6d. the textgrid adapter no longer excuses the brake on metadata, and only
   const forged = { ok: true, authority: MANUAL_SEND_AUTHORITY, authority_version: MANUAL_SEND_AUTHORITY_VERSION, operator: { id: OPERATOR.id } };
   assert.equal(isManualSendAuthorityVerdict(forged), false);
   assert.equal(isManualSendAuthorityVerdict(Object.freeze(forged)), false);
-  const genuine = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED), operator: OPERATOR });
+  const genuine = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_PAUSED_MANUAL_ENABLED), operator: OPERATOR });
   assert.equal(isManualSendAuthorityVerdict(genuine), true);
   assert.equal(isManualSendAuthorityVerdict({ ...genuine }), false, "a copy is not the issued verdict");
   const denied = await evaluateManualSendAuthority({ getSystemValue: controlPlane({}), operator: OPERATOR });
@@ -609,17 +663,32 @@ async function sendThroughAdapter({ send_authority = null, metadata = null, sour
   }
 }
 
-test("6e. adapter: an issued manual verdict crosses the automation brake; metadata and forged verdicts do not; global shutdown stops all", async () => {
-  const genuine = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED), operator: OPERATOR });
+test("6e. adapter: an issued manual verdict crosses the processor-mode brake but NOT the emergency stop; metadata and forged verdicts do not; global shutdown stops all", async () => {
+  const genuine = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_PAUSED_MANUAL_ENABLED), operator: OPERATOR });
   assert.equal(genuine.ok, true);
 
-  const ok = await sendThroughAdapter({ send_authority: genuine });
+  // Processor off, execution stopped, NO emergency stop: the verdict crosses.
+  const ok = await sendThroughAdapter({ send_authority: genuine, values: { queue_emergency_stop_at: "" } });
   assert.equal(ok.error, null, `unexpected refusal: ${ok.error?.message}`);
   assert.equal(ok.provider_calls.length, 1);
   assert.equal(ok.result.sid, "SMadapterproof1");
   assert.equal(ok.result.metadata.send_authority, "manual_operator", "the authority is recorded on the send");
   assert.equal(ok.result.metadata.send_authority_version, MANUAL_SEND_AUTHORITY_VERSION);
   assert.equal(ok.result.metadata.operator_id, OPERATOR.id);
+
+  // 2026-11-11: an emergency stop pressed AFTER the verdict was issued is
+  // re-read at the last hop and refuses the genuine verdict.
+  const stopped_after_verdict = await sendThroughAdapter({ send_authority: genuine });
+  assert.equal(stopped_after_verdict.result, null);
+  assert.equal(stopped_after_verdict.error.local_refusal, true);
+  assert.equal(stopped_after_verdict.error.local_refusal_reason, "queue_emergency_stop_active");
+  assert.equal(stopped_after_verdict.provider_calls.length, 0);
+
+  // An unreadable stop (the marker system-control.js returns) refuses too.
+  const unreadable_stop = await sendThroughAdapter({ send_authority: genuine, values: { queue_emergency_stop_at: "control_plane_unreadable" } });
+  assert.equal(unreadable_stop.result, null);
+  assert.equal(unreadable_stop.error.local_refusal_reason, "queue_emergency_stop_active");
+  assert.equal(unreadable_stop.provider_calls.length, 0);
 
   const claimed = await sendThroughAdapter({ source: "manual_inbox", manual_operator_send: true, metadata: { source: "manual_inbox", manual_operator_send: true } });
   assert.equal(claimed.result, null);
@@ -664,7 +733,7 @@ test("7a. two dispatches with the same operator_action_id send once (the §11 se
     operator_action_id: "op-double-click-1",
     store,
     operator: OPERATOR,
-    getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED),
+    getSystemValue: controlPlane(AUTOMATION_PAUSED_MANUAL_ENABLED),
     sendProvider,
     message: { to: THREAD, from: FROM, body: "One reply, please." },
   };
@@ -730,14 +799,14 @@ test("8. a provider failure under manual authority is recorded as a failure: no 
 test("10. manual_send_mode absent or anything but exactly 'enabled' denies; an unreadable control plane denies", async () => {
   for (const mode of [undefined, null, "", "disabled", "Enabled", "ENABLED", "true", "on", "1", "yes", "live", "enabled;", " enabled!"]) {
     const r = await evaluateManualSendAuthority({
-      getSystemValue: controlPlane({ ...AUTOMATION_STOPPED_MANUAL_ENABLED, manual_send_mode: mode }),
+      getSystemValue: controlPlane({ ...AUTOMATION_PAUSED_MANUAL_ENABLED, manual_send_mode: mode }),
       operator: OPERATOR,
     });
     assert.equal(r.ok, false, `manual_send_mode=${JSON.stringify(mode)} must deny`);
     assert.equal(r.reason, "manual_send_disabled", JSON.stringify(mode));
     assert.equal(r.status, 423);
   }
-  const enabled = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED), operator: OPERATOR });
+  const enabled = await evaluateManualSendAuthority({ getSystemValue: controlPlane(AUTOMATION_PAUSED_MANUAL_ENABLED), operator: OPERATOR });
   assert.equal(enabled.ok, true);
   assert.equal(enabled.authority, "manual_operator");
   assert.equal(enabled.authority_version, MANUAL_SEND_AUTHORITY_VERSION);
@@ -751,7 +820,7 @@ test("10. manual_send_mode absent or anything but exactly 'enabled' denies; an u
   assert.equal(missing.reason, "control_plane_unreadable");
 
   // Through the service: an absent switch denies BEFORE any row, claim or provider call.
-  const h = makeHarness({ values: { ...AUTOMATION_STOPPED_MANUAL_ENABLED, manual_send_mode: null } });
+  const h = makeHarness({ values: { ...AUTOMATION_PAUSED_MANUAL_ENABLED, manual_send_mode: null } });
   const result = await executeManualInboxSendNow(PAYLOAD, { ...h.deps, operator: OPERATOR });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "manual_send_disabled");
@@ -782,26 +851,27 @@ test("the new keys are operator-owned: campaign automation can never write them"
   assert.ok(!rearm.includes("global_send_shutdown_at") && !rearm.includes("manual_send_mode"));
   const stop = route.slice(route.indexOf("if (action === 'emergency_stop')"), route.indexOf("if (action === 'run_dry_run_feeder')"));
   assert.ok(!stop.includes("global_send_shutdown_at") && !stop.includes("manual_send_mode"));
-  // The manual authority's CODE never names the automation brake (its header
-  // comment documents the separation, which is prose, not a code path).
+  // 2026-11-11: the manual authority's CODE reads the emergency stop (it never
+  // writes it: nothing in the module calls a writer).
   const authority_code = read("lib/domain/queue/manual-send-authority.js")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
-  assert.ok(!authority_code.includes("queue_emergency_stop_at"), "the manual authority never reads or writes the automation brake");
+  assert.ok(authority_code.includes('"queue_emergency_stop_at"'), "the manual authority reads the emergency stop");
+  assert.ok(!/setSystemValues|\.upsert\(|\.update\(/.test(authority_code), "the manual authority never writes the control plane");
 });
 
-test("the manual authority reads ONLY its two keys; the request surface cannot influence it", async () => {
+test("the manual authority reads ONLY its three keys; the request surface cannot influence it", async () => {
   const seen = [];
   const r = await evaluateManualSendAuthority({
     getSystemValue: async (key) => { seen.push(key); return key === "manual_send_mode" ? "enabled" : null; },
     operator: OPERATOR,
   });
   assert.equal(r.ok, true);
-  assert.deepEqual(seen.sort(), ["global_send_shutdown_at", "manual_send_mode"]);
+  assert.deepEqual(seen.sort(), ["global_send_shutdown_at", "manual_send_mode", "queue_emergency_stop_at"]);
   const src = read("lib/domain/queue/manual-send-authority.js")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
-  for (const forbidden of ["queue_emergency_stop_at", "queue_processor_mode", "queue_execution_mode", "OPS_DASHBOARD_SECRET", "INTERNAL_API_SECRET", "req.headers", "searchParams", "metadata", "send_source"]) {
+  for (const forbidden of ["queue_processor_mode", "queue_execution_mode", "OPS_DASHBOARD_SECRET", "INTERNAL_API_SECRET", "req.headers", "searchParams", "metadata", "send_source"]) {
     assert.ok(!src.includes(forbidden), `manual authority must not consult ${forbidden}`);
   }
 });

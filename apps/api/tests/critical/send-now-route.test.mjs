@@ -12,10 +12,17 @@ function makeLogger() {
     entries,
     logger: {
       info: (event, meta) => entries.push({ level: "info", event, meta }),
+      warn: (event, meta) => entries.push({ level: "warn", event, meta }),
       error: (event, meta) => entries.push({ level: "error", event, meta }),
     },
   };
 }
+
+// INTERNAL_API_SECRET=test in the critical environment (package.json test:critical).
+const AUTH = { "x-internal-api-secret": "test" };
+
+/** A control plane that permits queue creation: no stop, no shutdown, live_limited. */
+const HEALTHY = async (key) => (key === "campaign_mode" ? "live_limited" : null);
 
 test("normalizeSendNowInput keeps missing touch_number as null", () => {
   const normalized = normalizeSendNowInput({
@@ -42,11 +49,13 @@ test("send-now POST accepts custom message_text and forwards it as a real overri
       }),
       headers: {
         "Content-Type": "application/json",
+        ...AUTH,
       },
     }),
     "POST",
     {
       logger,
+      getSystemValue: HEALTHY,
       queueOutboundMessageImpl: async (payload) => {
         calls.queued = payload;
         return {
@@ -83,11 +92,13 @@ test("send-now GET keeps missing touch_number null and accepts rendered_message_
 
   const response = await handleSendNowRequestData(
     new Request(
-      "http://localhost/api/internal/outbound/send-now?phone=12087034955&rendered_message_text=Manual%20reply"
+      "http://localhost/api/internal/outbound/send-now?phone=12087034955&rendered_message_text=Manual%20reply",
+      { headers: AUTH }
     ),
     "GET",
     {
       logger: makeLogger().logger,
+      getSystemValue: HEALTHY,
       queueOutboundMessageImpl: async (payload) => {
         queued_payload = payload;
         return {
@@ -119,11 +130,13 @@ test("send-now route returns a structured queue-build failure instead of a blind
       }),
       headers: {
         "Content-Type": "application/json",
+        ...AUTH,
       },
     }),
     "POST",
     {
       logger,
+      getSystemValue: HEALTHY,
       queueOutboundMessageImpl: async () => {
         throw new Error("queue_override_failed");
       },
@@ -155,11 +168,13 @@ test("send-now route returns a structured queue-processing failure when immediat
       }),
       headers: {
         "Content-Type": "application/json",
+        ...AUTH,
       },
     }),
     "POST",
     {
       logger: makeLogger().logger,
+      getSystemValue: HEALTHY,
       queueOutboundMessageImpl: async () => ({
         ok: true,
         queue_item_id: 7003,
@@ -175,4 +190,86 @@ test("send-now route returns a structured queue-processing failure when immediat
   assert.equal(response.payload.result.processed.stage, "queue_processing");
   assert.equal(response.payload.result.processed.reason, "queue_processing_failed");
   assert.equal(response.payload.result.processed.message, "send_stage_failed");
+});
+
+// ── Send-authorization fix (2026-11-11): authentication ─────────────────────
+
+function sendNowRequest(headers = {}) {
+  return new Request("http://localhost/api/internal/outbound/send-now", {
+    method: "POST",
+    body: JSON.stringify({ phone: "12087034955", message_text: "Manual reply" }),
+    headers: { "Content-Type": "application/json", ...headers },
+  });
+}
+
+function neverSendDeps(calls) {
+  return {
+    logger: makeLogger().logger,
+    getSystemValue: HEALTHY,
+    queueOutboundMessageImpl: async () => { calls.queued += 1; return { ok: true, queue_item_id: 1 }; },
+    processSendQueueImpl: async () => { calls.processed += 1; return { ok: true, sent: true }; },
+  };
+}
+
+test("send-now refuses a request with no credential, a wrong credential, or a query-string credential, before queueing", async () => {
+  for (const [headers, reason] of [
+    [{}, "missing_internal_api_secret_token"],
+    [{ "x-internal-api-secret": "wrong" }, "invalid_internal_api_secret_token"],
+    [{ authorization: "Bearer wrong" }, "invalid_internal_api_secret_token"],
+    [{ "x-cron-secret": "test" }, "missing_internal_api_secret_token"],
+    [{ "x-ops-dashboard-secret": "test" }, "missing_internal_api_secret_token"],
+  ]) {
+    const calls = { queued: 0, processed: 0 };
+    const response = await handleSendNowRequestData(sendNowRequest(headers), "POST", neverSendDeps(calls));
+    assert.equal(response.status, 401, JSON.stringify(headers));
+    assert.equal(response.payload.ok, false);
+    assert.equal(response.payload.error, reason, JSON.stringify(headers));
+    assert.equal(calls.queued, 0, "nothing is queued without authentication");
+    assert.equal(calls.processed, 0, "nothing is sent without authentication");
+  }
+
+  const calls = { queued: 0, processed: 0 };
+  const via_query = await handleSendNowRequestData(
+    new Request("http://localhost/api/internal/outbound/send-now?phone=12087034955&message_text=x&x-internal-api-secret=test"),
+    "GET",
+    neverSendDeps(calls)
+  );
+  assert.equal(via_query.status, 401);
+  assert.equal(calls.queued + calls.processed, 0);
+
+  const bearer = await handleSendNowRequestData(sendNowRequest({ authorization: "Bearer test" }), "POST", neverSendDeps({ queued: 0, processed: 0 }));
+  assert.equal(bearer.status, 200, "a Bearer INTERNAL_API_SECRET is accepted");
+});
+
+test("the internal send auth fails closed when INTERNAL_API_SECRET is not configured, in every environment", async () => {
+  const { authorizeInternalSendRoute } = await import("@/lib/security/internal-send-route-auth.js");
+  for (const env of [{}, { INTERNAL_API_SECRET: "" }, { INTERNAL_API_SECRET: "   " }, { NODE_ENV: "development" }]) {
+    const result = authorizeInternalSendRoute(sendNowRequest({ "x-internal-api-secret": "anything" }), { env });
+    assert.equal(result.ok, false, JSON.stringify(env));
+    assert.equal(result.status, 503);
+    assert.equal(result.error, "internal_api_secret_not_configured");
+  }
+  const ok = authorizeInternalSendRoute(sendNowRequest({ "x-internal-api-secret": "s3cret" }), { env: { INTERNAL_API_SECRET: "s3cret" } });
+  assert.equal(ok.ok, true);
+});
+
+// ── Send-authorization fix: the runtime brakes fail closed ──────────────────
+
+test("send-now fails closed: absent campaign_mode, emergency stop, global shutdown, unreadable stop and a throwing reader all refuse with 423", async () => {
+  const cases = [
+    [async () => null, "campaign_paused"],
+    [async (k) => (k === "campaign_mode" ? "live_limited" : k === "queue_emergency_stop_at" ? "2026-11-11T00:00:00Z" : null), "queue_emergency_stop_active"],
+    [async (k) => (k === "campaign_mode" ? "live_limited" : k === "queue_emergency_stop_at" ? "control_plane_unreadable" : null), "queue_emergency_stop_active"],
+    [async (k) => (k === "campaign_mode" ? "live_limited" : k === "global_send_shutdown_at" ? "2026-11-11T00:00:00Z" : null), "global_send_shutdown_active"],
+    [async () => { throw new Error("control plane down"); }, "control_plane_unreadable"],
+  ];
+  for (const [getSystemValue, reason] of cases) {
+    const calls = { queued: 0, processed: 0 };
+    const response = await handleSendNowRequestData(sendNowRequest(AUTH), "POST", { ...neverSendDeps(calls), getSystemValue });
+    assert.equal(response.status, 423, reason);
+    assert.equal(response.payload.ok, false);
+    assert.equal(response.payload.result.queued.stage, "runtime_brake");
+    assert.equal(response.payload.result.queued.reason, reason);
+    assert.equal(calls.queued + calls.processed, 0, `${reason}: nothing queued or sent`);
+  }
 });

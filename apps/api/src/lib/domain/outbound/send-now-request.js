@@ -1,6 +1,10 @@
 import { processSendQueue } from "@/lib/domain/queue/process-send-queue.js";
-import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateInternalSendPreflight } from "@/lib/domain/outbound/internal-send-preflight.js";
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
+import {
+  authorizeInternalSendRoute,
+  internalSendRouteRefusal,
+} from "@/lib/security/internal-send-route-auth.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { checkThreadContactability } from "@/lib/domain/lead-state/check-thread-contactability.js";
@@ -69,13 +73,10 @@ export async function buildAndSendNow(
   let queued;
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
-    {
-      campaign_mode: await get_system_value("campaign_mode"),
-      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
-    },
-    { action: "send_now_queue_create", failClosed: false }
-  );
+  const runtime_brake = await evaluateInternalSendPreflight({
+    getSystemValue: get_system_value,
+    action: "send_now_queue_create",
+  });
   if (!runtime_brake.ok) {
     return {
       queued: {
@@ -216,7 +217,19 @@ export async function handleSendNowRequestData(request, method = "GET", deps = {
     logger,
     queueOutboundMessageImpl = queueOutboundMessage,
     processSendQueueImpl = processSendQueue,
+    authorizeRequest = authorizeInternalSendRoute,
   } = deps;
+
+  // Authenticate before reading the request at all.
+  const auth = authorizeRequest(request);
+  if (!auth?.ok) {
+    logger?.warn?.("outbound_send_now.unauthorized", { method, reason: auth?.error || "unauthorized" });
+    return internalSendRouteRefusal(
+      { status: auth?.status || 401, error: auth?.error || "unauthorized" },
+      "internal/outbound/send-now"
+    );
+  }
+
   let request_meta = {
     method,
     phone: null,
@@ -260,6 +273,8 @@ export async function handleSendNowRequestData(request, method = "GET", deps = {
     const result = await buildAndSendNow(normalized_input, {
       queueOutboundMessageImpl,
       processSendQueueImpl,
+      ...(deps.getSystemValue ? { getSystemValue: deps.getSystemValue } : {}),
+      ...(deps.supabase ? { supabase: deps.supabase } : {}),
     });
 
     logger?.info?.("outbound_send_now.completed", {

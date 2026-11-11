@@ -27,11 +27,97 @@ const CACHE_TTL_MS = 30_000; // 30 seconds
 
 const _cache = new Map(); // key -> { value, expires_at }
 const _value_cache = new Map(); // key -> { value, expires_at }
+// Test-only primed values for kill-switch keys (see primeSystemControlValue).
+// Kill switches never use _cache/_value_cache, so tests that prime them need
+// a store the fresh path consults. Production never writes here.
+const _primed_kill_switch_values = new Map(); // key -> value
+const _primed_kill_switch_flags = new Map(); // key -> boolean
 
 const TRUE_FLAG_VALUES = new Set(["true", "1", "yes", "on", "enabled"]);
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+// ── KILL SWITCHES: always fresh, and a failed read never reads as "clear" ────
+//
+// The 30s cache above is fine for tuning values, but it is wrong for the keys
+// that STOP sends. Two defects (send-authorization audit, 2026-11-11):
+//   1. STALE. setSystemValues invalidates the cache only in the lambda that did
+//      the write; every other warm lambda served the pre-stop value for up to
+//      30s, so an operator's stop was not seen there.
+//   2. FAIL OPEN. getSystemValue swallowed every read error, returned null and
+//      CACHED that null for 30s. For a brake, null means "clear", so a Supabase
+//      error made an active emergency stop / global shutdown read as inactive,
+//      and the authorities' own try/catch ("control_plane_unreadable") never
+//      fired because nothing was ever thrown.
+//
+// Kill-switch keys are therefore never cached, and a failed read of a STOP key
+// returns KILL_SWITCH_UNREADABLE, a non-clear marker every brake evaluator
+// (isEmergencyStopActive) treats as ACTIVE. Mode keys return null on failure,
+// which their consumers already normalize to the closed posture
+// (queue_processor_mode -> off, queue_execution_mode -> stopped,
+// manual_send_mode -> disabled, outbound_sms_enabled -> false).
+
+/** Marker a failed STOP-key read resolves to. Not a clear marker, so it denies. */
+export const KILL_SWITCH_UNREADABLE = "control_plane_unreadable";
+
+/** Keys whose ACTIVE value stops sends: absence is "clear", so an unreadable read must be "active". */
+export const STOP_KILL_SWITCH_KEYS = Object.freeze([
+  "queue_emergency_stop_at",
+  "global_send_shutdown_at",
+]);
+
+/** Every key read fresh (never cached). */
+export const KILL_SWITCH_KEYS = Object.freeze([
+  ...STOP_KILL_SWITCH_KEYS,
+  "queue_processor_mode",
+  "queue_execution_mode",
+  "manual_send_mode",
+  "outbound_sms_enabled",
+]);
+
+const KILL_SWITCH_KEY_SET = new Set(KILL_SWITCH_KEYS);
+const STOP_KILL_SWITCH_KEY_SET = new Set(STOP_KILL_SWITCH_KEYS);
+
+export function isKillSwitchKey(key) {
+  return KILL_SWITCH_KEY_SET.has(clean(key));
+}
+
+function isProductionRuntime() {
+  return (
+    clean(process.env.VERCEL_ENV).toLowerCase() === "production" ||
+    clean(process.env.NODE_ENV).toLowerCase() === "production"
+  );
+}
+
+function killSwitchReadFailedValue(key) {
+  return STOP_KILL_SWITCH_KEY_SET.has(key) ? KILL_SWITCH_UNREADABLE : null;
+}
+
+async function readKillSwitchValue(key, opts = {}) {
+  if (_primed_kill_switch_values.has(key)) return _primed_kill_switch_values.get(key);
+  const { supabase = defaultSupabase } = opts;
+  if (!opts.supabase && !hasSupabaseConfig()) {
+    // No control plane at all. Outside production (tests, local dev) this is
+    // the historical "no opinion"; in production it is a read failure.
+    return isProductionRuntime() ? killSwitchReadFailedValue(key) : null;
+  }
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) {
+      warn("system_control.kill_switch_read_failed", { key, message: error.message });
+      return killSwitchReadFailedValue(key);
+    }
+    return data ? clean(data.value) : null;
+  } catch (err) {
+    warn("system_control.kill_switch_read_failed", { key, message: err?.message });
+    return killSwitchReadFailedValue(key);
+  }
 }
 
 function getCachedFlag(key) {
@@ -65,6 +151,12 @@ function parseSystemControlValue(raw) {
 export async function getSystemFlag(key, opts = {}) {
   const { supabase = defaultSupabase } = opts;
   const normalized_key = clean(key);
+
+  if (KILL_SWITCH_KEY_SET.has(normalized_key)) {
+    // Fresh every time; an unreadable or absent flag is disabled (false).
+    if (_primed_kill_switch_flags.has(normalized_key)) return _primed_kill_switch_flags.get(normalized_key);
+    return parseSystemControlValue(await readKillSwitchValue(normalized_key, opts));
+  }
 
   const cached = getCachedFlag(normalized_key);
   if (cached !== null) return cached;
@@ -119,6 +211,7 @@ function setCachedValue(key, value) {
 export async function getSystemValue(key, opts = {}) {
   const { supabase = defaultSupabase } = opts;
   const normalized_key = clean(key);
+  if (KILL_SWITCH_KEY_SET.has(normalized_key)) return readKillSwitchValue(normalized_key, opts);
   const cached = getCachedValue(normalized_key);
   if (cached !== undefined) return cached;
 
@@ -164,6 +257,8 @@ export async function getSystemValue(key, opts = {}) {
 export async function getSystemValueFresh(key, opts = {}) {
   const { supabase = defaultSupabase } = opts;
   const normalized_key = clean(key);
+  // A STOP key that cannot be read must not read as "clear" here either.
+  if (KILL_SWITCH_KEY_SET.has(normalized_key)) return readKillSwitchValue(normalized_key, opts);
   if (!opts.supabase && !hasSupabaseConfig()) return null;
   try {
     const { data, error } = await supabase
@@ -261,6 +356,10 @@ export async function getSystemFlags(keys, opts = {}) {
   const to_fetch = [];
 
   for (const key of normalized_keys) {
+    if (KILL_SWITCH_KEY_SET.has(key)) {
+      result[key] = await getSystemFlag(key, opts);
+      continue;
+    }
     const cached = getCachedFlag(key);
     if (cached !== null) {
       result[key] = cached;
@@ -354,14 +453,27 @@ export function buildDisabledResponse(key, context = "unknown") {
 export function clearSystemControlCache() {
   _cache.clear();
   _value_cache.clear();
+  _primed_kill_switch_values.clear();
+  _primed_kill_switch_flags.clear();
 }
 
 /** Prime a flag directly into the cache (test-only — avoids hitting Supabase). */
 export function primeSystemControlCache(key, value) {
+  const normalized_key = clean(key);
+  if (KILL_SWITCH_KEY_SET.has(normalized_key)) {
+    _primed_kill_switch_flags.set(normalized_key, Boolean(value));
+    return;
+  }
   setCachedFlag(String(key), Boolean(value));
 }
 
 /** Prime a raw system_control value (test-only — avoids hitting Supabase). */
 export function primeSystemControlValue(key, value) {
-  setCachedValue(String(key), value == null ? null : clean(value));
+  const normalized_key = clean(key);
+  const normalized_value = value == null ? null : clean(value);
+  if (KILL_SWITCH_KEY_SET.has(normalized_key)) {
+    _primed_kill_switch_values.set(normalized_key, normalized_value);
+    return;
+  }
+  setCachedValue(String(key), normalized_value);
 }

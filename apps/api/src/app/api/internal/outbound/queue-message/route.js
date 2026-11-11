@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
+import {
+  authorizeInternalSendRoute,
+  internalSendRouteRefusal,
+} from "@/lib/security/internal-send-route-auth.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +13,16 @@ export const dynamic = "force-dynamic";
 const logger = child({
   module: "api.internal.outbound.queue_message",
 });
+
+// This route queues a seller-facing SMS that the queue runner will send, so it
+// requires INTERNAL_API_SECRET like the other internal send routes.
+function refuseUnauthorized(request, method) {
+  const auth = authorizeInternalSendRoute(request);
+  if (auth.ok) return null;
+  logger.warn("outbound_queue_message.unauthorized", { method, reason: auth.error });
+  const { status, payload } = internalSendRouteRefusal(auth, "internal/outbound/queue-message");
+  return NextResponse.json(payload, { status });
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -24,6 +38,8 @@ function statusForResult(result) {
 }
 
 export async function GET(request) {
+  const refused = refuseUnauthorized(request, "GET");
+  if (refused) return refused;
   try {
     const { searchParams } = new URL(request.url);
 
@@ -69,6 +85,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const refused = refuseUnauthorized(request, "POST");
+  if (refused) return refused;
   try {
     const body = await request.json().catch(() => ({}));
 

@@ -18,10 +18,17 @@ function makeLogger() {
     entries,
     logger: {
       info: (event, meta) => entries.push({ level: "info", event, meta }),
+      warn: (event, meta) => entries.push({ level: "warn", event, meta }),
       error: (event, meta) => entries.push({ level: "error", event, meta }),
     },
   };
 }
+
+// INTERNAL_API_SECRET=test in the critical environment (package.json test:critical).
+const AUTH = { "x-internal-api-secret": "test" };
+
+/** A control plane that permits queue creation: no stop, no shutdown, live_limited. */
+const HEALTHY = async (key) => (key === "campaign_mode" ? "live_limited" : null);
 
 function buildPhoneItem() {
   return createPodioItem(401, {
@@ -75,11 +82,13 @@ test("direct-send POST queues the exact manual message and processes it immediat
       }),
       headers: {
         "Content-Type": "application/json",
+        ...AUTH,
       },
     }),
     "POST",
     {
       logger,
+      getSystemValue: HEALTHY,
       findPhoneRecordImpl: async () => items.get(401),
       getItemImpl: async (item_id) => items.get(Number(item_id)) || null,
       fetchAllItemsImpl: async () => [items.get(701)],
@@ -123,11 +132,13 @@ test("direct-send returns 400 for missing required numbers", async () => {
       }),
       headers: {
         "Content-Type": "application/json",
+        ...AUTH,
       },
     }),
     "POST",
     {
       logger,
+      getSystemValue: HEALTHY,
     }
   );
 
@@ -135,4 +146,54 @@ test("direct-send returns 400 for missing required numbers", async () => {
   assert.equal(response.payload.ok, false);
   assert.equal(response.payload.error, "outbound_direct_send_failed");
   assert.equal(response.payload.message, "missing_from_number");
+});
+
+// ── Send-authorization fix (2026-11-11) ─────────────────────────────────────
+
+function directSendRequest(headers = {}) {
+  return new Request("http://localhost/api/internal/outbound/direct-send", {
+    method: "POST",
+    body: JSON.stringify({ from_number: "12085550111", to_number: "12087034955", message_text: "Manual reply" }),
+    headers: { "Content-Type": "application/json", ...headers },
+  });
+}
+
+function trippedDeps(calls, getSystemValue = HEALTHY) {
+  const trip = (label) => async () => { calls.push(label); throw new Error(`${label} must not run`); };
+  return {
+    logger: makeLogger().logger,
+    getSystemValue,
+    findPhoneRecordImpl: trip("findPhoneRecord"),
+    getItemImpl: trip("getItem"),
+    fetchAllItemsImpl: trip("fetchAllItems"),
+    buildSendQueueItemImpl: trip("buildSendQueueItem"),
+    processSendQueueImpl: trip("processSendQueue"),
+  };
+}
+
+test("direct-send refuses an unauthenticated request before any lookup, queue or send", async () => {
+  for (const headers of [{}, { "x-internal-api-secret": "wrong" }, { authorization: "Bearer nope" }, { "x-queue-engine-secret": "test" }]) {
+    const calls = [];
+    const response = await handleDirectSendRequestData(directSendRequest(headers), "POST", trippedDeps(calls));
+    assert.equal(response.status, 401, JSON.stringify(headers));
+    assert.equal(response.payload.ok, false);
+    assert.match(response.payload.error, /internal_api_secret_token$/);
+    assert.deepEqual(calls, [], "no dependency ran");
+  }
+});
+
+test("direct-send fails closed on absent campaign_mode, emergency stop, global shutdown and an unreadable control plane", async () => {
+  for (const [getSystemValue, reason] of [
+    [async () => null, "campaign_paused"],
+    [async (k) => (k === "campaign_mode" ? "live_limited" : k === "queue_emergency_stop_at" ? "2026-11-11T00:00:00Z" : null), "queue_emergency_stop_active"],
+    [async (k) => (k === "campaign_mode" ? "live_limited" : k === "global_send_shutdown_at" ? "2026-11-11T00:00:00Z" : null), "global_send_shutdown_active"],
+    [async () => { throw new Error("down"); }, "control_plane_unreadable"],
+  ]) {
+    const calls = [];
+    const response = await handleDirectSendRequestData(directSendRequest(AUTH), "POST", trippedDeps(calls, getSystemValue));
+    assert.equal(response.status, 423, reason);
+    assert.equal(response.payload.ok, false);
+    assert.equal(response.payload.message, reason);
+    assert.deepEqual(calls, [], `${reason}: no dependency ran`);
+  }
 });

@@ -57,43 +57,50 @@ function makeSystemControl(initial) {
   return { state, supabase };
 }
 
-test("fresh reader observes a mid-TTL system_control change that the cached reader still hides", async () => {
+test("both readers observe a mid-TTL queue_execution_mode change (kill-switch keys are never cached since 2026-11-11)", async () => {
   clearSystemControlCache();
   const { state, supabase } = makeSystemControl("paused");
 
-  // 1. Preflight warms the cache while the mode is still paused.
+  // 1. Preflight reads while the mode is still paused.
   const warmed = await getSystemValue("queue_execution_mode", { supabase });
-  assert.equal(warmed, "paused", "precondition: cache warmed with paused");
+  assert.equal(warmed, "paused", "precondition: paused");
 
   // 2. Operator flips the backing row to scoped_canary_only.
   state.value = "scoped_canary_only";
 
-  // 3. The cached reader still reports the stale value — this is the bug.
-  const stale = await getSystemValue("queue_execution_mode", { supabase });
-  assert.equal(stale, "paused", "cached reader serves the stale value inside the TTL");
+  // 3. The default reader no longer serves the stale value. Before the
+  //    send-authorization fix this returned the cached `paused` for 30s.
+  const after = await getSystemValue("queue_execution_mode", { supabase });
+  assert.equal(after, "scoped_canary_only", "getSystemValue reads kill-switch keys fresh");
 
-  // 4. The fresh reader observes the change immediately.
+  // 4. The fresh reader observes the change as well.
   const fresh = await getSystemValueFresh("queue_execution_mode", { supabase });
   assert.equal(fresh, "scoped_canary_only", "fresh reader must see the operator's change");
+
+  // 5. A non-kill-switch key is still cached (the 30s TTL is unchanged for tuning values).
+  clearSystemControlCache();
+  const tuning = makeSystemControl("50");
+  assert.equal(await getSystemValue("queue_run_limit", { supabase: tuning.supabase }), "50");
+  tuning.state.value = "10";
+  assert.equal(await getSystemValue("queue_run_limit", { supabase: tuning.supabase }), "50", "tuning values keep the cache");
 });
 
-test("scoped-canary gate ADMITS via the fresh reader while the cached reader would deny", async () => {
+test("scoped-canary gate ADMITS via either reader after the operator's change", async () => {
   clearSystemControlCache();
   const { state, supabase } = makeSystemControl("paused");
 
-  await getSystemValue("queue_execution_mode", { supabase }); // warm as paused
+  await getSystemValue("queue_execution_mode", { supabase }); // read as paused
   state.value = "scoped_canary_only";
 
-  // Cached path — reproduces the observed 423.
-  const cachedMode = await getQueueExecutionMode({
+  // Default reader: before the fix this reproduced the observed 423.
+  const defaultMode = await getQueueExecutionMode({
     getSystemValue: (key, opts) => getSystemValue(key, { ...opts, supabase }),
   });
-  const cachedGate = evaluateScopedCanaryDispatchGate(cachedMode, { action: "runScopedCampaignCanary" });
-  assert.equal(cachedMode, "stopped", "paused normalizes to stopped");
-  assert.equal(cachedGate.ok, false, "cached read denies the scoped canary");
-  assert.equal(cachedGate.reason, "queue_execution_mode_not_scoped_canary_only");
+  const defaultGate = evaluateScopedCanaryDispatchGate(defaultMode, { action: "runScopedCampaignCanary" });
+  assert.equal(defaultMode, "scoped_canary_only");
+  assert.equal(defaultGate.ok, true, "the default reader no longer serves the stale mode");
 
-  // Fresh path — what runScopedCampaignCanary now does.
+  // Fresh path — what runScopedCampaignCanary does.
   const freshMode = await getQueueExecutionMode({
     getSystemValue: (key, opts) => getSystemValueFresh(key, { ...opts, supabase }),
   });

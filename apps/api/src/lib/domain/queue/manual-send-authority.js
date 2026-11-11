@@ -28,13 +28,23 @@
 // FAIL CLOSED, ALWAYS.
 //   * no / invalid principal             -> manual_send_requires_authenticated_operator
 //   * global_send_shutdown_at active      -> global_send_shutdown_active
+//   * queue_emergency_stop_at active      -> queue_emergency_stop_active
 //   * manual_send_mode !== "enabled"     -> manual_send_disabled  (absent = off)
 //   * the control-plane read throws       -> control_plane_unreadable
 //   * no control-plane reader supplied    -> control_plane_unreadable
 //
-// This authority does NOT read queue_emergency_stop_at, queue_processor_mode or
-// queue_execution_mode: an operator answering a seller is not campaign
-// automation, and stopping automation must not silence the human.
+// THE EMERGENCY STOP STOPS THE HUMAN TOO (founder decision, 2026-11-11).
+// The 2026-11-02 hotfix let an authenticated operator cross
+// queue_emergency_stop_at. The send-authorization audit found that meant the
+// operator's emergency-stop button did not stop every send. Now an active
+// queue_emergency_stop_at denies a manual send with queue_emergency_stop_active,
+// and so does an unreadable stop (system-control.js resolves a failed read of a
+// stop key to a non-clear marker). Operators who need to reply during an
+// incident clear the stop through the control route. Nothing here clears it.
+//
+// This authority still does NOT read queue_processor_mode or
+// queue_execution_mode: those are automation posture, not stops, and a paused
+// processor must not silence the human.
 //
 // Every compliance gate (opt-out, suppression, property holds, paused/quarantined
 // threads, sender eligibility, duplicate prevention) is evaluated elsewhere and
@@ -46,13 +56,21 @@ export const MANUAL_SEND_AUTHORITY_VERSION = "manual_send_authority_v1";
 export const MANUAL_SEND_AUTHORITY = "manual_operator";
 
 export const GLOBAL_SEND_SHUTDOWN_KEY = "global_send_shutdown_at";
+export const QUEUE_EMERGENCY_STOP_KEY = "queue_emergency_stop_at";
 export const MANUAL_SEND_MODE_KEY = "manual_send_mode";
 export const MANUAL_SEND_MODE_ENABLED = "enabled";
 export const MANUAL_SEND_MODE_DISABLED = "disabled";
 
-/** Control-plane keys this authority reads. Both are required. */
+/** Control-plane keys introduced by this authority (operator-owned). */
 export const MANUAL_SEND_CONTROL_KEYS = Object.freeze([
   GLOBAL_SEND_SHUTDOWN_KEY,
+  MANUAL_SEND_MODE_KEY,
+]);
+
+/** Every control-plane key this authority reads. All are required. */
+export const MANUAL_SEND_READ_KEYS = Object.freeze([
+  GLOBAL_SEND_SHUTDOWN_KEY,
+  QUEUE_EMERGENCY_STOP_KEY,
   MANUAL_SEND_MODE_KEY,
 ]);
 
@@ -146,10 +164,12 @@ export async function evaluateManualSendAuthority({
   }
 
   let shutdown_at;
+  let emergency_stop_at;
   let manual_mode;
   try {
-    [shutdown_at, manual_mode] = await Promise.all([
+    [shutdown_at, emergency_stop_at, manual_mode] = await Promise.all([
       getSystemValue(GLOBAL_SEND_SHUTDOWN_KEY),
+      getSystemValue(QUEUE_EMERGENCY_STOP_KEY),
       getSystemValue(MANUAL_SEND_MODE_KEY),
     ]);
   } catch (error) {
@@ -165,6 +185,14 @@ export async function evaluateManualSendAuthority({
       "global_send_shutdown_active",
       "Global send shutdown is active; every outbound send is blocked, manual included.",
       { action, diagnostics: { global_send_shutdown_at: clean(shutdown_at) || null } }
+    );
+  }
+
+  if (isEmergencyStopActive(emergency_stop_at)) {
+    return denial(
+      "queue_emergency_stop_active",
+      "Emergency stop is active; operator manual sends are blocked until an operator clears it.",
+      { action, diagnostics: { queue_emergency_stop_at: clean(emergency_stop_at) || null } }
     );
   }
 
@@ -191,6 +219,7 @@ export async function evaluateManualSendAuthority({
     diagnostics: Object.freeze({
       manual_send_mode: MANUAL_SEND_MODE_ENABLED,
       global_send_shutdown_at: null,
+      queue_emergency_stop_at: null,
     }),
   });
   ISSUED_VERDICTS.add(verdict);

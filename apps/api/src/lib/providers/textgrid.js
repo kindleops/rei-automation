@@ -9,7 +9,7 @@ import {
   loadTextgridConfig,
 } from "@/lib/config/textgrid-config.js";
 import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
-import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateQueueSendRuntimeBrakes, isEmergencyStopActive } from "@/lib/domain/queue/queue-control-safety.js";
 import {
   GLOBAL_SEND_SHUTDOWN_KEY,
   describeSendAuthorityForMetadata,
@@ -521,9 +521,26 @@ export async function sendTextgridSMS({
 
   if (hasSupabaseConfig() && manual_operator_authority) {
     // An authenticated operator under manual_send_mode=enabled is not campaign
-    // automation: the queue emergency stop / processor mode brake does not
-    // apply. The verdict was evaluated by the dispatch seam immediately before
-    // provider_request_started; the global shutdown was re-checked just above.
+    // automation: queue_processor_mode does not apply. The EMERGENCY STOP does
+    // (founder decision 2026-11-11): it is re-read fresh here, at the last hop,
+    // so a stop pressed after the verdict was issued still refuses the send.
+    // An unreadable stop resolves to a non-clear marker and refuses as well.
+    const manual_emergency_stop_at = await getSystemValue("queue_emergency_stop_at");
+    if (isEmergencyStopActive(manual_emergency_stop_at)) {
+      info("send.blocked_runtime_brake", {
+        reason: "queue_emergency_stop_active",
+        to_input: to,
+        client_reference_id,
+        manual_operator_authority: true,
+        source: send_context.source,
+        send_source: send_context.send_source,
+      });
+      throw localRefusal(
+        "queue_emergency_stop_active",
+        "sendTextgridSMS: queue_emergency_stop_active - manual send blocked by emergency stop",
+        { to, from, body }
+      );
+    }
     Object.assign(send_metadata, {
       ...(send_context.source ? { source: send_context.source } : {}),
       ...(send_context.send_source ? { send_source: send_context.send_source } : {}),

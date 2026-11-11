@@ -1,6 +1,10 @@
 import APP_IDS from "@/lib/config/app-ids.js";
 import { deriveContextSummary } from "@/lib/domain/context/derive-context-summary.js";
-import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
+import { evaluateInternalSendPreflight } from "@/lib/domain/outbound/internal-send-preflight.js";
+import {
+  authorizeInternalSendRoute,
+  internalSendRouteRefusal,
+} from "@/lib/security/internal-send-route-auth.js";
 import { buildSendQueueItem } from "@/lib/domain/queue/build-send-queue-item.js";
 import { processSendQueue } from "@/lib/domain/queue/process-send-queue.js";
 import {
@@ -67,8 +71,12 @@ function isDirectSendInputError(message = "") {
 function isDirectSendRuntimeBrakeError(message = "") {
   return [
     "queue_emergency_stop_active",
+    "global_send_shutdown_active",
+    "control_plane_unreadable",
     "campaign_paused",
+    "campaign_not_live_limited",
     "queue_auto_enqueue_disabled",
+    "runtime_brake_active",
   ].some((candidate) => String(message || "").startsWith(candidate));
 }
 
@@ -264,13 +272,10 @@ export async function buildAndProcessDirectSend(input, deps = {}) {
   const normalized = normalizeDirectSendInput(input);
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
-    {
-      campaign_mode: await get_system_value("campaign_mode"),
-      queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
-    },
-    { action: "direct_send_queue_create", failClosed: false }
-  );
+  const runtime_brake = await evaluateInternalSendPreflight({
+    getSystemValue: get_system_value,
+    action: "direct_send_queue_create",
+  });
   if (!runtime_brake.ok) {
     throw new Error(runtime_brake.reason || "runtime_brake_active");
   }
@@ -361,7 +366,19 @@ export async function buildAndProcessDirectSend(input, deps = {}) {
 export async function handleDirectSendRequestData(request, method = "GET", deps = {}) {
   const {
     logger,
+    authorizeRequest = authorizeInternalSendRoute,
   } = deps;
+
+  // Authenticate before reading the request at all.
+  const auth = authorizeRequest(request);
+  if (!auth?.ok) {
+    logger?.warn?.("outbound_direct_send.unauthorized", { method, reason: auth?.error || "unauthorized" });
+    return internalSendRouteRefusal(
+      { status: auth?.status || 401, error: auth?.error || "unauthorized" },
+      "internal/outbound/direct-send"
+    );
+  }
+
   let request_meta = {
     method,
     from_number: null,
