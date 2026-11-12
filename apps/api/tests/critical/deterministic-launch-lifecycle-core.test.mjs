@@ -93,6 +93,9 @@ function buildEligibleCandidate(overrides = {}) {
     likely_owner: true,
     likely_renting: false,
     property_address_full: "123 Main St, Austin, TX",
+    // Quiet hours: the feeder holds a lead with no resolved zone
+    // (TIMEZONE_UNRESOLVED); the property is in Austin, TX.
+    timezone: "America/Chicago",
     ...overrides,
   };
 }

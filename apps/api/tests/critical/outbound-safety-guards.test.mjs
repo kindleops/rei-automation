@@ -26,6 +26,8 @@ function makeCandidate(overrides = {}) {
     pending_prior_touch: false,
     touch_number: 1,
     template_use_case: "ownership_check",
+    // Quiet hours: the feeder holds a lead with no resolved zone (TIMEZONE_UNRESOLVED).
+    timezone: "America/Chicago",
     identity_alignment: {
       status: "verified",
       eligible: true,

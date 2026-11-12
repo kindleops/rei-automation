@@ -56,6 +56,9 @@ function makeSmsReadyCandidate(id, overrides = {}) {
     canonical_e164: `+12085550${String(100 + id).slice(-3)}`,
     market: "houston",
     property_address_state: "TX",
+    // Quiet hours: TX is split-zone, so state alone does not place the lead and
+    // the feeder would hold it (TIMEZONE_UNRESOLVED). The zone is explicit.
+    timezone: "America/Chicago",
     seller_first_name: "Test",
     owner_display_name: "Test Owner",
     prospect_full_name: "Test Owner",
