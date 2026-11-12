@@ -82,8 +82,7 @@ export async function dispatchManualOperatorSend(input = {}) {
       // An operator action is not a licence to cross a brake, and a seller
       // who sent STOP is still opted out while an operator is looking at them.
       // With a server-side principal the brake that applies is the manual-send
-      // authority (manual_send_mode + global_send_shutdown_at + the emergency
-      // stop, since 2026-11-11); without one it
+      // authority (manual_send_mode + global_send_shutdown_at); without one it
       // is the canonical automation authority. Same function, same principal
       // as the first check in executeManualInboxSendNow: no second opinion.
       evaluateRuntimeAuthority: async () => {

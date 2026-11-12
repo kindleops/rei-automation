@@ -54,23 +54,52 @@ place a check could happen.
   shutdown, the emergency stop and campaign_mode, uses `failClosed: true`, and
   treats a throwing reader as `control_plane_unreadable`. Every refusal is 423.
 
-### 3. Manual sends honour the emergency stop
+### 3. WITHDRAWN: manual sends keep the c5a7104f rule
 
-**This reverses part of the 2026-11-02 P0 hotfix (`c5a7104f`)**, which
-deliberately let an authenticated operator cross `queue_emergency_stop_at`.
+The earlier draft of this candidate made authenticated manual (Inbox) sends
+honour `queue_emergency_stop_at`. **The founder rejected that change, and it
+has been withdrawn.** Manual operator sends are intentionally a separate
+pathway, and they keep crossing `queue_emergency_stop_at` exactly as
+production `c5a7104f` does today.
 
-- `evaluateManualSendAuthority` now also reads `queue_emergency_stop_at`. An
-  active or unreadable stop denies with `queue_emergency_stop_active`, before
-  any row, claim or provider call. The §11 dispatch seam re-evaluates the same
-  authority, so it denies there too.
-- At the textgrid last hop, an issued manual verdict now re-reads the stop
-  fresh. A stop pressed after the verdict was issued still refuses the send.
-- Not changed: paused automation (processor off, execution stopped, campaigns
-  paused) **without** a stop still lets an operator reply. manual_send_mode and
-  global_send_shutdown_at work as before.
-- Operational consequence: while the emergency stop is set, nobody can text a
-  seller from the Inbox. To reply during an incident, an operator has to clear
-  the stop through `/api/cockpit/queue/control`. Nothing in this change clears it.
+- `manual-send-authority.js`, `dispatch-manual-operator-send.js`,
+  `textgrid.js` and the tests `manual-send-authority-hotfix.test.mjs` and
+  `manual-inbox-emergency-stop-enforced.test.mjs` are byte-identical to
+  `c5a7104f`.
+- The manual rule, unchanged from `c5a7104f`: an authenticated manual send is
+  NOT blocked by `queue_emergency_stop_at`. It IS blocked by an active
+  `global_send_shutdown_at`, by `manual_send_mode` being anything but exactly
+  `enabled`, and by an unreadable control plane. Opt-outs, suppression and
+  contact restrictions are evaluated elsewhere and still apply.
+- With change 2, a failed read of `global_send_shutdown_at` returns the
+  `control_plane_unreadable` marker (active), and a failed read of
+  `manual_send_mode` returns null (not enabled). Both deny a manual send, so an
+  unreadable control plane still denies it.
+- The owner's Inbox send is `POST /api/cockpit/inbox/send-now`
+  (`runInboxAction` -> `executeManualInboxSendNow` with the server-side
+  operator principal -> `dispatchManualOperatorSend` -> `sendTextgridSMS`). It
+  does not go through `/api/internal/outbound/send-now` or `direct-send`, so the
+  423 those internal routes return under the emergency stop (as they already
+  did at `c5a7104f`) does not touch it.
+- Automation is unchanged by this withdrawal: AI, campaign and internal-route
+  sends still stop dead on the emergency stop.
+
+### 4. Quiet hours: an automated first message never assumes Chicago
+
+`evaluateCandidateEligibility` in `supabase-candidate-feeder.js` passed
+`candidate.timezone || "America/Chicago"` to `evaluateContactWindow`, and
+`normalizeCandidateRow` had already stamped Chicago on a blank zone. A lead
+with no zone was judged on Central hours.
+
+- The check now uses the zone the lead row actually carried
+  (`stored_timezone`, set by `normalizeCandidateRow` before its Chicago
+  default). Without a valid one, the shared recipient-zone resolver
+  (`recipient-timezone.js`, the same D10 logic the send-time gate uses) places
+  the lead from the property's state/ZIP. With neither, the lead is held with
+  reason code `TIMEZONE_UNRESOLVED` (reason `recipient_timezone_unresolved`)
+  and is not queued, whatever `within_contact_window_now` says.
+- A lead with a valid stored zone is evaluated exactly as before.
+- The manual path (`send-now-service.js`) is not changed.
 
 ## How it was verified
 
@@ -86,9 +115,12 @@ deliberately let an authenticated operator cross `queue_emergency_stop_at`.
     campaign_mode, stop, unreadable stop, global shutdown and a throwing reader
     all get 423 with zero queue or send.
   - `manual-send-authority-hotfix.test.mjs` and
-    `manual-inbox-emergency-stop-enforced.test.mjs`. Updated to the new rule.
-    New test 1b covers the authority, the service, the seam and the adapter
-    re-check under the stop.
+    `manual-inbox-emergency-stop-enforced.test.mjs`. Restored to `c5a7104f`
+    (change 3 withdrawn): they assert an authenticated manual send crosses the
+    emergency stop and is still denied by the global shutdown,
+    `manual_send_mode`, and an unreadable control plane.
+  - `feed-candidates.test.mjs`. New quiet-hours test: a lead with no zone is
+    held with `TIMEZONE_UNRESOLVED`; a lead with a zone evaluates normally.
   - `scoped-canary-fresh-execution-mode.test.mjs`. Test 1 asserted the stale
     cache, which is the defect, so it now asserts freshness.
 - **NOT YET RUN:** `npm --prefix apps/api run test:critical` and `run lint`.

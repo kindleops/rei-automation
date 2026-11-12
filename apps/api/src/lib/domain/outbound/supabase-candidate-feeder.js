@@ -10,6 +10,7 @@ import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey,
   evaluateOutboundNumberEligibility,
 } from "@/lib/supabase/sms-engine.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
+import { storedTimezoneToIana } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   SEND_QUEUE_HISTORY_SELECT,
   MESSAGE_EVENTS_HISTORY_SELECT,
@@ -112,6 +113,9 @@ const REASON_CODES = Object.freeze({
   ACTIVE_QUEUE_ITEM: "ACTIVE_QUEUE_ITEM",
   PRIOR_TOUCH_COOLDOWN: "PRIOR_TOUCH_COOLDOWN",
   OUTREACH_HISTORY_UNAVAILABLE: "OUTREACH_HISTORY_UNAVAILABLE",
+  // The lead's zone is unknown: no valid stored zone and no property state/ZIP
+  // that places it. Held, never sent on an assumed America/Chicago.
+  TIMEZONE_UNRESOLVED: "TIMEZONE_UNRESOLVED",
 });
 
 const logger = child({ module: "domain.outbound.supabase_candidate_feeder" });
@@ -676,6 +680,9 @@ export function normalizeCandidateRow(row = {}, defaults = {}) {
     property_state: state,
     property_zip: clean(pick(row.property_address_zip, row.property_zip)),
     timezone: clean(pick(row.timezone, row.seller_timezone, "America/Chicago")) || "America/Chicago",
+    // The zone the row actually carried, before the Chicago default above.
+    // The contact-window check reads this, never the default.
+    stored_timezone: clean(pick(row.timezone, row.seller_timezone)) || null,
     contact_window: clean(
       pick(row.contact_window, row.contact_window_local, row.allowed_contact_window, "")
     ),
@@ -2849,14 +2856,40 @@ export async function evaluateCandidateEligibility(candidate = {}, options = {},
     return { ok: false, reason_code: REASON_CODES.PENDING_PRIOR_TOUCH, reason: "next_eligible_at_future", next_eligible_at: candidate.next_eligible_at };
   }
 
+  // A lead with no resolved zone is NOT a Chicago lead. Use the zone the row
+  // carried (normalizeCandidateRow's Chicago default is ignored here); without
+  // one, the shared recipient-zone resolver places the lead from the property's
+  // state/ZIP; with neither, evaluateContactWindow returns hold and the lead is
+  // held below, whatever within_contact_window_now says.
+  const stored_timezone_iana = storedTimezoneToIana(
+    Object.prototype.hasOwnProperty.call(candidate, "stored_timezone")
+      ? candidate.stored_timezone
+      : candidate.timezone
+  );
   const window_check = evaluateContactWindow(
     {
       contact_window: candidate.contact_window || null,
-      timezone: candidate.timezone || "America/Chicago",
+      timezone: stored_timezone_iana,
+      ...(stored_timezone_iana
+        ? {}
+        : {
+            property_address_state:
+              candidate.property_state || candidate.property_address_state || candidate.state || null,
+            property_address_zip: candidate.property_zip || candidate.property_address_zip || null,
+          }),
       scheduled_for: options.now || new Date().toISOString(),
     },
     { now: options.now }
   );
+
+  if (window_check.hold === true) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.TIMEZONE_UNRESOLVED,
+      reason: window_check.reason || "recipient_timezone_unresolved",
+      contact_window: window_check,
+    };
+  }
 
   if (options.within_contact_window_now && !window_check.allowed) {
     return {
@@ -2890,6 +2923,7 @@ const OWNER_CONTACT_SWAP_FIELDS = Object.freeze([
   "phone_type",
   "contact_window",
   "timezone",
+  "stored_timezone",
   "sms_eligible",
   "primary_prospect_id",
   "canonical_prospect_id",

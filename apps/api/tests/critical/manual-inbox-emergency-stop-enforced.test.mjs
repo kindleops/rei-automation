@@ -79,10 +79,6 @@ function makeClaimConflictSupabase() {
 // (manual_send_mode + global_send_shutdown_at); see
 // manual-send-authority-hotfix.test.mjs for that half. The last test here pins
 // the separation from this side.
-//
-// 2026-11-11 (send-authorization fix, founder decision): the operator's
-// authority now ALSO denies on an active queue_emergency_stop_at. Paused
-// automation without a stop still lets the operator through.
 
 test("emergency stop DENIES a manual inbox send before any row, claim, or provider call", async () => {
   const supabase = makeClaimConflictSupabase();
@@ -223,50 +219,34 @@ test("compliance still blocks even when the runtime authority AUTHORIZES the sen
   assert.equal(insert_called, false);
 });
 
-test("the SEPARATION, revised 2026-11-11: an operator principal is judged by the manual authority, and the emergency stop stops it too", async () => {
-  // Founder decision (send-authorization fix, 2026-11-11): the emergency stop
-  // stops EVERY send, the authenticated operator included. Paused automation
-  // (campaign paused, processor off) still does not silence the operator.
+test("the SEPARATION: a server-side operator principal is judged by the manual authority, not the automation brake", async () => {
+  // Same request, same active emergency stop. The only difference is that the
+  // server established an authenticated operator (deps.operator), and the
+  // control plane says manual_send_mode=enabled. Then the stop does not deny.
   const operator = { authenticated: true, auth_source: "ops_dashboard_session", via: "header:x-ops-dashboard-secret", id: "op-1", email: null };
+  const withManual = (key) => (key === "manual_send_mode" ? "enabled" : emergencySystemValue(key));
 
-  // 1. Active emergency stop + manual_send_mode=enabled: DENIED, before any row or claim.
-  const withManualUnderStop = (key) => (key === "manual_send_mode" ? "enabled" : emergencySystemValue(key));
-  const supabase0 = makeClaimConflictSupabase();
-  const stopped = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
-    loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
-    getSystemValue: withManualUnderStop,
-    supabase: supabase0,
-    operator,
-    createQueueRowImpl: async () => { throw new Error("no row may be created under the emergency stop"); },
-    sendTextgridImpl: async () => { throw new Error("no provider call under the emergency stop"); },
-  });
-  assert.equal(stopped.ok, false);
-  assert.equal(stopped.reason, "queue_emergency_stop_active");
-  assert.equal(stopped.status, 423);
-  assert.equal(supabase0.calls.updates, 0, "no claim under the emergency stop");
-
-  // 2. Automation paused but NO stop + manual_send_mode=enabled: authorized.
-  const pausedNoStop = (key) => (key === "manual_send_mode" ? "enabled" : key === "campaign_mode" ? "paused" : key === "queue_processor_mode" ? "off" : null);
   const supabase = makeClaimConflictSupabase();
   const result = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
     loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
-    getSystemValue: pausedNoStop,
+    getSystemValue: withManual,
     supabase,
     operator,
     createQueueRowImpl: async () => ({ ok: true, queue_row_id: "manual-authority-row" }),
     sendTextgridImpl: async () => ({ ok: true, sid: "must-not-reach-here-claim-conflicts" }),
   });
-  // Paused automation did NOT deny. (This fixture's send_queue refuses the claim,
-  // which is the next gate and proves the authority verdict was AUTHORIZE.)
+  // The brake did NOT deny. (This fixture's send_queue refuses the claim, which
+  // is the next gate and proves the authority verdict was AUTHORIZE.)
+  assert.notEqual(result.reason, "queue_emergency_stop_active");
   assert.equal(result.reason, "queue_item_claim_conflict");
   assert.equal(supabase.calls.updates, 1, "the claim was attempted: authority was granted");
 
-  // 3. With manual_send_mode absent, the same principal is denied by ITS switch,
+  // And with manual_send_mode absent, the same principal is denied by ITS switch,
   // still before any row or claim.
   const supabase2 = makeClaimConflictSupabase();
   const denied = await executeManualInboxSendNow(VALID_MANUAL_PAYLOAD, {
     loadOutboundNumberByPhone: ACTIVE_FLEET_SENDER,
-    getSystemValue: (key) => (key === "manual_send_mode" ? null : pausedNoStop(key)),
+    getSystemValue: emergencySystemValue,
     supabase: supabase2,
     operator,
     createQueueRowImpl: async () => ({ ok: true, queue_row_id: "must-not-be-created" }),
