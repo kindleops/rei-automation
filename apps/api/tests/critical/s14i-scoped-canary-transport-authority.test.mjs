@@ -442,6 +442,11 @@ test("adapter: the exception does not weaken any other guard", async () => {
   primeSystemControlValue("queue_processor_mode", "off");
   primeSystemControlValue("queue_emergency_stop_at", PROD_BRAKE.queue_emergency_stop_at);
   primeSystemControlValue("queue_execution_mode", "scoped_canary_only");
+  // Since the send-authorization fix (2026-11-11) an UNREAD global shutdown is
+  // active (fail closed), not clear. Prime it clear, exactly as
+  // sendUnderActiveBrake does, so this block reaches the content guard it is
+  // about. The fail-closed shutdown itself is asserted in the next test.
+  primeSystemControlValue("global_send_shutdown_at", "");
   try {
     await assert.rejects(
       sendTextgridSMS({
@@ -453,6 +458,40 @@ test("adapter: the exception does not weaken any other guard", async () => {
         supabaseClient: fakeSupabase(),
       }),
       (e) => e.local_refusal === true && e.local_refusal_reason === "blank_seller_greeting"
+    );
+  } finally {
+    process.env = originalEnv;
+    resetTextgridConfigCache();
+    clearSystemControlCache();
+  }
+});
+
+test("adapter: a verified authority does NOT cross an unreadable global shutdown", async () => {
+  // global_send_shutdown_at is deliberately NOT primed: under the stub Supabase
+  // config its read fails, and a failed read of a STOP key must refuse. The
+  // canary exception lifts only the emergency stop, never the global shutdown.
+  const originalEnv = { ...process.env };
+  process.env.SUPABASE_URL = "https://stub.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "stub-service-role";
+  process.env.TEXTGRID_ACCOUNT_SID = "AC_test_account";
+  process.env.TEXTGRID_AUTH_TOKEN = "test_token";
+  resetTextgridConfigCache();
+  const { primeSystemControlValue, clearSystemControlCache } = await import("@/lib/system-control.js");
+  clearSystemControlCache();
+  primeSystemControlValue("queue_processor_mode", "off");
+  primeSystemControlValue("queue_emergency_stop_at", PROD_BRAKE.queue_emergency_stop_at);
+  primeSystemControlValue("queue_execution_mode", "scoped_canary_only");
+  try {
+    await assert.rejects(
+      sendTextgridSMS({
+        to: DEST, from: SENDER,
+        body: "Hi Dana, quick question about your property.",
+        bypass_system_control: true,
+        logical_communication_id: LOGICAL,
+        transport_authority: boundAuthority(),
+        supabaseClient: fakeSupabase(),
+      }),
+      (e) => e.local_refusal === true && e.local_refusal_reason === "global_send_shutdown_active"
     );
   } finally {
     process.env = originalEnv;

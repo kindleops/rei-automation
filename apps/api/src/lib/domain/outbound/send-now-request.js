@@ -73,13 +73,20 @@ export async function buildAndSendNow(
   let queued;
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
+  // Both the runtime brakes and the compliance gate are evaluated before the
+  // verdict is chosen. When the compliance gate refuses (suppression,
+  // quarantine, paused review, ...), ITS reason is the verdict even if a brake
+  // is also active: a compliance block is permanent, it is what the operator
+  // and the records act on, and it outlives the emergency stop. The brake is
+  // still reported, as also_blocked_by. Either refusal alone denies the send;
+  // nothing is queued or sent unless both pass.
   const runtime_brake = await evaluateInternalSendPreflight({
     getSystemValue: get_system_value,
     action: "send_now_queue_create",
   });
-  if (!runtime_brake.ok) {
-    return {
-      queued: {
+  const runtime_brake_refusal = runtime_brake.ok
+    ? null
+    : {
         ok: false,
         stage: "runtime_brake",
         status: 423,
@@ -87,32 +94,53 @@ export async function buildAndSendNow(
         error: runtime_brake.error,
         message: runtime_brake.message,
         diagnostics: runtime_brake.diagnostics,
-      },
-      processed: null,
-    };
-  }
+      };
 
   const can_send_fn = deps.canSend || deps.canSendImpl;
   if (typeof can_send_fn === "function") {
-    const gate = await can_send_fn(
-      {
-        to_phone_number: phone,
-        thread_key: phone,
-        message_body: rendered_message_text,
-      },
-      deps
-    );
-    if (!gate.ok) {
+    let gate;
+    try {
+      gate = await can_send_fn(
+        {
+          to_phone_number: phone,
+          thread_key: phone,
+          message_body: rendered_message_text,
+        },
+        deps
+      );
+    } catch (gate_error) {
+      // A failed compliance check never authorizes anything. If a brake is
+      // already refusing, that refusal stands; otherwise the error propagates
+      // exactly as it did before the brake was moved.
+      if (runtime_brake_refusal) {
+        return { queued: runtime_brake_refusal, processed: null };
+      }
+      throw gate_error;
+    }
+    if (!gate?.ok) {
       return {
         queued: {
           ok: false,
           stage: "can_send_gate",
           status: 423,
-          reason: gate.reason,
+          reason: gate?.reason || "can_send_gate_refused",
+          ...(runtime_brake_refusal
+            ? {
+                also_blocked_by: {
+                  stage: "runtime_brake",
+                  reason: runtime_brake_refusal.reason,
+                  error: runtime_brake_refusal.error,
+                },
+              }
+            : {}),
         },
         processed: null,
       };
     }
+  }
+
+  if (runtime_brake_refusal) {
+    return { queued: runtime_brake_refusal, processed: null };
   }
 
   if (hasSupabaseConfig()) {

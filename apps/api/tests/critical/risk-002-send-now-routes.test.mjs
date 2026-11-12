@@ -235,6 +235,62 @@ test("RISK-002: identical payload → same gate verdict across createInboxSendNo
   assert.equal(outboundResult.queued.reason, gateReason);
 });
 
+// Send-authorization fix (2026-11-11): the brakes now fail closed, so with no
+// campaign_mode the preflight refuses too. The compliance reason must still be
+// the verdict, with the brake reported alongside; and with a passing gate the
+// brake alone still refuses and nothing is written.
+test("RISK-002: compliance block AND active emergency stop: compliance reason is the verdict, brake is also reported", async () => {
+  let writer_called = false;
+  const values = { campaign_mode: "live_limited", queue_emergency_stop_at: "2026-11-11T00:00:00.000Z", global_send_shutdown_at: "" };
+  const result = await buildAndSendNow(
+    { phone: "+15005550001", rendered_message_text: "Hi John, are you interested in selling?" },
+    {
+      canSend: async () => ({ ok: false, reason: "phone_suppressed" }),
+      getSystemValue: async (key) => values[key] ?? null,
+      queueOutboundMessageImpl: async () => { writer_called = true; return { ok: true }; },
+      processSendQueueImpl: async () => ({ ok: true }),
+    }
+  );
+  assert.equal(writer_called, false);
+  assert.equal(result.queued.ok, false);
+  assert.equal(result.queued.stage, "can_send_gate");
+  assert.equal(result.queued.reason, "phone_suppressed");
+  assert.equal(result.queued.also_blocked_by?.stage, "runtime_brake");
+  assert.equal(result.queued.also_blocked_by?.reason, "queue_emergency_stop_active");
+});
+
+test("RISK-002: passing compliance gate + active emergency stop: brake refuses, nothing written", async () => {
+  let writer_called = false;
+  const values = { campaign_mode: "live_limited", queue_emergency_stop_at: "2026-11-11T00:00:00.000Z", global_send_shutdown_at: "" };
+  const result = await buildAndSendNow(
+    { phone: "+15005550001", rendered_message_text: "Hi John, are you interested in selling?" },
+    {
+      canSend: async () => ({ ok: true }),
+      getSystemValue: async (key) => values[key] ?? null,
+      queueOutboundMessageImpl: async () => { writer_called = true; return { ok: true }; },
+      processSendQueueImpl: async () => ({ ok: true }),
+    }
+  );
+  assert.equal(writer_called, false);
+  assert.equal(result.queued.stage, "runtime_brake");
+  assert.equal(result.queued.reason, "queue_emergency_stop_active");
+});
+
+test("RISK-002: compliance check throws while a brake refuses: the brake refusal stands", async () => {
+  const result = await buildAndSendNow(
+    { phone: "+15005550001", rendered_message_text: "Hi John, are you interested in selling?" },
+    {
+      canSend: async () => { throw new Error("db_down"); },
+      getSystemValue: async () => null,
+      queueOutboundMessageImpl: async () => { throw new Error("must not queue"); },
+      processSendQueueImpl: async () => { throw new Error("must not process"); },
+    }
+  );
+  assert.equal(result.queued.ok, false);
+  assert.equal(result.queued.stage, "runtime_brake");
+  assert.equal(result.queued.reason, "campaign_paused");
+});
+
 // ─── RISK-006 fail-closed: suppression DB error → send BLOCKED ────────────────
 
 test("RISK-002/canSend: suppression lookup throws → send is BLOCKED (suppression_check_unavailable)", async () => {
