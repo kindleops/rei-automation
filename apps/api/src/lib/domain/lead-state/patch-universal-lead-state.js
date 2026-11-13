@@ -970,6 +970,21 @@ export async function patchUniversalLeadState({
     }
   }
 
+  // link #32: the agents' wake-up feed — THE lead-state registry is the one choke point of stage / status / temperature
+  // changes; field NAMES and code values only, idempotent per audit row (or write time); never blocks or fails the write
+  try {
+    const changed = Object.keys(rowPatch).filter((f) => f !== 'thread_key' && rowPatch[f] !== previous?.[f]);
+    if (changed.length && typeof supabase?.rpc === 'function') {
+      const { appendLeadEvent } = await import('@/lib/domain/outreach/lead-events.js');
+      const codeOf = (v) => (v == null ? null : String(v).replace(/[^A-Za-z0-9_ .:-]/g, '_').slice(0, 60));
+      const watched = ['lead_temperature', 'operational_status', 'universal_stage', 'universal_status', 'lifecycle_stage', 'disposition', 'contactability_status'];
+      await appendLeadEvent(supabase, {
+        kind: 'lead_state_changed', eventKey: `${auditRows[0]?.id || `${data?.id || previous?.id || 'thread'}:${clean(data?.updated_at) || Date.now()}`}`, threadKey: key, threadId: data?.id || previous?.id || null,
+        payload: { fields: changed.slice(0, 20), changes: Object.fromEntries(changed.filter((f) => watched.includes(f)).map((f) => [f, { from: codeOf(previous?.[f]), to: codeOf(rowPatch[f]) }])), change_source: codeOf(meta.change_source) },
+      });
+    }
+  } catch { /* the feed never blocks the registry */ }
+
   return {
     ok: true,
     thread_key: key,

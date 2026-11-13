@@ -37,6 +37,7 @@ import { assertDisposableTarget, sanitizedPgEnv, UnsafeDbTargetError } from './d
 import { lintFixtureSource, classifyFile } from './lint-migration-fixtures.mjs'
 import { lexPsqlScript, leadingWords } from './sql-fixture-lexer.mjs'
 import { MIGRATION_TESTS, PROD_SHAPE } from './migration-tests.manifest.mjs'
+import { appliedInProductionReferences, assertNotAppliedInProduction } from './applied-in-production.mjs'
 
 // A production-shaped database = a SCHEMA-ONLY snapshot (pg_dump --schema-only of production,
 // taken read-only) restored into the disposable database before the test's own setup. The
@@ -106,17 +107,62 @@ function sql(url, text, env) {
 
 // ── fresh cluster (unix socket only) ────────────────────────────────────────
 
-export function startCluster({ bin, dataRoot = null, log = () => {} }) {
+// agntei reconciliation (test temp lifecycle): a run that is killed or crashes cannot stop its cluster, so every
+// start first removes leftover lc-mt-* clusters: only a directory that holds a PostgreSQL data directory, whose
+// postmaster is not running and which is older than an hour. Never a symlink. A run also refuses to start below a
+// free-space floor (LC_MT_MIN_FREE_MB, default 1024).
+export function sweepStaleClusters(base = os.tmpdir(), { now = Date.now(), minAgeMs = 3_600_000 } = {}) {
+  const removed = []
+  let names = []
+  try { names = fs.readdirSync(base) } catch { return removed }
+  for (const name of names) {
+    if (!/^lc-mt-[A-Za-z0-9]{6}$/.test(name)) continue
+    const dir = path.join(base, name)
+    let st; try { st = fs.lstatSync(dir) } catch { continue }
+    if (st.isSymbolicLink() || !st.isDirectory() || now - st.mtimeMs < minAgeMs) continue
+    if (!fs.existsSync(path.join(dir, 'data', 'PG_VERSION'))) continue
+    const pidFile = path.join(dir, 'data', 'postmaster.pid')
+    if (fs.existsSync(pidFile)) {
+      const pid = Number(String(fs.readFileSync(pidFile, 'utf8')).split('\n')[0])
+      let alive = false
+      try { process.kill(pid, 0); alive = true } catch (e) { alive = e.code === 'EPERM' }
+      if (alive) continue
+    }
+    fs.rmSync(dir, { recursive: true, force: true })
+    removed.push(dir)
+  }
+  return removed
+}
+
+function assertFreeSpace(dir, minMb = Number(process.env.LC_MT_MIN_FREE_MB ?? 1024)) {
+  const s = fs.statfsSync(dir)
+  const free = Math.floor((Number(s.bavail) * Number(s.bsize)) / 1048576)
+  if (free < minMb) throw new Error(`only ${free} MB free under ${dir}; a migration test needs ${minMb} MB (LC_MT_MIN_FREE_MB)`)
+}
+
+export function startCluster({ bin, dataRoot = null, log = () => {}, keep = false }) {
+  if (!dataRoot) {
+    const swept = sweepStaleClusters()
+    if (swept.length) log(`cluster: removed ${swept.length} leftover cluster(s) from killed runs`)
+  }
+  assertFreeSpace(dataRoot ? path.resolve(dataRoot) : os.tmpdir())
   const root = dataRoot ? fs.mkdtempSync(path.join(path.resolve(dataRoot), 'cluster-')) : fs.mkdtempSync(path.join(os.tmpdir(), 'lc-mt-'))
   const data = path.join(root, 'data')
   const sock = fs.mkdtempSync('/tmp/lcmt-') // short: unix socket paths are length-limited
   const exe = (name) => path.join(bin, name)
   const env = sanitizedPgEnv(process.env)
-  const init = spawnSync(exe('initdb'), ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--no-locale', '--no-instructions'], { encoding: 'utf8', env })
-  if (init.status !== 0) throw new Error(`initdb failed: ${(init.stderr || init.stdout || '').slice(0, 800)}`)
-  const opts = `-c listen_addresses='' -k ${sock} -c port=5432 -c fsync=off -c synchronous_commit=off -c full_page_writes=off`
-  const start = spawnSync(exe('pg_ctl'), ['-D', data, '-o', opts, '-l', path.join(root, 'server.log'), '-w', '-t', '60', 'start'], { encoding: 'utf8', env })
-  if (start.status !== 0) throw new Error(`pg_ctl start failed: ${(start.stderr || start.stdout || '').slice(0, 800)}`)
+  try {
+    const init = spawnSync(exe('initdb'), ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--no-locale', '--no-instructions'], { encoding: 'utf8', env })
+    if (init.status !== 0) throw new Error(`initdb failed: ${(init.stderr || init.stdout || '').slice(0, 800)}`)
+    const opts = `-c listen_addresses='' -k ${sock} -c port=5432 -c fsync=off -c synchronous_commit=off -c full_page_writes=off`
+    const start = spawnSync(exe('pg_ctl'), ['-D', data, '-o', opts, '-l', path.join(root, 'server.log'), '-w', '-t', '60', 'start'], { encoding: 'utf8', env })
+    if (start.status !== 0) throw new Error(`pg_ctl start failed: ${(start.stderr || start.stdout || '').slice(0, 800)}`)
+  } catch (e) {
+    // a failed initdb / start leaves nothing behind (it used to leave both folders)
+    fs.rmSync(sock, { recursive: true, force: true })
+    if (!keep) fs.rmSync(root, { recursive: true, force: true })
+    throw e
+  }
   const url = `postgresql://postgres@/postgres?host=${encodeURIComponent(sock)}&port=5432`
   log(`cluster: started (unix socket only) data=${data}`)
   return {
@@ -125,7 +171,9 @@ export function startCluster({ bin, dataRoot = null, log = () => {} }) {
     stop() {
       spawnSync(exe('pg_ctl'), ['-D', data, '-m', 'fast', '-w', 'stop'], { encoding: 'utf8', env })
       fs.rmSync(sock, { recursive: true, force: true })
-      log('cluster: stopped')
+      // the data directory this run created goes too (it was left behind before: ~48 MB per run)
+      if (!keep) fs.rmSync(root, { recursive: true, force: true })
+      log(keep ? `cluster: stopped (kept ${root})` : 'cluster: stopped and removed')
     },
   }
 }
@@ -139,7 +187,7 @@ function assertServerIsDisposable(adminUrl) {
 
 // ── fingerprint ────────────────────────────────────────────────────────────
 
-const FINGERPRINT_SQL = `
+export const FINGERPRINT_SQL = `
 with ns as (select oid, nspname from pg_namespace where nspname not in ('pg_catalog','information_schema','pg_toast','${SCRATCH_SCHEMA}') and nspname not like 'pg_temp%' and nspname not like 'pg_toast_temp%')
 select 'ns'::text k, n.nspname::text o, coalesce(array_to_string(n.nspacl, ','), '') d from pg_namespace n join ns on ns.oid = n.oid
 union all select 'rel', format('%s.%s', ns.nspname, c.relname), format('%s:%s%s:%s', c.relkind, c.relrowsecurity, c.relforcerowsecurity, coalesce(array_to_string(c.relacl, ','), ''))
@@ -156,19 +204,19 @@ union all select 'view', format('%s.%s', schemaname, viewname), md5(definition) 
 union all select 'role', rolname::text, format('%s:%s:%s', rolsuper, rolbypassrls, rolcanlogin) from pg_roles where rolname !~ '^pg_'
 order by 1, 2`
 
-function fingerprint(url) {
+export function fingerprint(url) {
   const out = sql(url, FINGERPRINT_SQL)
   return { hash: crypto.createHash('sha256').update(out).digest('hex').slice(0, 16), lines: out.split('\n') }
 }
 
-function rowCounts(url) {
+export function rowCounts(url) {
   const out = sql(url, `select coalesce(string_agg(format('%s=%s', c.oid::regclass, (xpath('/row/n/text()', query_to_xml(format('select count(*) as n from %s', c.oid::regclass), false, true, '')))[1]::text), ',' order by c.oid::regclass::text), '')
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
    where c.relkind = 'r' and n.nspname not in ('pg_catalog','information_schema','${SCRATCH_SCHEMA}') and n.nspname not like 'pg_%'`)
   return out
 }
 
-function diffLines(a, b) {
+export function diffLines(a, b) {
   const A = new Set(a)
   const B = new Set(b)
   return { removed: a.filter((x) => !B.has(x)).slice(0, 20), added: b.filter((x) => !A.has(x)).slice(0, 20) }
@@ -203,7 +251,9 @@ function hasOwnTransaction(file) {
   return /^\s*(begin|start\s+transaction)\s*;/im.test(src.replace(/--[^\n]*/g, ''))
 }
 
-function applyFile(url, file, env) {
+export function applyFile(url, file, env) {
+  // recorded production history (applied-in-production.mjs) is never re-applied, by path or by header marker
+  assertNotAppliedInProduction(file)
   const args = hasOwnTransaction(file) ? ['-f', rel(file)] : ['--single-transaction', '-f', rel(file)]
   return runPsql(url, args, { env })
 }
@@ -242,6 +292,10 @@ export function runMigrationTest(t, { adminUrl, log = console.log, keep = false,
     return { id: t.id, ok: false, skipped: true, steps: [], error: `needs a production-shaped schema snapshot: --prod-shape <prelude.sql,schema.sql> (or ${PROD_SHAPE_ENV})` }
   }
   for (const f of prodShapeFiles) assertSnapshotFile(f)
+  const applied = appliedInProductionReferences(t)
+  if (applied.length) {
+    return { id: t.id, ok: false, refused: true, steps: [], error: `refused: names migration(s) APPLIED IN PRODUCTION (recorded history, never re-applied): ${applied.join(', ')}` }
+  }
   const lint = lintTestFixtures(t)
   if (lint.length) {
     return { id: t.id, ok: false, steps: [], error: `fixture lint failed; nothing executed:\n${lint.map((x) => `${x.file}:${x.line} [${x.rule}] ${x.detail}`).join('\n')}` }
@@ -344,8 +398,10 @@ export async function main(argv = process.argv.slice(2)) {
   let cluster = null
   let adminUrl = target.url
   if (target.mode === 'cluster') {
-    cluster = startCluster({ bin: target.bin, dataRoot: arg(argv, '--data-root'), log: console.log })
+    cluster = startCluster({ bin: target.bin, dataRoot: arg(argv, '--data-root'), log: console.log, keep: argv.includes('--keep') })
     adminUrl = cluster.url
+    // a signal still stops and removes the cluster
+    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { try { cluster.stop() } finally { process.exit(130) } })
   }
   const results = []
   try {

@@ -70,10 +70,12 @@ function makeSupabase() {
   return { from, _state: state };
 }
 
+// R4 (2026-10-20): an outbound offer is persisted only under an independent ceiling (the production producer always
+// supplies the frozen one), so the fixture carries it; the churn rules under test are unchanged.
 const offer = (supabase, over = {}) =>
   persistActiveOffer({
     opportunity_id: OPP, thread_key: THREAD, property_id: "prop-1",
-    purchase_price: 250000, offer_type: "initial_offer", supabase, ...over,
+    purchase_price: 250000, offer_type: "initial_offer", authorized_ceiling: 500000, supabase, ...over,
   });
 
 // ── identical terms -> reuse, no churn ───────────────────────────────────────

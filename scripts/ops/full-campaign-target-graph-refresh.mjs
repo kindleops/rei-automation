@@ -2,7 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import pg from "pg";
+import { connectProdWrite } from "../lib/prod-db-credentials.mjs";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 const RUNNER_SOURCE = "full_campaign_target_graph_refresh_runner";
@@ -189,15 +189,9 @@ if (config.batchLimit < 100 && !config.forceSmallBatch) {
 
 const isFullTraversal = !config.state && !config.market;
 
-const dbUrl =
-  process.env.DATABASE_URL ||
-  process.env.SUPABASE_URL_NO_POOL ||
-  process.env.SUPABASE_DB_URL;
-
-if (!dbUrl) {
-  console.error("FAIL missing DATABASE_URL, SUPABASE_URL_NO_POOL, or SUPABASE_DB_URL");
-  process.exit(1);
-}
+// rc-8.5.21-c: the database URL is no longer derived from the environment or env files.
+// Writes go through the explicit production-write path (scripts/lib/prod-db-credentials.mjs):
+// --prod-write=<approval-ref>, LC_PROD_WRITE_DB_URL_FILE and an interactive TTY confirmation.
 
 const baseUrl = String(
   process.env.COCKPIT_PROOF_BASE_URL ||
@@ -887,8 +881,7 @@ async function startCampaignLaunchFlow(client, runId) {
 }
 
 async function main() {
-  const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const client = await connectProdWrite({ purpose: "full campaign_target_graph refresh (stage + swap)", applicationName: "lc-ctg-full-refresh" });
 
   try {
     const before = await counts(client);

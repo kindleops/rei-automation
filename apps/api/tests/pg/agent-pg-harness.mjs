@@ -36,6 +36,30 @@ export const SQL = {
   runtimePosttest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_posttest.sql'),
   runtime: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime.sql'),
   runtimeRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261012140000_intel_runtime_rollback.sql'),
+  // LeadCommand Workforce Phase A (docs/WORKFORCE.md §2; no BEGIN/COMMIT inside — see applyInTransaction)
+  workforcePretest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100000_workforce_foundation_pretest.sql'),
+  workforce: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100000_workforce_foundation.sql'),
+  workforcePosttest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100000_workforce_foundation_posttest.sql'),
+  workforceRollback: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100000_workforce_foundation_rollback.sql'),
+  workforceRollbackPosttest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100000_workforce_foundation_rollback_posttest.sql'),
+  workforceSeed: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100100_workforce_seed.sql'),
+  workforceSeedPosttest: path.join(REPO_DIR, 'supabase/migrations/PROPOSED_20261022100100_workforce_seed_posttest.sql'),
+}
+
+// public tables agent.ops_health_snapshot (R2) reads (same fixture as tests/critical/agent-runtime-pg.test.mjs)
+export const RUNTIME_PUBLIC_FIXTURE = `
+  create table if not exists public.system_control (key text primary key, value text, updated_at timestamptz default now());
+  create table if not exists public.send_queue (id bigserial primary key, queue_status text, scheduled_for timestamptz);
+  create index if not exists idx_send_queue_status_sched on public.send_queue (queue_status, scheduled_for);
+  revoke all on public.system_control, public.send_queue from agent_api;`
+
+/** S3 (+ opaque ids) → research → R2 runtime → Workforce, on an already-created S3 database. */
+export async function applyWorkforceChain(pool, { workforce = true } = {}) {
+  await runSqlFile(pool, SQL.researchPretest)
+  await runSqlFile(pool, SQL.research)
+  await pool.query(RUNTIME_PUBLIC_FIXTURE)
+  await applyInTransaction(pool, SQL.runtime)
+  if (workforce) await applyInTransaction(pool, SQL.workforce)
 }
 
 /** Apply a migration file that carries no BEGIN/COMMIT in ONE transaction (psql --single-transaction equivalent). */
@@ -77,8 +101,11 @@ export async function runSqlFile(pool, file) {
   await pool.query(fs.readFileSync(file, 'utf8'))
 }
 
-/** Fresh database with the S3 schema applied (unless { apply: false }). */
-export async function freshDb({ apply = true, opaqueIds = true } = {}) {
+/**
+ * Fresh database with the S3 schema applied (unless { apply: false }).
+ * { workforce: true } also applies the research + R2 runtime chain and the Workforce migration.
+ */
+export async function freshDb({ apply = true, opaqueIds = true, workforce = false } = {}) {
   const name = `agent_s3_${crypto.randomBytes(5).toString('hex')}`
   const admin = new pg.Pool({ connectionString: ADMIN_URL, max: 1 })
   await admin.query(`create database ${name}`)
@@ -91,6 +118,7 @@ export async function freshDb({ apply = true, opaqueIds = true } = {}) {
     await runSqlFile(pool, SQL.pretest)
     await runSqlFile(pool, SQL.migration)
     if (opaqueIds) await runSqlFile(pool, SQL.payloadOpaqueIds)
+    if (workforce) await applyWorkforceChain(pool)
   }
   const extraPools = []
   // the API's least-privilege role (the companion *_api_login.sql enables LOGIN in prod)
@@ -139,5 +167,48 @@ export async function asRole(pool, role, sub, sql, params = []) {
     throw e
   } finally {
     c.release()
+  }
+}
+
+/**
+ * Workforce databases, fast: ONE template database carries S3 → research → R2 → Workforce; every
+ * fresh() is CREATE DATABASE … TEMPLATE (≈ 100 ms) with a superuser pool and an agent_api pool.
+ */
+export async function workforceDbFactory() {
+  const tpl = await freshDb({ workforce: true })
+  await tpl.pool.query('alter role agent_api login')
+  const template = tpl.name
+  for (const p of [tpl.api]) await p?.end().catch(() => {})
+  await tpl.pool.end().catch(() => {})
+  const made = []
+  return {
+    template,
+    async fresh() {
+      const name = `wf_${crypto.randomBytes(5).toString('hex')}`
+      const admin = new pg.Pool({ connectionString: ADMIN_URL, max: 1 })
+      try { await admin.query(`create database ${name} template ${template}`) } finally { await admin.end() }
+      const pool = new pg.Pool({ connectionString: urlFor(name), max: 8 })
+      const api = new pg.Pool({ connectionString: urlFor(name, 'agent_api'), max: 8 })
+      pool.on('error', () => {})
+      api.on('error', () => {})
+      const db = {
+        name, pool, api, url: urlFor(name), apiUrl: urlFor(name, 'agent_api'),
+        async drop() {
+          await api.end().catch(() => {})
+          await pool.end().catch(() => {})
+          const a = new pg.Pool({ connectionString: ADMIN_URL, max: 1 })
+          await a.query(`drop database if exists ${name} with (force)`).catch(() => {})
+          await a.end()
+        },
+      }
+      made.push(db)
+      return db
+    },
+    async dropAll() {
+      for (const db of made) await db.drop().catch(() => {})
+      const a = new pg.Pool({ connectionString: ADMIN_URL, max: 1 })
+      await a.query(`drop database if exists ${template} with (force)`).catch(() => {})
+      await a.end()
+    },
   }
 }

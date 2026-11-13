@@ -10,7 +10,8 @@ import { buildConversationContext, ContextError } from '../../src/lib/domain/con
 import { validateDraft, moneyMentions, contentReasons } from '../../src/lib/domain/conversation-ai/validator.js'
 import { buildFactLedger } from '../../src/lib/domain/conversation-ai/facts.js'
 import { questionKindOf, questionLedger, blockedQuestionKinds } from '../../src/lib/domain/conversation-ai/questions.js'
-import { runConversationAiShadow, createMemoryShadowStore } from '../../src/lib/domain/conversation-ai/engine.js'
+import { runConversationAiShadow as retiredR1Shadow, composeDraft, createMemoryShadowStore } from '../../src/lib/domain/conversation-ai/engine.js'
+import { runCanonicalShadow as runConversationAiShadow } from '../../src/lib/domain/conversation-ai/runtime/canonical-shadow.js'
 import { DEFAULT_AI_REPLY_POLICY, assertSendAllowed, shadowAllowed, normalizePolicy, SHADOW_ENV_FLAG } from '../../src/lib/domain/conversation-ai/policy.js'
 import { createConversationModelClient, createSpendTracker } from '../../src/lib/domain/conversation-ai/model-client.js'
 import { maskText } from '../../src/lib/domain/conversation-ai/pii.js'
@@ -76,24 +77,49 @@ test('contract: a valid decision passes; unknown keys, bad enums, foreign ids, r
   assert.equal(fc.contract_version, DECISION_CONTRACT_VERSION)
 })
 
-test('contract: invalid model output fails closed to NEEDS_REVIEW (after the escalation also fails)', async () => {
+test('contract: invalid model output is retried once on Haiku, then fails closed to NEEDS_REVIEW — never escalated without a candidate (8.5.15)', async () => {
   const { provider, mc } = client({ intent: 'nonsense' })
-  const ctx = buildConversationContext(input('what is your offer', priceAskThread))
-  const r = await understandInbound({ context: ctx, inboundText: 'what is your offer', inboundId: 'in-1', deterministic: { intent: 'asks_offer' }, eligibility: OPEN, modelClient: mc })
+  const ctx = buildConversationContext(input('hmm not sure yet', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm not sure yet', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
   assert.equal(r.decision.proposed_message, null)
-  assert.equal(provider.calls.length, 2, 'haiku then sonnet')
+  assert.equal(provider.calls.length, 2, 'haiku, then one haiku repair that sees the errors (8.5.16) — no sonnet without a candidate (8.5.15)')
   assert.match(provider.calls[0].model, /haiku/)
-  assert.match(provider.calls[1].model, /sonnet/)
-  assert.deepEqual(provider.calls[1].tool_choice, { type: 'auto' }, 'sonnet 5.5 refuses forced tool_choice')
+  assert.match(provider.calls[1].model, /haiku/)
+  assert.match(JSON.stringify(provider.calls[1].messages), /FAILED VALIDATION/)
+  assert.equal(r.trace.default_retry, true)
+  assert.deepEqual(r.trace.repair, { attempted: true, ok: false })
 })
 
-test('escalation: Sonnet gains no authority — its ESCALATE becomes NEEDS_REVIEW', async () => {
-  const { mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'financing', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'financing' })))
+test('escalation (8.5.15): a Haiku ESCALATE with no reply candidate is a human item — Sonnet is not called', async () => {
+  const { provider, mc } = client(goodDecision({ escalation_required: true, escalation_reason: 'financing', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }))
   const ctx = buildConversationContext(input('would you do owner financing?', priceAskThread))
   const r = await understandInbound({ context: ctx, inboundText: 'would you do owner financing?', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+  assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
+  assert.equal(provider.calls.length, 1)
+  assert.ok(r.trace.escalation_withheld.includes('financing'))
+})
+
+test('escalation: a reply candidate with a non-human-bound trigger goes to Sonnet, and Sonnet gains no authority — its ESCALATE becomes NEEDS_REVIEW', async () => {
+  const { provider, mc } = client((p, n) => (n === 1 ? goodDecision({ escalation_required: true, escalation_reason: 'low_confidence' }) : goodDecision({ outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false, escalation_required: true, escalation_reason: 'low_confidence' })))
+  const ctx = buildConversationContext(input('hmm let me see', priceAskThread))
+  const r = await understandInbound({ context: ctx, inboundText: 'hmm let me see', inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+  assert.deepEqual(provider.calls[1].tool_choice, { type: 'auto' }, 'sonnet 5.5 refuses forced tool_choice')
   assert.equal(r.trace.path, 'haiku→sonnet')
   assert.equal(r.decision.outcome, 'NEEDS_REVIEW')
+  assert.match(provider.calls[1].model, /sonnet/)
+})
+
+test('8.5.16 eval: NO Sonnet call when the turn goes to a human anyway (financing, offer request, Spanish); price contradiction is a HOLD', async () => {
+  for (const text of ['would you do owner financing?', 'what is your offer', '¿Cuánto me ofrece por la casa?']) {
+    const { provider, mc } = client(() => goodDecision({ escalation_required: true, escalation_reason: 'other', outcome: 'ESCALATE_TO_SONNET', proposed_message: null, response_needed: false }))
+    const ctx = buildConversationContext(input(text, priceAskThread))
+    const r = await understandInbound({ context: ctx, inboundText: text, inboundId: 'in-1', deterministic: null, eligibility: OPEN, modelClient: mc })
+    assert.equal(provider.calls.length, 1, text)
+    assert.match(provider.calls[0].model, /haiku/)
+    assert.equal(r.trace.escalation_skipped, 'human_bound', text)
+    assert.notEqual(r.decision.outcome, 'ESCALATE_TO_SONNET')
+  }
 })
 
 // ── deterministic pre-check ────────────────────────────────────────────────
@@ -143,8 +169,10 @@ test('validator: rejects a repeat asking-price question after "what\'s your prop
   assert.equal(again.status, 'rejected_with_reasons')
   assert.ok(again.reasons.some((r) => r.startsWith('question_already_asked:asking_price')))
   assert.ok(again.reasons.includes('irrelevant:re_asks_price_after_offer_request'))
+  // rc-8.5.21 v3 (S1–S5 + owner rule 10-18): price withheld after one ask ⇒ a human (research → gated offer):
+  // the routine draft is not sendable on its own
   const ok = await validateDraft({ decision: goodDecision(), context: ctx, inboundText: "What's your proposal", eligibility: OPEN })
-  assert.equal(ok.status, 'validated_draft', JSON.stringify(ok.reasons))
+  assert.ok(ok.reasons.includes('objective_override_violated:offer_needs_human'), JSON.stringify(ok.reasons))
 })
 
 test('validator: "what\'s your offer" never yields an invented number; an authoritative offer amount passes only flagged for approval', async () => {
@@ -245,6 +273,13 @@ test('model client refuses a payload with residual PII and never exceeds the spe
 })
 
 // ── engine: idempotency, kill switch, no send ──────────────────────────────
+// rc-8.5.21: the live shadow is the CANONICAL runtime (runtime/canonical-shadow.js); the R1
+// proposed_message writer (engine.js) is retired and throws.
+test('R1 composer retired: the old shadow engine and its draft normaliser throw R1_COMPOSER_RETIRED', async () => {
+  assert.throws(() => composeDraft(goodDecision()), (e) => e.code === 'R1_COMPOSER_RETIRED')
+  await assert.rejects(() => retiredR1Shadow({ input: input('hi') }), (e) => e.code === 'R1_COMPOSER_RETIRED')
+})
+
 test('parallel duplicate inbound (same message id) → exactly one decision', async () => {
   const store = createMemoryShadowStore()
   const { provider, mc } = client(goodDecision())
@@ -278,6 +313,8 @@ test('every shadow record says not sent; send permission is never granted', asyn
   assert.equal(r.record.send_status, 'not_sent_shadow')
   assert.equal(r.record.decision.send_permission_granted, false)
   assert.equal(r.record.policy_code, 'AI_REPLY_POLICY_DISABLED')
+  assert.equal(r.record.decision.contract_version, 'conv-ai.canonical-runtime.v1')
+  assert.match(r.record.writer_version, /^conv-ai\.pipeline\.v2\+playbook\.v3\+compose\.v3$/)
 })
 
 // ── follow-up re-evaluation ────────────────────────────────────────────────

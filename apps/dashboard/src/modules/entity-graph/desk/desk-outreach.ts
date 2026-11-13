@@ -30,6 +30,7 @@ export const SMS_REASON_LABEL: Record<string, string> = {
   suppressed: 'Suppressed (opted out)',
   suppression_blocked: 'Suppressed (opted out)',
   wrong_number: 'Wrong number',
+  prior_reply_not_owner: 'Said they are not the owner',
   active_queue_item: 'Already queued',
   ACTIVE_QUEUE_ITEM: 'Already queued',
   routing_blocked: 'No sender coverage',

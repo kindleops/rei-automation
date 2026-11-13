@@ -145,6 +145,33 @@ async function fetchCandidateRows(supabase, scope = {}) {
 /**
  * Cancel pending Supabase send_queue rows for a canonical identity scope.
  */
+/** Close the thread's lifecycle intents for this cancellation (never throws; no-op unless live). */
+async function closeLifecycleIntents({ supabase, deps = {}, policy, reason, thread_key, inbound_received_at = null, keep_nurture_follow_ups = false, only_property_id = null }) {
+  if (!clean(thread_key)) return null;
+  try {
+    const { lifecycleLive, closeFollowUpIntentsForThread } = await import("@/lib/domain/followups/followup-lifecycle.js");
+    const compliance = policy === CANCELLATION_POLICIES.COMPLIANCE_TERMINAL;
+    // rc-8.5.21 v3 P0-C: a STOP cancels EVERY pending follow-up intent of the contact whatever the
+    // lifecycle mode (a dry-run / off-mode intent must never become executable after a STOP); the
+    // supersession of a newer inbound stays live-mode only
+    if (!compliance && !(await lifecycleLive({ readSwitch: deps.readSwitch || null, supabase }))) return null;
+    return await closeFollowUpIntentsForThread({
+      thread_key,
+      state: compliance ? "cancelled" : "superseded",
+      reason: compliance ? clean(reason) || "compliance_cancel" : `superseded_by_newer_inbound:${clean(reason) || policy}`,
+      actor: `cancel_pending_outbound:${policy}`,
+      // a slow older inbound never closes a follow-up planned by a newer one
+      created_before: compliance ? null : clean(inbound_received_at) || null,
+      // blind-eval S1 (SYN-34): a reply that NAMES one property supersedes only THAT property's follow-ups
+      property_id: !compliance && clean(only_property_id) ? clean(only_property_id) : null,
+      keep_kinds: !compliance && keep_nurture_follow_ups ? ["not_interested_nurture", "seller_requested_callback", "nurture_tenant_or_occupancy", "nurture_listed_or_unavailable"] : null,
+    }, { supabase });
+  } catch (error) {
+    warn("followup_lifecycle.close_on_cancel_failed", { message: error?.message || "unknown_error" });
+    return null;
+  }
+}
+
 export async function cancelSupabasePendingOutbound(
   {
     thread_key = null,
@@ -166,6 +193,10 @@ export async function cancelSupabasePendingOutbound(
     /** Owner rule (2026-09-30): "A not interested is a 30 day follow up."
      *  When true, a scheduled nurture follow-up survives a follow-up sweep. */
     keep_nurture_follow_ups = false,
+    /** blind-eval S1 (SYN-34): an inbound takeover whose reply NAMES exactly one of the thread's
+     *  properties supersedes only that property's follow-ups; another property's follow-up (still a
+     *  silence on THAT property) survives. Never applies to a compliance cancel. */
+    only_property_id = null,
   } = {},
   deps = {}
 ) {
@@ -251,6 +282,14 @@ export async function cancelSupabasePendingOutbound(
 
     const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
     if (
+      clean(only_property_id) &&
+      policy !== CANCELLATION_POLICIES.COMPLIANCE_TERMINAL &&
+      clean(row.property_id || meta.property_id) &&
+      clean(row.property_id || meta.property_id) !== clean(only_property_id)
+    ) {
+      return false;
+    }
+    if (
       keep_nurture_follow_ups &&
       policy !== CANCELLATION_POLICIES.COMPLIANCE_TERMINAL &&
       row_type === "followup" &&
@@ -285,10 +324,26 @@ export async function cancelSupabasePendingOutbound(
     return true;
   });
 
+  // FOLLOW-UP LIFECYCLE (owner P0 2026-10-17): the same cancellation closes the thread's follow-up
+  // intents that have no row yet (planned / held) — a fresh inbound SUPERSEDES them, a compliance stop
+  // CANCELS them — and keeps follow_up_at a projection. Rows that exist are reconciled by the DB trigger
+  // as they are cancelled below. Only while followup_execution_mode = live; never blocks the cancel.
+  let lifecycle = !dry_run ? await closeLifecycleIntents({
+    supabase, deps, policy, reason, thread_key: normalizePhone(thread_key) || clean(thread_key), inbound_received_at, keep_nurture_follow_ups, only_property_id,
+  }) : null;
+  // rc-8.5.21 v3 P0-C: a STOP closes the CONTACT's intents — also those keyed by the phone when the
+  // caller's thread key is another shape / thread
+  const stop_phone = normalizePhone(to_phone_number);
+  if (!dry_run && policy === CANCELLATION_POLICIES.COMPLIANCE_TERMINAL && stop_phone && stop_phone !== (normalizePhone(thread_key) || clean(thread_key))) {
+    const more = await closeLifecycleIntents({ supabase, deps, policy, reason, thread_key: stop_phone, inbound_received_at, keep_nurture_follow_ups, only_property_id });
+    if (more) lifecycle = { ...(lifecycle || {}), ok: (lifecycle?.ok ?? true) && more.ok, closed: Number(lifecycle?.closed || 0) + Number(more.closed || 0) };
+  }
+
   if (!eligible.length) {
     return {
       ok: true,
       cancelled: 0,
+      ...(lifecycle ? { followup_intents_closed: lifecycle.closed || 0 } : {}),
       reason: "no_pending_rows",
       idempotency_key,
       scope_key,
@@ -412,6 +467,7 @@ export async function cancelSupabasePendingOutbound(
     ok: true,
     cancelled,
     cancelled_ids,
+    ...(lifecycle ? { followup_intents_closed: lifecycle.closed || 0 } : {}),
     scanned: candidates.length,
     eligible_count: eligible.length,
     idempotency_key,

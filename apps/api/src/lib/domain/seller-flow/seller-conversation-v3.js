@@ -32,6 +32,7 @@
 //      the same question again; a second ask gets a different answer, a third
 //      is archived. Never the identical text twice (repeat guard).
 
+import { isOwnershipUnverified } from "@/lib/domain/seller-flow/decline-followup-policy.js";
 import { extractSellerFacts } from "@/lib/domain/seller-flow/extract-seller-facts.js";
 import { extractUpdateYears } from "@/lib/domain/seller-flow/monetary-understanding.js";
 import { evaluateScoreOfferSanity } from "@/lib/acquisition/offer-sanity.js";
@@ -743,6 +744,11 @@ export function planSellerConversationV3({
   }
 
   // ── 2. relationship intents → automatic dispositions ────────────────────
+  // RC 8.5.15: S1 bare "No" -- ownership denied / unverified. Closed for this
+  // recipient x property; no referral ask, no further ownership question.
+  if (isOwnershipUnverified(classification)) {
+    return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_ownership_denied_unverified_archived");
+  }
   if (CLOSED_PROPERTY_INTENTS.has(intent) || v2_intent === V2_INTENTS.SOLD_FORMER_OWNER) {
     return terminal(b, V3_TERMINAL.ARCHIVE_PROPERTY, "v3_sold_or_not_owner_archived");
   }

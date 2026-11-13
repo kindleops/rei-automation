@@ -27,10 +27,11 @@
  * street names → placeholder streets, seller names shown as initials only.
  *
  * Usage (from apps/api; the @/ alias needs the ops loader):
- *   SUPABASE_DB_URL=… nice -n 15 node --import ./scripts/register-aliases-ops.mjs \
+ *   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> nice -n 15 node --import ./scripts/register-aliases-ops.mjs \
  *     scripts/ops/reply-quality-report.mjs [--date YYYY-MM-DD | --today | --from D --to D]
  *     [--tz America/Chicago] [--emit-fixtures] [--out report.txt] [--no-replay]
- *     [--db-url-file /tmp/.dburl]
+ * The credential is the role-enforced read-only diagnostics role (rc-8.5.21-c,
+ * scripts/lib/prod-db-credentials.mjs); SUPABASE_DB_URL / DATABASE_URL are not read.
  *
  * Default window: yesterday in --tz (default America/Chicago), whole local day.
  * --emit-fixtures writes CANDIDATE fixtures (no expected label) for SUSPECT and
@@ -41,7 +42,7 @@
  *   cd apps/api && nice -n 15 node --import ./scripts/register-aliases-ops.mjs \
  *     scripts/ops/reply-quality-report.mjs --emit-fixtures --out ../../tmp/reply-quality/$(date -v-1d +%F).txt
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -687,15 +688,8 @@ async function main() {
   const end = new Date(Math.min(endFull.getTime(), Date.now()));
   const label = `${from}${to !== from ? `..${to}` : ""}${end < endFull ? ` (so far, to ${fmtLocal(end.toISOString(), tz)} local)` : " (all day)"}`;
 
-  const urlFile = arg("db-url-file");
-  const url = String(process.env.SUPABASE_DB_URL || process.env.DATABASE_URL || (urlFile ? readFileSync(urlFile, "utf8") : "")).trim();
-  if (!url) {
-    console.error("SUPABASE_DB_URL / DATABASE_URL (or --db-url-file) is required.");
-    process.exit(2);
-  }
-  const { default: pg } = await import("pg");
-  const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const { connectReadOnlyDiagnostics } = await import("../../../../scripts/lib/prod-db-credentials.mjs");
+  const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-reply-quality-report" });
   let data;
   try {
     await client.query("BEGIN READ ONLY");

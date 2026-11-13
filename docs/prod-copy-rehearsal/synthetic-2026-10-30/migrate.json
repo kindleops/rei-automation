@@ -1,0 +1,1302 @@
+{
+  "step": "migrate",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_20261030",
+  "admin_url": "postgres://postgres@127.0.0.1:54341/postgres",
+  "started_at": "2026-10-30T05:20:05.050Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": true,
+    "target": {
+      "database": "lc_prodcopy_synth_20261030",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    }
+  },
+  "status": "pass",
+  "results": {
+    "links": [],
+    "hash_check": [
+      {
+        "link": "#29",
+        "runner_id": "action_gateway_ohg",
+        "apply": "PROPOSED_20261027120000_action_gateway_ohg.sql",
+        "sha256": "3f76b0e6c0d8d184a91a53ef3dd5d187ee11858a72d69a7ef7b50467b796fda7",
+        "expected": "3f76b0e6c0d8d184a91a53ef3dd5d187ee11858a72d69a7ef7b50467b796fda7",
+        "rollback": "PROPOSED_20261027120000_action_gateway_ohg_rollback.sql",
+        "rollback_sha256": "fb24555568e7e1db1700f132d7b7245bf04690689661cbf91f5e366044cc8eb3",
+        "rollback_expected_prefix": "fb24555568e7",
+        "ok": true,
+        "fixtures": {
+          "PROPOSED_20261027120000_action_gateway_ohg_pretest.sql": "a4d033ee61d6a0ef602b1842bd0eae9df167063a9ae567264a3abde5bbf90dc8",
+          "PROPOSED_20261027120000_action_gateway_ohg_posttest.sql": "af14f465314d4405490d43b78d157b9f2d0d1d6567e62c7d87826b8699dffcc3",
+          "PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql": "5d1ccf7d78415d45eb47934d299d518a7f3ac52fc7f752d2cb393accfbb0c333"
+        }
+      },
+      {
+        "link": "#30",
+        "runner_id": "lc_mcp_acquisition_reads",
+        "apply": "PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql",
+        "sha256": "10ec163f8d82df7c81e7ca64548f2aa6b974f3fbc8a9d7a4a4551e38b24010fe",
+        "expected": "10ec163f8d82df7c81e7ca64548f2aa6b974f3fbc8a9d7a4a4551e38b24010fe",
+        "rollback": "PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql",
+        "rollback_sha256": "e124785fa75c9db8139c09e73d854fc8a59dc5b8e9b04abbaf85bc974bba9500",
+        "rollback_expected_prefix": "e124785fa75c",
+        "ok": true,
+        "fixtures": {
+          "PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql": "0a964f73dfa0dd9959551c11d418b5c570163859fa18dbeb7d7ecb4d2dc6eb8f",
+          "PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql": "bf79f5cb0ccae1f5d7fe3a697fd56098efa4d2ed3189767414d9dc91be47c99e",
+          "PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql": "a6d85614825099351688a84135acac2a19fdd0a9eb5aee8d214567ffcfecb0e3"
+        }
+      },
+      {
+        "link": "#31",
+        "runner_id": "action_gateway_standing_reply",
+        "apply": "PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+        "sha256": "2e054bfdad4438df30b816d7c2d336d12f2cbcddb35c83a859a8649cb4b88f18",
+        "expected": "2e054bfdad4438df30b816d7c2d336d12f2cbcddb35c83a859a8649cb4b88f18",
+        "rollback": "PROPOSED_20261028100000_action_gateway_standing_reply_rollback.sql",
+        "rollback_sha256": "c3b925a1e26d38d0a589ba705afdcef0c5ca1484080e111fc4beaf69a42a9024",
+        "rollback_expected_prefix": "c3b925a1e26d",
+        "ok": true,
+        "fixtures": {
+          "PROPOSED_20261028100000_action_gateway_standing_reply_pretest.sql": "5318b92bd500b0ddcff7f2ce7ab15952fd6046180e42080cba6f990e2b6fecd2",
+          "PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql": "13c28f651ad33adf5b3ca02b52327705dafd92bf592e33863e1c229488ce50e0",
+          "PROPOSED_20261028100000_action_gateway_standing_reply_rollback_posttest.sql": "ed3a82228a8e5d1ebb9013fe3de5fe363fe344e498d89087b0290bf881af821d"
+        }
+      },
+      {
+        "link": "A",
+        "runner_id": "ai_generated_outbound",
+        "apply": "PROPOSED_20261029090000_ai_generated_outbound.sql",
+        "sha256": "64537ccfe7eef2f526ba11db773c1d37d1b4c355695a3ec8be1c017e8940dc33",
+        "expected": "64537ccfe7eef2f526ba11db773c1d37d1b4c355695a3ec8be1c017e8940dc33",
+        "rollback": "PROPOSED_20261029090000_ai_generated_outbound_rollback.sql",
+        "rollback_sha256": "be12377bbe2794e196485d6cbe8f9bf53a42b8a969febf214360ff30d2c62a74",
+        "rollback_expected_prefix": "be12377bbe27",
+        "ok": true,
+        "fixtures": {
+          "PROPOSED_20261029090000_ai_generated_outbound_pretest.sql": "204c92f8ec0d3ae4dc04643357f6c6112b7e0f31028fe1f1f36fc9a33a9c1556",
+          "PROPOSED_20261029090000_ai_generated_outbound_posttest.sql": "2badaa1e8b5741ad2f07167daf26cb954d0c5de674cc7a3c2f938ac71f45c68b",
+          "PROPOSED_20261029090000_ai_generated_outbound_rollback_posttest.sql": "bcd5cca0a6dc4bffb24b0a8a19ba9637d1294787b301636a0f290c95bfa3269a"
+        }
+      },
+      {
+        "link": "B",
+        "runner_id": "action_gateway_agent_message",
+        "apply": "PROPOSED_20261029100000_action_gateway_agent_message.sql",
+        "sha256": "cb34b2dcae8912266784931a2b1f3369c01cf0f98b302bd645c1313885605178",
+        "expected": "cb34b2dcae8912266784931a2b1f3369c01cf0f98b302bd645c1313885605178",
+        "rollback": "PROPOSED_20261029100000_action_gateway_agent_message_rollback.sql",
+        "rollback_sha256": "61b0e9ba3393ce05e6b43cdc0ad76122586b907747520da4aa9de8a85eaacf43",
+        "rollback_expected_prefix": "61b0e9ba3393",
+        "ok": true,
+        "fixtures": {
+          "PROPOSED_20261029100000_action_gateway_agent_message_pretest.sql": "f213582d049643494751f2618291413ad778b5584e24971fb3ad1053cfc1d825",
+          "PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql": "13c6abf3654069a75a86a632f91eb72df0a773268c98ff900a68b81defe29678",
+          "PROPOSED_20261029100000_action_gateway_agent_message_rollback_posttest.sql": "378179a7eddca482248229f415a38fcc4f5065cdfee89e272da8b7736b092abe"
+        }
+      }
+    ],
+    "cycle1": [
+      {
+        "link": "#29",
+        "runner_id": "action_gateway_ohg",
+        "pretest": {
+          "ms": 46,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261027120000_action_gateway_ohg.sql",
+          "ms": 83,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.lead_annotations.lead_annotations_amount_check",
+            "action_gateway.lead_annotations.lead_annotations_class_check",
+            "action_gateway.lead_annotations.lead_annotations_intent_id_fkey",
+            "action_gateway.lead_annotations.lead_annotations_kind_check",
+            "action_gateway.lead_annotations.lead_annotations_note_check",
+            "action_gateway.lead_annotations.lead_annotations_org_id_fkey",
+            "action_gateway.lead_annotations.lead_annotations_payload_check",
+            "action_gateway.lead_annotations.lead_annotations_pkey",
+            "action_gateway.lead_annotations.lead_annotations_value_check",
+            "action_gateway.ohg_restore.ohg_restore_pkey",
+            "action_gateway.seller_action_receipts.seller_action_receipts_action_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.seller_action_receipts",
+              "constraint": "seller_action_receipts_action_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 14,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261027120000_action_gateway_ohg_posttest.sql",
+            "ms": 118,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "#30",
+        "runner_id": "lc_mcp_acquisition_reads",
+        "pretest": {
+          "ms": 17,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql",
+          "ms": 159,
+          "ok": true,
+          "constraints_added_or_changed": [],
+          "check_revalidation": []
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql",
+            "ms": 28,
+            "outcome": "advisory_fail",
+            "error": "ERROR:  42P06: schema \"action_gateway\" already exists",
+            "advisory_reason": "written for its isolated runner world: it CREATEs schema action_gateway inside its transaction (so it fails wherever link #26 is applied, which #29 / #31 / B require) and asserts the synthetic seeds of lc_mcp_acquisition_reads_emulation.sql (threads 101 / 102 / 107). Its pretest, the apply's own self-check post-condition, its rollback posttest and the fingerprint checks remain stops."
+          }
+        ]
+      },
+      {
+        "link": "#31",
+        "runner_id": "action_gateway_standing_reply",
+        "pretest": {
+          "ms": 22,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+          "ms": 55,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.action_authorizations.action_authorizations_per_use_authority_chk",
+            "action_gateway.action_authorizations.action_authorizations_standing_chk",
+            "action_gateway.capability_grants.capability_grants_standing_seller_facing_chk"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_standing_seller_facing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 11,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_per_use_authority_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_standing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 22,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql",
+            "ms": 121,
+            "outcome": "pass",
+            "error": null
+          }
+        ],
+        "section1_after": {
+          "sql_sha256": "c3d2e47b3aec7e0c0179d7579b73014dd33f94438ce4a0f9d47e820c9e7d766d",
+          "source": "docs/AGENT-MESSAGES-MIGRATION-PLAN.md §1 (verbatim)",
+          "verbatim": {
+            "ledger": true,
+            "link_26": true,
+            "link_27": true,
+            "link_28": true,
+            "link_28_send_authority": true,
+            "link_29": true,
+            "link_31": true,
+            "link_31_check": true,
+            "gateway_self_check": true,
+            "relations": true
+          },
+          "guarded": {
+            "ledger": true,
+            "link_26": true,
+            "link_27": true,
+            "link_28": true,
+            "link_28_send_authority": true,
+            "link_29": true,
+            "link_31": true,
+            "link_31_check": true,
+            "relations": true,
+            "gateway_self_check": true
+          },
+          "verbatim_matches_guarded": true
+        }
+      },
+      {
+        "link": "A",
+        "runner_id": "ai_generated_outbound",
+        "pretest": {
+          "ms": 24,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261029090000_ai_generated_outbound.sql",
+          "ms": 56,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "ai_generated_messages.ai_generated_messages_author_check",
+            "ai_generated_messages.ai_generated_messages_authorization_scope_check",
+            "ai_generated_messages.ai_generated_messages_check",
+            "ai_generated_messages.ai_generated_messages_check1",
+            "ai_generated_messages.ai_generated_messages_decision_outcome_check",
+            "ai_generated_messages.ai_generated_messages_record_kind_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_record_kind_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 17,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_author_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_check1",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_decision_outcome_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 13,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_authorization_scope_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 40960,
+              "scan_ms": 15,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261029090000_ai_generated_outbound_posttest.sql",
+            "ms": 27,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "B",
+        "runner_id": "action_gateway_agent_message",
+        "pretest": {
+          "ms": 27,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261029100000_action_gateway_agent_message.sql",
+          "ms": 176,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.action_authorizations.action_authorizations_standing_chk",
+            "action_gateway.agent_message_restore.agent_message_restore_pkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_attribution_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_attribution_hash_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_body_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_check1",
+            "action_gateway.agent_text_submissions.agent_text_submissions_org_id_fkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_pkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_text_hash_check",
+            "action_gateway.capability_grants.capability_grants_agent_message_lead_day_cap_chk",
+            "action_gateway.capability_grants.capability_grants_standing_seller_facing_chk",
+            "action_gateway.lead_assignments.lead_assignments_agent_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_check",
+            "action_gateway.lead_assignments.lead_assignments_check1",
+            "action_gateway.lead_assignments.lead_assignments_intent_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_lead_ref_check",
+            "action_gateway.lead_assignments.lead_assignments_org_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_pkey",
+            "action_gateway.lead_assignments.lead_assignments_release_reason_check",
+            "action_gateway.lead_events.lead_events_event_id_check",
+            "action_gateway.lead_events.lead_events_event_id_key",
+            "action_gateway.lead_events.lead_events_kind_check",
+            "action_gateway.lead_events.lead_events_payload_check",
+            "action_gateway.lead_events.lead_events_pkey",
+            "action_gateway.lead_events.lead_events_thread_ref_check",
+            "action_gateway.seller_action_receipts.seller_action_receipts_action_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.seller_action_receipts",
+              "constraint": "seller_action_receipts_action_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 15,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_standing_seller_facing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 20,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_agent_message_lead_day_cap_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 18,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_standing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 12,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql",
+            "ms": 107,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      }
+    ],
+    "rollback": [
+      {
+        "link": "B",
+        "runner_id": "action_gateway_agent_message",
+        "rollback": {
+          "file": "PROPOSED_20261029100000_action_gateway_agent_message_rollback.sql",
+          "ms": 191,
+          "ok": true
+        },
+        "rollback_posttests": [
+          {
+            "file": "PROPOSED_20261029100000_action_gateway_agent_message_rollback_posttest.sql",
+            "ms": 77,
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "A",
+        "runner_id": "ai_generated_outbound",
+        "rollback": {
+          "file": "PROPOSED_20261029090000_ai_generated_outbound_rollback.sql",
+          "ms": 51,
+          "ok": true
+        },
+        "rollback_posttests": [
+          {
+            "file": "PROPOSED_20261029090000_ai_generated_outbound_rollback_posttest.sql",
+            "ms": 19,
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "#31",
+        "runner_id": "action_gateway_standing_reply",
+        "rollback": {
+          "file": "PROPOSED_20261028100000_action_gateway_standing_reply_rollback.sql",
+          "ms": 49,
+          "ok": true
+        },
+        "rollback_posttests": [
+          {
+            "file": "PROPOSED_20261028100000_action_gateway_standing_reply_rollback_posttest.sql",
+            "ms": 85,
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "#30",
+        "runner_id": "lc_mcp_acquisition_reads",
+        "rollback": {
+          "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql",
+          "ms": 66,
+          "ok": true
+        },
+        "rollback_posttests": [
+          {
+            "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql",
+            "ms": 89,
+            "ok": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "#29",
+        "runner_id": "action_gateway_ohg",
+        "rollback": {
+          "file": "PROPOSED_20261027120000_action_gateway_ohg_rollback.sql",
+          "ms": 110,
+          "ok": true
+        },
+        "rollback_posttests": [
+          {
+            "file": "PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql",
+            "ms": 71,
+            "ok": true,
+            "error": null
+          }
+        ]
+      }
+    ],
+    "cycle2": [
+      {
+        "link": "#29",
+        "runner_id": "action_gateway_ohg",
+        "pretest": {
+          "ms": 38,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261027120000_action_gateway_ohg.sql",
+          "ms": 75,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.lead_annotations.lead_annotations_amount_check",
+            "action_gateway.lead_annotations.lead_annotations_class_check",
+            "action_gateway.lead_annotations.lead_annotations_intent_id_fkey",
+            "action_gateway.lead_annotations.lead_annotations_kind_check",
+            "action_gateway.lead_annotations.lead_annotations_note_check",
+            "action_gateway.lead_annotations.lead_annotations_org_id_fkey",
+            "action_gateway.lead_annotations.lead_annotations_payload_check",
+            "action_gateway.lead_annotations.lead_annotations_pkey",
+            "action_gateway.lead_annotations.lead_annotations_value_check",
+            "action_gateway.ohg_restore.ohg_restore_pkey",
+            "action_gateway.seller_action_receipts.seller_action_receipts_action_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.seller_action_receipts",
+              "constraint": "seller_action_receipts_action_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 18,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261027120000_action_gateway_ohg_posttest.sql",
+            "ms": 118,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "#30",
+        "runner_id": "lc_mcp_acquisition_reads",
+        "pretest": {
+          "ms": 17,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql",
+          "ms": 163,
+          "ok": true,
+          "constraints_added_or_changed": [],
+          "check_revalidation": []
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql",
+            "ms": 42,
+            "outcome": "advisory_fail",
+            "error": "ERROR:  42P06: schema \"action_gateway\" already exists",
+            "advisory_reason": "written for its isolated runner world: it CREATEs schema action_gateway inside its transaction (so it fails wherever link #26 is applied, which #29 / #31 / B require) and asserts the synthetic seeds of lc_mcp_acquisition_reads_emulation.sql (threads 101 / 102 / 107). Its pretest, the apply's own self-check post-condition, its rollback posttest and the fingerprint checks remain stops."
+          }
+        ]
+      },
+      {
+        "link": "#31",
+        "runner_id": "action_gateway_standing_reply",
+        "pretest": {
+          "ms": 19,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+          "ms": 77,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.action_authorizations.action_authorizations_per_use_authority_chk",
+            "action_gateway.action_authorizations.action_authorizations_standing_chk",
+            "action_gateway.capability_grants.capability_grants_standing_seller_facing_chk"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_per_use_authority_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_standing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 15,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_standing_seller_facing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 10,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql",
+            "ms": 77,
+            "outcome": "pass",
+            "error": null
+          }
+        ],
+        "section1_after": {
+          "sql_sha256": "c3d2e47b3aec7e0c0179d7579b73014dd33f94438ce4a0f9d47e820c9e7d766d",
+          "source": "docs/AGENT-MESSAGES-MIGRATION-PLAN.md §1 (verbatim)",
+          "verbatim": {
+            "ledger": true,
+            "link_26": true,
+            "link_27": true,
+            "link_28": true,
+            "link_28_send_authority": true,
+            "link_29": true,
+            "link_31": true,
+            "link_31_check": true,
+            "gateway_self_check": true,
+            "relations": true
+          },
+          "guarded": {
+            "ledger": true,
+            "link_26": true,
+            "link_27": true,
+            "link_28": true,
+            "link_28_send_authority": true,
+            "link_29": true,
+            "link_31": true,
+            "link_31_check": true,
+            "relations": true,
+            "gateway_self_check": true
+          },
+          "verbatim_matches_guarded": true
+        }
+      },
+      {
+        "link": "A",
+        "runner_id": "ai_generated_outbound",
+        "pretest": {
+          "ms": 19,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261029090000_ai_generated_outbound.sql",
+          "ms": 51,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "ai_generated_messages.ai_generated_messages_author_check",
+            "ai_generated_messages.ai_generated_messages_authorization_scope_check",
+            "ai_generated_messages.ai_generated_messages_check",
+            "ai_generated_messages.ai_generated_messages_check1",
+            "ai_generated_messages.ai_generated_messages_decision_outcome_check",
+            "ai_generated_messages.ai_generated_messages_record_kind_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_record_kind_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 12,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_decision_outcome_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 11,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_author_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 12,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 14,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_check1",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 20,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "ai_generated_messages",
+              "constraint": "ai_generated_messages_authorization_scope_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 81920,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261029090000_ai_generated_outbound_posttest.sql",
+            "ms": 38,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      },
+      {
+        "link": "B",
+        "runner_id": "action_gateway_agent_message",
+        "pretest": {
+          "ms": 30,
+          "ok": true,
+          "left_no_trace": true
+        },
+        "apply": {
+          "file": "PROPOSED_20261029100000_action_gateway_agent_message.sql",
+          "ms": 217,
+          "ok": true,
+          "constraints_added_or_changed": [
+            "action_gateway.action_authorizations.action_authorizations_standing_chk",
+            "action_gateway.agent_message_restore.agent_message_restore_pkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_attribution_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_attribution_hash_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_body_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_check",
+            "action_gateway.agent_text_submissions.agent_text_submissions_check1",
+            "action_gateway.agent_text_submissions.agent_text_submissions_org_id_fkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_pkey",
+            "action_gateway.agent_text_submissions.agent_text_submissions_text_hash_check",
+            "action_gateway.capability_grants.capability_grants_agent_message_lead_day_cap_chk",
+            "action_gateway.capability_grants.capability_grants_standing_seller_facing_chk",
+            "action_gateway.lead_assignments.lead_assignments_agent_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_check",
+            "action_gateway.lead_assignments.lead_assignments_check1",
+            "action_gateway.lead_assignments.lead_assignments_intent_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_lead_ref_check",
+            "action_gateway.lead_assignments.lead_assignments_org_id_fkey",
+            "action_gateway.lead_assignments.lead_assignments_pkey",
+            "action_gateway.lead_assignments.lead_assignments_release_reason_check",
+            "action_gateway.lead_events.lead_events_event_id_check",
+            "action_gateway.lead_events.lead_events_event_id_key",
+            "action_gateway.lead_events.lead_events_kind_check",
+            "action_gateway.lead_events.lead_events_payload_check",
+            "action_gateway.lead_events.lead_events_pkey",
+            "action_gateway.lead_events.lead_events_thread_ref_check",
+            "action_gateway.seller_action_receipts.seller_action_receipts_action_check"
+          ],
+          "check_revalidation": [
+            {
+              "table": "action_gateway.seller_action_receipts",
+              "constraint": "seller_action_receipts_action_check",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 15,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_standing_seller_facing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 13,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.capability_grants",
+              "constraint": "capability_grants_agent_message_lead_day_cap_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 24576,
+              "scan_ms": 15,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            },
+            {
+              "table": "action_gateway.action_authorizations",
+              "constraint": "action_authorizations_standing_chk",
+              "validated": true,
+              "rows": 0,
+              "table_bytes": 32768,
+              "scan_ms": 16,
+              "violating_rows": 0,
+              "note": "VALIDATED at apply: the apply scanned every row under its lock; scan_ms is the read-only cost of the same evaluation"
+            }
+          ]
+        },
+        "posttests": [
+          {
+            "file": "PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql",
+            "ms": 132,
+            "outcome": "pass",
+            "error": null
+          }
+        ]
+      }
+    ],
+    "checks": {
+      "switches_before": {
+        "ok": true,
+        "switches": [
+          {
+            "key": "ai_agent_text_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_agent_message_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_conversation_send_enabled",
+            "value": "false",
+            "off": true
+          }
+        ],
+        "rule": "absent or false (each is enabled only by the value true)"
+      },
+      "fingerprint_pre_apply": "31ff3e92c89a0d9c",
+      "fingerprint_applied": "6917073e6524414e",
+      "verify_after_cycle1": {
+        "V-A": {
+          "has_columns": true,
+          "no_agent_records_yet": true,
+          "replies_bound": true
+        },
+        "V-B": {
+          "self_check": true,
+          "registry_rows": true,
+          "handoff_kind": true,
+          "composers_retired": true,
+          "gateway_writer": true,
+          "no_worker_fn_for_gateway": true,
+          "no_anon": true,
+          "feed_empty": true
+        },
+        "V-OFF": {
+          "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+          "at_switch": null,
+          "new_grants": 0,
+          "standing_at": 0
+        },
+        "ok": true,
+        "expected_v_off": {
+          "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+          "at_switch": null,
+          "new_grants": 0,
+          "standing_at": 0
+        }
+      },
+      "switches_after_cycle1": {
+        "ok": true,
+        "switches": [
+          {
+            "key": "ai_agent_text_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_agent_message_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_conversation_send_enabled",
+            "value": "false",
+            "off": true
+          }
+        ],
+        "rule": "absent or false (each is enabled only by the value true)"
+      },
+      "fingerprint_after_rollback": "31ff3e92c89a0d9c",
+      "rollback_restored_fingerprint": true,
+      "rollback_fingerprint_diff_excluding_cluster_roles": {
+        "removed": [],
+        "added": []
+      },
+      "rollback_restored_row_counts": true,
+      "fingerprint_reapplied": "6917073e6524414e",
+      "reapply_matches_first_apply": true,
+      "verify_after_reapply": {
+        "V-A": {
+          "has_columns": true,
+          "no_agent_records_yet": true,
+          "replies_bound": true
+        },
+        "V-B": {
+          "self_check": true,
+          "registry_rows": true,
+          "handoff_kind": true,
+          "composers_retired": true,
+          "gateway_writer": true,
+          "no_worker_fn_for_gateway": true,
+          "no_anon": true,
+          "feed_empty": true
+        },
+        "V-OFF": {
+          "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+          "at_switch": null,
+          "new_grants": 0,
+          "standing_at": 0
+        },
+        "ok": true,
+        "expected_v_off": {
+          "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+          "at_switch": null,
+          "new_grants": 0,
+          "standing_at": 0
+        }
+      },
+      "switches_after_reapply": {
+        "ok": true,
+        "switches": [
+          {
+            "key": "ai_agent_text_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_agent_message_enabled",
+            "value": "absent",
+            "off": true
+          },
+          {
+            "key": "ai_conversation_send_enabled",
+            "value": "false",
+            "off": true
+          }
+        ],
+        "rule": "absent or false (each is enabled only by the value true)"
+      }
+    },
+    "timings": [
+      {
+        "cycle": "cycle 1",
+        "link": "#29",
+        "pretest_ms": 46,
+        "apply_ms": 83,
+        "posttest_ms": 118,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.seller_action_receipts",
+            "rows": 0,
+            "scan_ms": 14
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 1",
+        "link": "#30",
+        "pretest_ms": 17,
+        "apply_ms": 159,
+        "posttest_ms": 28,
+        "posttest": "advisory_fail",
+        "check_constraints": []
+      },
+      {
+        "cycle": "cycle 1",
+        "link": "#31",
+        "pretest_ms": 22,
+        "apply_ms": 55,
+        "posttest_ms": 121,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 11
+          },
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 16
+          },
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 22
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 1",
+        "link": "A",
+        "pretest_ms": 24,
+        "apply_ms": 56,
+        "posttest_ms": 27,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 17
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 16
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 16
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 16
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 13
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 15
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 1",
+        "link": "B",
+        "pretest_ms": 27,
+        "apply_ms": 176,
+        "posttest_ms": 107,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.seller_action_receipts",
+            "rows": 0,
+            "scan_ms": 15
+          },
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 20
+          },
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 18
+          },
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 12
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 2",
+        "link": "#29",
+        "pretest_ms": 38,
+        "apply_ms": 75,
+        "posttest_ms": 118,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.seller_action_receipts",
+            "rows": 0,
+            "scan_ms": 18
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 2",
+        "link": "#30",
+        "pretest_ms": 17,
+        "apply_ms": 163,
+        "posttest_ms": 42,
+        "posttest": "advisory_fail",
+        "check_constraints": []
+      },
+      {
+        "cycle": "cycle 2",
+        "link": "#31",
+        "pretest_ms": 19,
+        "apply_ms": 77,
+        "posttest_ms": 77,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 16
+          },
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 15
+          },
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 10
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 2",
+        "link": "A",
+        "pretest_ms": 19,
+        "apply_ms": 51,
+        "posttest_ms": 38,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 12
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 11
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 12
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 14
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 20
+          },
+          {
+            "table": "ai_generated_messages",
+            "rows": 0,
+            "scan_ms": 16
+          }
+        ]
+      },
+      {
+        "cycle": "cycle 2",
+        "link": "B",
+        "pretest_ms": 30,
+        "apply_ms": 217,
+        "posttest_ms": 132,
+        "posttest": "pass",
+        "check_constraints": [
+          {
+            "table": "action_gateway.seller_action_receipts",
+            "rows": 0,
+            "scan_ms": 15
+          },
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 13
+          },
+          {
+            "table": "action_gateway.capability_grants",
+            "rows": 0,
+            "scan_ms": 15
+          },
+          {
+            "table": "action_gateway.action_authorizations",
+            "rows": 0,
+            "scan_ms": 16
+          }
+        ]
+      },
+      {
+        "cycle": "rollback",
+        "link": "B",
+        "rollback_ms": 191,
+        "rollback_posttest_ms": 77
+      },
+      {
+        "cycle": "rollback",
+        "link": "A",
+        "rollback_ms": 51,
+        "rollback_posttest_ms": 19
+      },
+      {
+        "cycle": "rollback",
+        "link": "#31",
+        "rollback_ms": 49,
+        "rollback_posttest_ms": 85
+      },
+      {
+        "cycle": "rollback",
+        "link": "#30",
+        "rollback_ms": 66,
+        "rollback_posttest_ms": 89
+      },
+      {
+        "cycle": "rollback",
+        "link": "#29",
+        "rollback_ms": 110,
+        "rollback_posttest_ms": 71
+      }
+    ]
+  },
+  "finished_at": "2026-10-30T05:20:17.199Z",
+  "ms": 12149
+}

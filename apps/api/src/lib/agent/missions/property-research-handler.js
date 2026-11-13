@@ -30,7 +30,7 @@ import { RuntimePermanentError, RuntimeStop } from '../runtime/runtime-tick.js'
 import { createJobAskStore } from './job-ask-store.js'
 import { MISSION_LIMITS, missionIdentity, PROPERTY_RESEARCH_KIND } from './mission-kinds.js'
 import { decodePropertyRef, encodePropertyRef, jsonBytes, storableUrl } from './mission-codec.js'
-import { recordFindings } from './record-findings.js' // Package A: not research-mission-handler.js (capability plane → send stack)
+import { recordFindings } from './record-findings.js' // reconciliation (production Package A): research kinds have no import path to the send stack
 import { encodeForStore, maskContacts } from '../research/pii.js'
 import { isWebEnabled } from '../research/web-research.js'
 import { paidResearchGate, webEvidenceIsFresh, usageFinding } from '../research/research-usage.js'

@@ -1,0 +1,10 @@
+# DISPOSABLE-TEST EMULATION of Supabase's pg_net (NOT the real extension; no C module, no background
+# worker, nothing ever leaves the database). Installed ONLY into a cloned, temporary PostgreSQL share
+# directory by apps/api/tests/helpers/pg-net-posture.mjs, so `CREATE EXTENSION pg_net` (run AS
+# supabase_admin) records real extension membership (pg_depend deptype 'e') for every object.
+# Shape: pg_net 0.20.x (schema net, the request queue + response tables, the http_* entry points).
+comment = 'LeadCommand test emulation of pg_net (shape only; no network)'
+default_version = '0.20.0'
+relocatable = false
+superuser = true
+trusted = false

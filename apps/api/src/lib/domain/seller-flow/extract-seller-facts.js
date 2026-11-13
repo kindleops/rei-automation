@@ -585,8 +585,10 @@ function extractObjections(message, base) {
 const OWNERSHIP_POSITIVE_RE =
   /\b(yes,? )?(i|we) own (it|that|this|the (house|property|place|home))|it'?s (my|our) (house|property|place|home)|i'?m the owner|that'?s (my|our) (house|property)|(?<!\bnot )\b(that|this|it)'?s mine\b|(soy|somos) (el|la|los) due[nñ][oa]s?|es (mi|nuestra) (casa|propiedad)/i;
 
+// a renter is not the owner; a LANDLORD ("I rent it out", "we rent it to a family", "I'm renting it out") is one
+// (blind evaluation v7, Z09: an owner-landlord was read as a non-owner and a compliant reply was stopped)
 const OWNERSHIP_NEGATIVE_RE =
-  /\b(i|we) (don'?t|do not|never) own(ed)?|not (my|the owner'?s?|mine)|it'?s not mine|wrong (number|person)|(i|we) sold (it|that|the)|no longer (own|mine)|i('?m| am) (just )?(the |a )?(tenant|renter)|i('?m| am) renting|\b(i|we) (just )?rent (here|it|this place|the (house|place))\b|no soy (el|la) due[nñ][oa]|ya (la|lo) vend[ií]/i;
+  /\b(i|we) (don'?t|do not|never) own(ed)?|not (my|the owner'?s?|mine)|it'?s not mine|wrong (number|person)|(i|we) sold (it|that|the)|no longer (own|mine)|i('?m| am) (just )?(the |a )?(tenant|renter)|i('?m| am) renting(?!\s+(?:it|the (?:house|place|property))\s+(?:out|to)\b)|\b(i|we) (just )?rent (here|it|this place|the (house|place))\b(?!\s+(?:out|to|for)\b)|no soy (el|la) due[nñ][oa]|ya (la|lo) vend[ií]/i;
 
 // Attribution of the property to a living third party ("it's my brother's").
 // Spouse relations are deliberately excluded: those are authority/co-decision

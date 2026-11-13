@@ -20,11 +20,14 @@
  *
  * Usage (from apps/api):
  *   nice -n 15 node --import ./scripts/register-aliases-ops.mjs scripts/ops/autopilot-v2-audit.mjs \
- *     --from 2026-10-05 --to 2026-10-06 --db-url-file /tmp/.dburl --out <file>
+ *     --from 2026-10-05 --to 2026-10-06 --out <file>
+ *   (credential: LC_RO_OPS_DIAG_DB_URL_FILE — the role-enforced read-only diagnostics role,
+ *   verified by scripts/lib/prod-db-credentials.mjs before the first query)
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import * as rq from "./reply-quality-report.mjs";
+import { connectReadOnlyDiagnostics } from "../../../../scripts/lib/prod-db-credentials.mjs";
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -147,10 +150,7 @@ async function main() {
   const to = arg("to") || from;
   const start = rq.localMidnightUtc(from, tz);
   const end = new Date(Math.min(rq.localMidnightUtc(addDays(to, 1), tz).getTime(), Date.now()));
-  const url = String(readFileSync(arg("db-url-file", "/tmp/.dburl"), "utf8")).trim();
-  const { default: pg } = await import("pg");
-  const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
-  await client.connect();
+  const client = await connectReadOnlyDiagnostics({ purpose: "ops_diag", applicationName: "lc-autopilot-v2-audit" });
   let data;
   let extra;
   try {

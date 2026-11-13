@@ -10,10 +10,15 @@
  * Run from apps/api (the alias loader resolves "@/" against the cwd):
  *   cd apps/api
  *   node ../../scripts/entity-graph/backfill-eg-property-facts.mjs --dry-run --batch 500 --max-batches 1
- *   node ../../scripts/entity-graph/backfill-eg-property-facts.mjs                 # full run (resumes automatically)
+ *   node ../../scripts/entity-graph/backfill-eg-property-facts.mjs --prod-write=<approval-ref>   # full run (resumes automatically)
  *
- * DATABASE_URL: env, else /tmp/.dburl. Never printed. Output carries counts,
- * timings and property_id cursors only — no names, phones or addresses.
+ * Credentials (rc-8.5.21-c, scripts/lib/prod-db-credentials.mjs; DATABASE_URL and
+ * the operator URL file are no longer read):
+ *   --dry-run   the role-enforced read-only diagnostics role (LC_RO_ENTITY_GRAPH_DB_URL_FILE)
+ *   full run    the explicit production-write path: --prod-write=<approval-ref>,
+ *               LC_PROD_WRITE_DB_URL_FILE and an interactive TTY confirmation
+ * Never printed. Output carries counts, timings and property_id cursors only — no
+ * names, phones or addresses.
  *
  * Safety:
  *   - ONE connection, statements strictly serial (application_name eg_facts_backfill).
@@ -63,13 +68,12 @@ const OPT = {
 }
 if (!process.cwd().endsWith('/apps/api')) { console.error('run from apps/api (the alias loader resolves "@/" against the cwd)'); process.exit(2) }
 
-const pg = (await import('pg')).default
+const { connectReadOnlyDiagnostics, connectProdWrite } = await import('../lib/prod-db-credentials.mjs')
 const { computeFacts, COMPUTED_FACTS } = await import('@/lib/domain/entity-graph/entity-graph-facts.js')
 const { factsTableColumns, FACTS_TABLE_NAME } = await import('@/lib/domain/entity-graph/entity-graph-facts-ddl.js')
 const { FACTS_REFRESH_LOCK_KEY, addendaWritten, computedColumnsOf, factsBaseColumns, factRecords, factsUpsertSql, writableFactsColumns } = await import('@/lib/domain/entity-graph/entity-graph-facts-refresh.js')
 
-const url = process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim()
-const client = new pg.Client({ connectionString: url, ssl: url.includes('localhost') ? false : { rejectUnauthorized: false }, application_name: 'eg_facts_backfill' })
+let client = null
 const log = (o) => console.log(JSON.stringify({ t: new Date().toISOString(), ...o }))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const q = (c) => `"${c}"`
@@ -106,7 +110,9 @@ const writeState = (s) => fs.writeFileSync(OPT.state, JSON.stringify(s, null, 2)
 let exitCode = 0
 let locked = false
 try {
-  await client.connect()
+  client = OPT.dryRun
+    ? await connectReadOnlyDiagnostics({ purpose: 'entity_graph', applicationName: 'eg_facts_backfill', statementTimeoutMs: OPT.stmtTimeoutMs })
+    : await connectProdWrite({ purpose: 'eg_property_facts full backfill (upserts every property facts row)', applicationName: 'eg_facts_backfill' })
   await client.query(`set statement_timeout = ${Math.trunc(OPT.stmtTimeoutMs)}`)
   await client.query(`set lock_timeout = '5s'`)
   if (OPT.dryRun) await client.query('set default_transaction_read_only = on')
@@ -231,6 +237,6 @@ try {
   exitCode = exitCode || 1
 } finally {
   if (locked) await client.query('select pg_advisory_unlock($1)', [FACTS_REFRESH_LOCK_KEY]).catch(() => {})
-  await client.end().catch(() => {})
+  await client?.end().catch(() => {})
 }
 process.exit(exitCode)

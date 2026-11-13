@@ -5,11 +5,11 @@
  *   1. the thread's sender (inbox_thread_state.our_number, else the latest
  *      outbound number on the thread) while it passes the canonical sender
  *      eligibility (evaluateSenderDispatchEligibility);
- *   2. otherwise the highest-priority eligible routing fallback — the Sender
- *      Routing 2.0 graph when its gate is on, else the campaign router
- *      (exact market -> approved alias -> approved regional, blocklist
- *      applied) — and the new thread -> sender relationship is PERSISTED
- *      (inbox_thread_state.our_number) with a reason and an audit event;
+ *   2. otherwise NOTHING automatic (owner P0 rc-8.5.21, sender continuity): the
+ *      thread's sender cannot send => { ok:false, reason:'sender_unavailable' }
+ *      and the caller holds / refuses visibly. Permanent loss is resolved only by
+ *      an explicit, audited operator reassignment (sender-continuity.js). (Until
+ *      rc-8.5.21 this branch rerouted to a routing fallback automatically.)
  *   3. a brand-new conversation (no thread sender) may use the sender the
  *      caller proposed when it is eligible; else the router.
  * The sender is never re-picked per message: a caller's proposal for an
@@ -154,13 +154,17 @@ export async function resolveStickyThreadSender(ctx = {}, deps = {}) {
     if (v.ok) {
       return { ok: true, phone: thread_sender, decision: "thread_continuity", overrode_proposed: Boolean(proposed && proposed !== thread_sender) };
     }
-    const fallback = await routeFallback({ ...ctx, thread_key, thread_sender }, blocked, deps).catch(() => null);
-    if (!fallback) return { ok: false, reason: "no_eligible_sender_for_thread", sender_reason: v.reason, detail: `thread sender ${thread_sender.slice(-4)} ${v.reason}; no eligible routing fallback` };
-    const fv = await verdictFor(fallback.phone, blocked, deps);
-    if (!fv.ok) return { ok: false, reason: "no_eligible_sender_for_thread", detail: `fallback ${fallback.phone.slice(-4)} ${fv.reason}` };
-    const reason = `thread_sender_${String(v.reason || "ineligible").replace(/^outbound_number_/, "")}`;
-    await persistThreadSenderChange({ thread_key, from: thread_sender, to: fallback.phone, reason, via: fallback.via }, deps);
-    return { ok: true, phone: fallback.phone, decision: "thread_rerouted", reason, previous: thread_sender, via: fallback.via };
+    // OWNER P0 (rc-8.5.21, sender continuity): an established thread NEVER moves to another number
+    // automatically. The thread's sender cannot send ⇒ sender_unavailable (the caller holds / refuses,
+    // visibly). Permanent loss is an explicit, audited operator reassignment
+    // (sender-continuity.js#reassignThreadSender) — never this resolver.
+    return {
+      ok: false,
+      reason: "sender_unavailable",
+      sender_reason: v.reason,
+      thread_sender,
+      detail: `thread sender ${thread_sender.slice(-4)} ${v.reason}; held (no automatic reroute of an established thread)`,
+    };
   }
 
   // A new conversation: the caller's proposal when eligible, else the router.

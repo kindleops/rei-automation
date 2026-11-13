@@ -136,9 +136,9 @@ test('NO-SEND (static): the operations module imports no send / queue / provider
     for (const l of imports) assert.doesNotMatch(l, forbidden, `${f}: ${l}`)
     assert.doesNotMatch(src, /\binvoke\(\{\s*capability_id:\s*'(inbox\.prepare_reply|campaigns\.)/, `${f} prepares no message and no campaign`)
   }
-  // the recovery sweep has no capability plane at all; Package A: pipeline.reconcile (the only capability caller) is removed
+  // the recovery sweep has no capability plane at all; only pipeline.reconcile invokes one capability
   const h = fs.readFileSync(path.join(OPS_DIR, 'operations-handlers.js'), 'utf8')
-  assert.deepEqual([...new Set([...h.matchAll(/capability_id:\s*'([a-z_.]+)'/g)].map((m) => m[1]))], [])
+  assert.deepEqual([...new Set([...h.matchAll(/capability_id:\s*'([a-z_.]+)'/g)].map((m) => m[1]))], ['pipeline.propose_stage_change'])
   const sql = fs.readFileSync(path.join(OPS_DIR, 'operations-sql.js'), 'utf8')
   assert.doesNotMatch(sql, /\b(insert\s+into|update\s+public\.|delete\s+from|truncate|alter\s+table|create\s+table)\b/i)
 })

@@ -100,7 +100,19 @@ test("no seller-visible provider call site is left UNKNOWN", () => {
 
 const QUEUE_ROW_CREATORS = [
   "app/api/dev/send-test/route.js",
+  // Action Gateway queue_agent_text (link #32; LeadCommand worker, action_gateway.execute; born OFF — owner architecture
+  // correction 2026-10-29: the agent composes every SMS): converged — only through insertSupabaseSendQueueRow,
+  // deterministic identity (queue_key = dedupe_key = agent_text:<intent id>, a retry finds the row and adds none), after
+  // every gate is re-run on the agent's EXACT text (no model call), the day caps (+ the inbound's one-reply reservation)
+  // are reserved and ONE immutable agent_text ledger record is written; dispatched only by the queue runner (the
+  // agent-text row gate). The retired queue_agent_message executor creates nothing (AGENT_COMPOSES_TEXT).
+  "lib/ai/action-gateway-execution.js",
   "app/api/internal/proof/s1s2-attended/route.js",
+  // 8.5.16 R3 (built OFF, unwired — nothing imports it): the ONE AI conversation
+  // creator. Converged: it inserts only through insertSupabaseSendQueueRow with a
+  // deterministic identity (queue_key = dedupe_key = ai_conversation:<inbound id>)
+  // after an atomic per-inbound idempotency_ledger reservation.
+  "lib/ai/conversation-ai-r3-executor.js",
   "lib/domain/acquisition/delivery-retry-engine.js",
   "lib/domain/acquisition/inbound-dispatcher.js",
   "lib/domain/acquisition/no-reply-followup-scheduler.js",
@@ -111,6 +123,10 @@ const QUEUE_ROW_CREATORS = [
   "lib/domain/closings/advance-closing-workflow.js",
   "lib/domain/inbound/unknown-inbound-router.js",
   "lib/domain/inbox/send-now-service.js",
+  // Action Gateway execute_authorized_offer (LeadCommand worker, action_gateway.execute; born OFF): converged —
+  // only through insertSupabaseSendQueueRow, deterministic identity (queue_key = dedupe_key =
+  // negotiation_offer:<intent id>), after persistActiveOffer (R4) and a durable send-budget use (R5).
+  "lib/domain/negotiation/negotiation-send.js",
   "lib/domain/outbound/run-supabase-outbound-feeder.js",
   "lib/domain/queue/build-send-queue-item.js",
   "lib/domain/queue/canonical-queue-writer.js",

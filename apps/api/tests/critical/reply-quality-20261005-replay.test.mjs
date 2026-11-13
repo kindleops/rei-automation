@@ -107,9 +107,9 @@ const LABELS = {
   // ── unclear Spanish ──
   "026": { intent: "not_interested", lang: "Spanish", suppress: "none" },
   "047": { intent: "not_interested", lang: "Spanish", suppress: "none" },
-  "034": { intent: "wrong_number", lang: "Spanish" },
-  "052": { intent: "wrong_number", lang: "Spanish" },
-  "036": { intent: "hostile_or_legal", lang: "Spanish", auto: false },
+  "034": { intent: "property_specific_non_owner", lang: "Spanish" }, // RC 8.5.15 written denial
+  "052": { intent: "property_specific_non_owner", lang: "Spanish" }, // RC 8.5.15 written denial
+  "036": { intent: "hostile_or_troll", lang: "Spanish", auto: false }, // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
   "040": { intent: "who_is_this", lang: "Spanish" },
   "041": { intent: "who_is_this", lang: "Spanish" },
   "051": { intent: "who_is_this", auto: true },
@@ -131,18 +131,20 @@ const LABELS = {
   // Round 8 owner rule: a bare "?" gets the who_is_this reply.
   "030": { intent: "who_is_this", auto: true },
   "039": { intent: "unclear", review: true },
-  "012": { intent: "hostile_or_legal", auto: false },
-  // ── bare "No" to the ownership question: a decline -> 30-day nurture, never
-  // suppressed (owner decision 2026-10-13; superseded the 2026-10-06 clarifier) ──
-  "001": { intent: "not_interested", review: false, suppress: "none" },
-  "013": { intent: "not_interested", review: false, suppress: "none" },
-  "019": { intent: "not_interested", review: false, suppress: "none" },
-  "033": { intent: "not_interested", review: false, suppress: "none" },
-  "037": { intent: "not_interested", review: false, suppress: "none" },
-  // ── classifier-level intent (live layers refine these) ──
-  "009": { intent: "wrong_number" },
-  "024": { intent: "wrong_number" },
-  "049": { intent: "wrong_number" },
+  "012": { intent: "hostile_or_troll", auto: false }, // owner 2026-10-06 (locked, re-asserted 10-18): an insult is hostile_or_troll (quiet archive, never suppressed)
+  // ── bare "No" to the ownership question DENIES ownership: property-scoped,
+  // no nurture, never suppressed (owner decision 2026-10-14, RC 8.5.15;
+  // supersedes the 2026-10-13 decline and the 2026-10-06 clarifier) ──
+  "001": { intent: "property_specific_non_owner", review: false, suppress: "none" },
+  "013": { intent: "property_specific_non_owner", review: false, suppress: "none" },
+  "019": { intent: "property_specific_non_owner", review: false, suppress: "none" },
+  "033": { intent: "property_specific_non_owner", review: false, suppress: "none" },
+  "037": { intent: "property_specific_non_owner", review: false, suppress: "none" },
+  // ── classifier-level intent (live layers refine these). RC 8.5.15: written
+  // ownership denials are property-scoped, never wrong_number ──
+  "009": { intent: "property_specific_non_owner" },
+  "024": { intent: "property_specific_non_owner" },
+  "049": { intent: "property_specific_non_owner" },
   "014": { intent: "not_interested" },
   "017": { intent: "sold_property" },
 };

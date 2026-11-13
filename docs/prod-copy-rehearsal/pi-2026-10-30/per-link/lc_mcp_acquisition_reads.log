@@ -1,0 +1,23 @@
+cluster: started (unix socket only) data=/tmp/lc-mt-pi/cluster-xysfGS/data
+[lc_mcp_acquisition_reads] database lc_mt_lc_mcp_acquisition_reads_581d9f2e
+  ok  setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only) (33 ms)
+  ok  setup supabase-shim.sql (43 ms)
+  ok  setup lc_mcp_reader_supabase_emulation.sql (110 ms)
+  ok  setup PROPOSED_20261019150000_lc_mcp_reader.sql (101 ms)
+  ok  setup lc_mcp_conversation_intel_emulation.sql (61 ms)
+  ok  setup lc_mcp_acquisition_reads_emulation.sql (59 ms)
+  ok  cycle 1: pretest PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql (50 ms)
+  ok  cycle 1: pretest left no trace (fingerprint 829cf85a39f269ff)
+  ok  cycle 1: APPLY PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql (99 ms)
+  ok  cycle 1: posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql (133 ms)
+  ok  ROLLBACK FILE PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql (41 ms)
+  ok  rollback posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql (77 ms)
+  ok  rollback restored the pre-apply fingerprint 829cf85a39f269ff
+  ok  cycle 2 (re-apply): pretest PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql (44 ms)
+  ok  cycle 2 (re-apply): pretest left no trace (fingerprint 829cf85a39f269ff)
+  ok  cycle 2 (re-apply): APPLY PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql (88 ms)
+  ok  cycle 2 (re-apply): posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql (135 ms)
+[lc_mcp_acquisition_reads] PASS
+cluster: stopped
+
+run-migration-test: 1/1 PASS

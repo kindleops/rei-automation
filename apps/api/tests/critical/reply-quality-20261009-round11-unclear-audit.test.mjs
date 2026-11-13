@@ -72,8 +72,22 @@ const PROD_851_DIVERGENCE = new Set(["ui-44225d7a", "ui-5ddde262"]);
 // a bare negative to the S1 ownership question with no ownership-denial words
 // is not_interested (30-day nurture). F01 rows WITH denial words ("No, I'm
 // not") keep the hold.
+// OWNER DECISION 2026-10-14 (RC 8.5.15) supersedes both: every F01 "No" to the
+// S1 ownership question -- bare or with denial words ("No, I'm not") -- DENIES
+// ownership (property_specific_non_owner; property-scoped, no nurture, never
+// suppressed). A polite / emoji decline ("No thanks") is still a decline.
+const isPoliteDecline = (c) => {
+  const bare = matchBareNegative(c.seller_message);
+  return Boolean(bare) && (/(?:thanks|thank you|thank u|thx|ty|gracias)$/.test(bare.canonical) || /\p{Extended_Pictographic}/u.test(c.seller_message));
+};
 const isBareNegativeF01 = (c) => /F01_bare_no_to_ownership/.test(c.family) && Boolean(matchBareNegative(c.seller_message));
-const expectedIntentOf = (c) => (isBareNegativeF01(c) ? "not_interested" : c.expected_intent);
+const DENIAL_WORDS_RE = /^\s*(?:no+|nope)[\s,.!]*(?:i\s*(?:do\s*n[o'’]?t|dont|am\s+not|['’]?m\s+not)|not\s+at\s+all|and\s+no|i\s+am\s+not)\b[\s.!]*$/i;
+const expectedIntentOf = (c) => {
+  if (!/F01_bare_no_to_ownership/.test(c.family)) return c.expected_intent;
+  if (matchBareNegative(c.seller_message)) return isPoliteDecline(c) ? "not_interested" : "property_specific_non_owner";
+  if (DENIAL_WORDS_RE.test(c.seller_message)) return "property_specific_non_owner";
+  return c.expected_intent;
+};
 
 const results = new Map();
 async function run(c) {
@@ -117,14 +131,10 @@ test("policy holds keep their routing: bare No to S1, yes to our price question,
   let bare_negatives = 0;
   for (const c of AUDIT.filter((x) => /F01_bare_no_to_ownership/.test(x.family))) {
     const r = await run(c);
-    if (isBareNegativeF01(c)) {
-      bare_negatives += 1;
-      // Owner 2026-10-13: a decline -> the S1 30-day nurture, never suppressed.
-      assert.equal(r.classification.primary_intent, "not_interested", c.id);
-      assert.equal(r.decision.should_suppress_contact, false, c.id);
-    } else {
-      assert.equal(r.classification.primary_intent, "unclear", c.id);
-    }
+    if (isBareNegativeF01(c)) bare_negatives += 1;
+    // RC 8.5.15: ownership denied (or, for a polite decline, the 30-day decline); never suppressed.
+    assert.equal(r.classification.primary_intent, expectedIntentOf(c), c.id);
+    assert.equal(r.decision.should_suppress_contact, false, c.id);
     assert.equal(r.text, null, `${c.id} a bare No never auto-replies`);
   }
   assert.ok(bare_negatives > 0);

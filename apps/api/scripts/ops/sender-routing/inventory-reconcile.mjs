@@ -52,3 +52,4 @@ if (sourceDisagreements.length) {
   for (const d of sourceDisagreements) console.log(" ", JSON.stringify(d));
 }
 writeOut(arg("out"), { generated_at: new Date().toISOString(), provider_source: providerSource, source_disagreements: sourceDisagreements, ...report });
+await sb.close();

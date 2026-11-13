@@ -12,7 +12,7 @@
 //      already on the active sms_suppression_list, so the send path already
 //      blocks it). Every other repaired thread changes bucket / last_intent only.
 //
-//   DATABASE_URL=... node --import ./tests/register-aliases.mjs \
+//   LC_RO_OPS_DIAG_DB_URL_FILE=<0600 file> node --import ./tests/register-aliases.mjs \
 //     scripts/ops/r10-safety/campaign-safety-check.mjs --repair=<PROPOSED-inbox-round9-repair.sql> \
 //     --view=<PROPOSED_20261008020000_inbox_round9_buckets.sql> --out=<dir> [--names="A|B"]
 import fs from "node:fs";

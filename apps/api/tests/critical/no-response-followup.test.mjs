@@ -165,7 +165,10 @@ test("window: a due follow-up row only sends 8am–9pm recipient-local (processo
   assert.equal(evaluateContactWindow(row, { now: "2026-10-06T15:00:00.000Z" }).allowed, true, "10:00 CDT");
   assert.equal(evaluateContactWindow(row, { now: "2026-10-07T02:30:00.000Z" }).allowed, false, "21:30 CDT");
   assert.equal(evaluateContactWindow(row, { now: "2026-10-06T12:30:00.000Z" }).allowed, false, "07:30 CDT");
-  assert.equal(evaluateContactWindow({ ...row, timezone: null }, { now: "2026-10-06T15:00:00.000Z" }).hold, true, "unknown zone holds");
+  // rc-8.5.21 S3: the recipient's area code (612, Central) places the seller even with no stored zone;
+  // nothing at all (a non-geographic number, no zone, no property) holds
+  assert.equal(evaluateContactWindow({ ...row, timezone: null }, { now: "2026-10-07T02:30:00.000Z" }).allowed, false, "21:30 CDT by area code");
+  assert.equal(evaluateContactWindow({ ...row, timezone: null, to_phone_number: "+15005550100" }, { now: "2026-10-06T15:00:00.000Z" }).hold, true, "unknown zone holds");
 });
 
 // ── Gates ───────────────────────────────────────────────────────────────────
@@ -444,3 +447,22 @@ test("observed offer: a manual Inbox offer is recorded (amount, source, message 
   assert.equal(db.rows("negotiation_quotes").length, 1);
   assert.equal(db.rows("send_queue").find((r) => r.type === "followup").metadata.no_response_followup.offer.amount, 132000);
 });
+
+// blind-eval SYN-37 (rc-8.5.21): a typed offer RANGE is the no-number offer follow-up, never no plan
+test('SYN-37: an ambiguous typed offer range gets the NO-NUMBER offer follow-up (never picks either number)', async () => {
+  const { detectOutboundOffer, classifyNoResponseAnchor, useCaseForStep, resolveNoResponseConfig } = await import('../../src/lib/domain/seller-flow/no-response-followup.js')
+  for (const b of ['Somewhere between 80 and 90 depending on the inspection', 'We could be around 70 to 75k depending on repairs']) {
+    const o = detectOutboundOffer({ message_body: b })
+    assert.deepEqual([o.is_offer, o.mode], [true, 'no_number'], b)
+  }
+  for (const b of ['Is your price between 80 and 90?', 'Between 2 and 3 weeks to close']) assert.equal(detectOutboundOffer({ message_body: b }).is_offer, false, b)
+  const config = resolveNoResponseConfig()
+  const c = classifyNoResponseAnchor({ message_body: 'Somewhere between 80 and 90 depending on the inspection', use_case: null, metadata: {} }, config)
+  if (config.offer?.enabled) {
+    assert.equal(c.kind, 'offer')
+    const uc = useCaseForStep('offer', 0, c.offer)
+    assert.ok(uc, 'a declared plan exists')
+  } else {
+    assert.equal(c.reason, 'no_response_kind_disabled:offer', 'a VISIBLE reason, never no_declared_followup_plan')
+  }
+})

@@ -103,9 +103,10 @@ describe("compound intent preservation", () => {
     const r = await classifyHeuristic(
       "That's not my house, it's in my brother's family trust"
     );
-    // Ownership disconnect routes to wrong_number for suppression; the trust
+    // RC 8.5.15 (owner 2026-10-14): an ownership disconnect is the
+    // property-scoped denial (never a wrong-number suppression); the trust
     // component may remain as evidence but can never flip the identity lane.
-    assert.equal(r.primary_intent, "wrong_number");
+    assert.equal(r.primary_intent, "property_specific_non_owner");
     assert.ok(!r.matched_intents.includes("ownership_confirmed"));
   });
 

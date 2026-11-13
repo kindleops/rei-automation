@@ -48,7 +48,7 @@ import { createValuationSupabaseSource } from '@/lib/domain/valuation-refresh/va
 import { runValuationRefresh } from '@/lib/domain/valuation-refresh/dry-run.js'
 import { assessOpportunityEconomics } from '@/lib/domain/opportunity-economics/economics-service.js'
 import { operationsEnabled, RECOVERY_SWEEP_KIND, ACTION_CENTER_KIND, OPS_SUPERVISOR_KIND } from '@/lib/agent/operations/operations-kinds.js'
-import { buildOperationsHandlers } from '@/lib/agent/operations/operations-handlers.js'
+import { buildOperationsHandlers } from '@/lib/agent/operations/package-a-operations-handlers.js' // reconciliation: production's Package A handlers (no send path)
 import { createOperationsPgSource } from '@/lib/agent/operations/operations-source.js'
 import { createOperationsPgStore } from '@/lib/agent/operations/operations-store.js'
 import { OPS_HEALTH_CHECK_KIND } from '@/lib/agent/runtime/handlers/ops-health-check.js'

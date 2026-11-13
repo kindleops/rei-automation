@@ -324,3 +324,10 @@ test("DEFECT 4a: the legacy comp_anchor cannot send an unlogged number (flag on:
   assert.equal(q.rule_branch, "legacy_comp_anchor");
   assert.equal(q.amount, 140_000);
 });
+
+test("blind-eval SCONV-06: 'Not right now, maybe next year' gets the 30-day nurture (never no follow-up)", async () => {
+  const r = await runFlow({ turns: [["Yes", "ownership_check"], ["Not now, possibly in a year or so", "offer_interest"]] })
+  assert.deepEqual(r.results[1].followups, ["not_interested"])
+  const r2 = await runFlow({ turns: [["Yes", "ownership_check"], ["Not right now, maybe next year", "offer_interest"]] })
+  assert.deepEqual(r2.results[1].followups, ["not_interested"])
+})

@@ -1,0 +1,44 @@
+/* WORKFORCE × AGNTEI — the Employees additions. LC tokens only; no accent tints, no opaque fills: plates sit on the
+   pane material, chips are hairline outlines (the wf-kind language). The register dialog is body-portaled, so every
+   rule here falls back to the global LC tokens, never to a --wf-* token that only exists inside the module root. */
+
+.wf-origin { font: 700 9.5px/1 var(--lc-font-ui); letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 6px; border-radius: 5px; white-space: nowrap; color: var(--lc-ink-2); box-shadow: inset 0 0 0 1px var(--wf-line-hi, var(--lc-inner-edge)); }
+.wf-origin.is-agntei { color: var(--lc-ink-1); box-shadow: inset 0 0 0 1px var(--lc-ink-3); background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(var(--lc-edge-rgb), 0.06) 5px 6px); }
+.wf-origin.is-human { color: var(--lc-ink-inverse); background: var(--lc-ink-1); box-shadow: none; }
+.wf-cell-emp .wf-origin { margin-left: 6px; padding: 2px 4px; font-size: 8.5px; vertical-align: 1px; }
+
+.wf-activity { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+.wf-activity .lc-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-activity__seen { font: var(--lc-t-stamp); color: var(--lc-ink-3); white-space: nowrap; }
+.wf-activity.is-compact .wf-activity__seen { display: none; }
+
+.wf-steps-wrap { display: grid; gap: 10px; margin-top: 12px; }
+.wf-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: none; }
+.wf-step { display: grid; gap: 6px; padding: 10px 10px 10px 12px; border-radius: 10px; background: rgba(var(--lc-edge-rgb), 0.035); box-shadow: inset 0 0 0 1px var(--wf-line, var(--lc-hairline)); }
+.wf-step__h { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; min-width: 0; }
+.wf-step__n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font: 650 10.5px/1 var(--lc-font-ui); color: var(--lc-ink-2); box-shadow: inset 0 0 0 1px var(--lc-inner-edge); }
+.wf-step__t { font: 600 12.5px/1.25 var(--lc-font-ui); color: var(--lc-ink-1); min-width: 0; }
+.wf-step__who { font: 650 9.5px/1 var(--lc-font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--lc-ink-3); }
+.wf-step__cmd { margin: 0; padding: 8px 10px; border-radius: 8px; max-height: 168px; overflow: auto; white-space: pre-wrap; word-break: break-all; font: var(--lc-t-mono, 11.5px/1.5 var(--lc-font-mono)); color: var(--lc-ink-1); background: rgba(var(--lc-edge-rgb), 0.05); box-shadow: inset 0 0 0 1px var(--lc-hairline); user-select: all; }
+.wf-step__note { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.wf-step[data-who='agent'] .wf-step__n { color: var(--lc-ink-1); box-shadow: inset 0 0 0 1px var(--lc-ink-3); }
+
+.wf-hist { list-style: none; margin: 0; padding: 0; display: grid; }
+.wf-hist__row { display: grid; grid-template-columns: 72px 1fr auto; align-items: baseline; gap: 10px; padding: 7px 2px; box-shadow: inset 0 -1px 0 var(--wf-line, var(--lc-hairline)); }
+.wf-hist__src { font: 650 9.5px/1 var(--lc-font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--lc-ink-3); }
+.wf-hist__row[data-source='gateway'] .wf-hist__src { color: var(--lc-ink-2); }
+.wf-hist__what { font: var(--lc-t-body); color: var(--lc-ink-1); min-width: 0; overflow-wrap: anywhere; }
+.wf-hist__what code { margin-left: 6px; font: var(--lc-t-mono, 11px/1.4 var(--lc-font-mono)); color: var(--lc-ink-2); }
+
+.wf-reg { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.wf-reg__wide { grid-column: 1 / -1; }
+.wf-reg__mono { font-family: var(--lc-font-mono); }
+.wf-reg__problems { grid-column: 1 / -1; margin: 0; padding-left: 18px; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+.wf-reg__error { grid-column: 1 / -1; margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-1); }
+
+.wf-mode { font: 650 9.5px/1 var(--lc-font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--lc-ink-3); white-space: nowrap; }
+.wf-mode.is-external { color: var(--lc-ink-1); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .wf-step, .wf-step__cmd { background: var(--lc-pane-mat-bg, transparent); }
+}

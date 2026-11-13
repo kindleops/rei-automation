@@ -616,6 +616,20 @@ const BLOCKING_INTENTS = Object.freeze({
     reasoning_code: "HOLD_NOT_OWNER_PROPERTY_SCOPED_REVIEW",
     workflow_event: "AUTOMATION_NEEDS_REVIEW",
   },
+  // OWNER DECISION LOCKED 2026-10-17: a polite decline / bare "Not interested" to the OWNERSHIP
+  // question — declined engagement, ownership UNVERIFIED. The DISTINCT disposition declined_unverified
+  // (never not_interested: that is the 30-day nurture). Property-scoped: no contactability write, no
+  // ownership_patch (never recorded as not_owner), follow-ups cancelled, no review item.
+  ownership_declined_unverified: {
+    contactability: null,
+    disposition: DISPOSITION_CODES.DECLINED_UNVERIFIED,
+    operational_status: OPERATIONAL_STATUS_CODES.PAUSED,
+    next_action: NEXT_ACTIONS.NO_ACTION_CONTACT_BLOCKED,
+    cancel_followups: true,
+    review_required: false,
+    reasoning_code: "HOLD_OWNERSHIP_DECLINED_UNVERIFIED_PROPERTY_SCOPED",
+    workflow_event: "AUTOMATION_BLOCKED",
+  },
   // Canonical intent for a "former_owner" relationship claim (sold the
   // property, no longer owns it). Distinct disposition from a bare not-owner
   // claim for accurate telemetry/dashboard reporting.
@@ -1226,9 +1240,16 @@ export function resolveSellerStageTransition({
   let templateUseCase = prompt.template_use_case;
   // "Make me an offer": never re-ask the price the seller declined to give —
   // ask the highest-value missing underwriting question and let ADE decide.
+  // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price"): an offer request with no price on
+  // record asks for THEIR number ONCE (the asking-price stage's own question; the S3 deflection rule holds
+  // a repeat for a person: research → gated offer recommendation) — never a condition question first.
+  // Already AT the asking-price stage (our price question was asked) and the price is still withheld:
+  // never re-ask it, never condition first — research (ADE preliminary) → a gated offer for a PERSON.
+  const offer_before_price_hold = afterCode === LIFECYCLE_STAGE_CODES.ASKING_PRICE && facts.wants_offer === true &&
+    beforeCode === LIFECYCLE_STAGE_CODES.ASKING_PRICE && !(facts.asking_price?.value > 0);
   if (afterCode === LIFECYCLE_STAGE_CODES.ASKING_PRICE && facts.wants_offer === true) {
-    templateUseCase = "condition_probe";
     if (!ade_result) adeAction = ADE_ACTIONS.RUN_PRELIMINARY;
+    if (offer_before_price_hold) templateUseCase = null;
   }
   if (afterIdx === 4) {
     const engineAction = lower(engine_decision?.acquisition_action);
@@ -1340,7 +1361,7 @@ export function resolveSellerStageTransition({
 
   const authorityReview = Boolean(authority_gate?.applied);
   const listingReview = Boolean(listing_gate?.applied);
-  const reviewRequired = lowConfidence || authorityReview || listingReview;
+  const reviewRequired = lowConfidence || authorityReview || listingReview || offer_before_price_hold;
   const reasoning = authority_gate?.applied
     ? `${stageShort(beforeCode)}_HOLD_AUTHORITY_${String(authority.block_reason || "unresolved").toUpperCase()}`
     : listing_gate?.applied
@@ -1404,6 +1425,8 @@ export function resolveSellerStageTransition({
     review_required: reviewRequired,
     review_reason: authorityReview
       ? authority.block_reason || "authority_unresolved"
+      : offer_before_price_hold
+        ? "offer_request_price_withheld_gated_offer"
       : listingReview
         ? `listing_${lower(facts.listing_status) || "agent_involved"}`
       : reviewRequired
@@ -1413,7 +1436,12 @@ export function resolveSellerStageTransition({
     workflow_event_types: advancementEvents(beforeIdx, afterIdx, facts, intentKey),
     follow_up: {
       create: false,
-      cancel: true, // a reply always cancels stale reply-pending follow-ups
+      // a reply always cancels stale reply-pending follow-ups. An insult / profanity
+      // (hostile_or_troll) never suppresses (owner 2026-10-06: no reply, quiet archive, no DNC) —
+      // and owner rule 2026-10-19: unsolicited NURTURE never continues on a hostile thread, so the
+      // pending follow-ups are cancelled too (the send-time guard refuses any new one:
+      // hostile_thread_no_nurture)
+      cancel: true,
       replace: afterIdx > beforeIdx,
       days: null,
       due_at: null,

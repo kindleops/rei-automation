@@ -1,4 +1,4 @@
-// The production rehearsal runner must never commit: both migrations carry their own
+// The release rehearsal runner (disposable databases only since 2026-10-15) must never commit: both migrations carry their own
 // begin; … commit; — a naive BEGIN; \i … ROLLBACK; wrapper would commit at the file's commit;.
 // The runner strips exactly that outer pair and refuses any other transaction control.
 // With AGENT_PG_TEST_DB_URL it also proves end-to-end that a full rehearsal leaves nothing behind.
@@ -38,4 +38,16 @@ test('rehearsal (PG): full S3 + research apply, owner membership, verify — the
   } finally {
     await db.drop()
   }
+})
+
+test('rehearsal refuses a production-like target before connecting (owner boundary 2026-10-15)', async () => {
+  const lines = []
+  for (const url of [
+    'postgresql://postgres.abcdefghijklmnopqrst:pw@aws-1-us-west-2.pooler.supabase.com:6543/postgres',
+    'postgresql://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres',
+    'postgresql://postgres:pw@10.0.0.5:5432/postgres',
+  ]) {
+    await assert.rejects(rehearse({ url, log: (l) => lines.push(l) }), /refused/)
+  }
+  assert.equal(lines.length, 0, 'nothing ran')
 })

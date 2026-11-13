@@ -8,15 +8,22 @@
 import { createCapabilityRegistry, createCapabilityInvoker, describeCapability, capabilityGate } from './registry.js'
 import { createCapabilityApprovals } from './approvals.js'
 import { createThreadRefCodec } from './thread-ref.js'
-import { createDomainServices, loadProductionDeps } from './services.js'
+import { createDomainServices, loadProductionDeps, decideOnlyServices } from './services.js'
 import { createPgCapabilityStore } from './stores.js'
 import { isProductionRuntime } from '../config/agent-config.js'
 import { campaignCapabilities } from './defs/campaigns.js'
 import { inboxCapabilities } from './defs/inbox.js'
 import { pipelineCapabilities } from './defs/pipeline.js'
 import { platformCapabilities } from './defs/platform.js'
+import { actionGatewayRequestCapabilities } from './defs/action-gateway-requests.js'
+import { agentActionApprovalCapability, withActionGatewayServices } from '../../domain/action-gateway/approvals.js'
+import { createDecisionRegistry } from './decision-registry.js'
 
-export const FIRST_CAPABILITIES = Object.freeze([...campaignCapabilities, ...inboxCapabilities, ...pipelineCapabilities, ...platformCapabilities])
+export { withActionGatewayServices }
+
+// D1 (docs/ACTION-MCP-AUDIT.md §13): the Action Gateway's approval capability and its T2 human-request capabilities are
+// registered here, so a named operator decides gateway approvals in production through the one decide path.
+export const FIRST_CAPABILITIES = Object.freeze([...campaignCapabilities, ...inboxCapabilities, ...pipelineCapabilities, ...platformCapabilities, ...actionGatewayRequestCapabilities, agentActionApprovalCapability])
 export const DEFAULT_ORG_ID = '00000000-0000-4000-8000-00000000a001'
 export const CAPABILITY_SECRET_ENV = 'AGENT_CAPABILITY_SECRET'
 
@@ -32,7 +39,8 @@ export const fromApiName = (name) => (String(name).startsWith('cap__') ? String(
 
 /** Model-facing tool definitions. The tier is described, never a parameter. */
 export function capabilityToolDefs(registry) {
-  return registry.list().map((c) => ({
+  // capabilities only the Action Gateway files (prepare refuses) are decided by humans, never offered to a model
+  return registry.list().filter((c) => c.filed_by !== 'action_gateway' && c.id !== agentActionApprovalCapability.id).map((c) => ({
     name: toApiName(c.id),
     description: `${c.description} [${c.side_effect}; ${c.tier === 'requires_explicit_approval' ? 'creates a pending approval only — a human decides' : c.tier}]`,
     input_schema: c.input_schema,
@@ -40,12 +48,16 @@ export function capabilityToolDefs(registry) {
 }
 
 /**
- * @param {{ env?, store, services, secret, now?, registry?, systemControlMode? }} o
+ * @param {{ env?, store, services, secret, now?, registry?, decisionRegistry?, systemControlMode? }} o
+ *   registry          the MODEL-FACING registry (invoker + tool list)
+ *   decisionRegistry  what the human decide path resolves (registry ∪ the decide-only specs, D6 / D1)
+ *   services.negotiationFor({ refs })  → the negotiation services the envelope / send-authorization specs read
  */
-export function createCapabilityPlane({ env = process.env, store, services, secret, now = () => Date.now(), registry = createDefaultCapabilityRegistry(), systemControlMode = null }) {
+export function createCapabilityPlane({ env = process.env, store, services, secret, now = () => Date.now(), registry = createDefaultCapabilityRegistry(), decisionRegistry = null, systemControlMode = null }) {
   const refs = createThreadRefCodec({ secret })
-  const svc = Object.freeze({ ...services, refs })
-  const approvals = createCapabilityApprovals({ store, registry, services: svc, now })
+  const { negotiationFor, ...rest } = services || {}
+  const svc = Object.freeze({ ...rest, ...(typeof negotiationFor === 'function' ? { negotiation: negotiationFor({ refs }) } : {}), refs })
+  const approvals = createCapabilityApprovals({ store, registry: decisionRegistry || createDecisionRegistry(registry.list()), services: svc, now })
   const invoker = createCapabilityInvoker({ registry, store, approvals, services: svc, env, now, systemControlMode })
   return Object.freeze({
     registry,
@@ -74,7 +86,7 @@ export async function getCapabilityPlane(env = process.env) {
       await assertAgentPoolTls(pool, env)
       await store.assertLeastPrivilege()
     }
-    const services = createDomainServices({ runtimeStore: () => getVerifiedRuntimeStore(env) })
+    const services = { ...withActionGatewayServices(createDomainServices({ runtimeStore: () => getVerifiedRuntimeStore(env) }), pool), ...(await decideOnlyServices()) }
     globalThis[PLANE] = createCapabilityPlane({ env, store, services, secret, systemControlMode: () => getSystemValue('agent_mode') })
   }
   return globalThis[PLANE]
@@ -83,3 +95,4 @@ export async function getCapabilityPlane(env = process.env) {
 export function __resetCapabilityPlane() {
   delete globalThis[PLANE]
 }
+

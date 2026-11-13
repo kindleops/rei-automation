@@ -1,0 +1,5 @@
+2026-10-30T05:20:02.464Z re-hashing the backup (it must be the file validate-backup checked)…
+2026-10-30T05:20:02.557Z created lc_prodcopy_synth_20261030
+2026-10-30T05:20:04.261Z pg_restore --no-owner --no-privileges: exit 1, 1 error(s) {"expected_stub_schema_exists":1} in 1665 ms
+2026-10-30T05:20:04.437Z ACL pass: 379 entries, 0 error(s) {}
+2026-10-30T05:20:04.541Z restore: pass (2174 ms)

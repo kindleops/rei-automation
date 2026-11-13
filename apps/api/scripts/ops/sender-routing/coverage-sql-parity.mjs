@@ -3,7 +3,7 @@
  * SENDER ROUTING 2.0 r3 — PARITY of the proposed coverage SQL with the JS policy. READ-ONLY.
  *
  *   node --import ./scripts/register-aliases-ops.mjs scripts/ops/sender-routing/coverage-sql-parity.mjs \
- *     --evidence=<activation-dry-run.json> --sql-out=<file.sql> [--dburl-file=<path>]
+ *     --evidence=<activation-dry-run.json> --sql-out=<file.sql> [--run-sql]
  *
  * The routing tables do not exist in prod yet, so this builds ONE read-only SELECT:
  *   - market_sender_routes / sender_pools / sender_pool_numbers as VALUES stand-ins, built
@@ -13,14 +13,17 @@
  *   - the BODY of public.sender_routing_v2_first_touch_pick, copied verbatim from
  *     PROPOSED_20261007170000_graph_sender_coverage_routing_v2.sql (only the four table
  *     names are re-pointed at the stand-ins), evaluated for every canonical market.
- * With --dburl-file it runs the SELECT through psql inside BEGIN READ ONLY … ROLLBACK and
- * compares every market's pick (pool + number) with selectSender() on the same inputs.
+ * With --run-sql it runs the SELECT through psql inside BEGIN READ ONLY … ROLLBACK, as the
+ * role-enforced read-only diagnostics credential (LC_RO_OPS_DIAG_DB_URL_FILE, verified by
+ * scripts/lib/prod-db-credentials.mjs before psql starts), and compares every market's pick
+ * (pool + number) with selectSender() on the same inputs.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readOnlyClient, readAll, arg } from "./_readonly.mjs";
+import { resolveReadOnlyUrl, psqlEnv } from "../../../../../scripts/lib/prod-db-credentials.mjs";
 import { buildRoutingGraph, selectSender, normalizeE164, PURPOSES } from "../../../src/lib/domain/routing/sender-routing/sender-routing-policy.js";
 import { proposedGraphRows } from "../../../src/lib/domain/routing/sender-routing/proposed-initial-graph.js";
 import { applyBackfillToFleet } from "../../../src/lib/domain/routing/sender-routing/sender-inventory-reconciliation.js";
@@ -86,12 +89,13 @@ WHERE m.is_active
 ORDER BY m.id`;
 }
 
-function runPsql(dburlFile, sql) {
+let roUrl = null;
+async function runPsql(sql) {
+  roUrl ??= (await resolveReadOnlyUrl({ purpose: 'ops_diag' })).url;
   const script = `SET statement_timeout='30s';\nBEGIN READ ONLY;\n\\pset format unaligned\n\\pset tuples_only on\n\\pset fieldsep '|'\n${sql};\nROLLBACK;\n`;
-  // Only psql's stderr is ever printed (the Node error message would echo the argv,
-  // which carries the connection string).
+  // The connection travels in PG* env (never argv); only psql's stderr is ever printed.
   try {
-    return execFileSync("psql", ["--dbname", fs.readFileSync(dburlFile, "utf8").trim(), "-X", "-q", "-v", "ON_ERROR_STOP=1"], { input: script, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return execFileSync("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], { input: script, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], env: psqlEnv(roUrl, { readOnly: true }) });
   } catch (error) {
     console.error(`psql failed: ${String(error.stderr || "").slice(0, 2000)}`);
     process.exit(1);
@@ -104,7 +108,7 @@ if (isMain) {
   // --live-evidence: the 171000 backfill rule evaluated now, in SQL (verbatim evidence CTE) and in JS.
   // otherwise: --evidence=<activation-dry-run.json> (the earlier static backfill).
   const liveEvidence = Boolean(arg("live-evidence"));
-  const dburlFile = arg("dburl-file");
+  const runSql = Boolean(arg("run-sql"));
   const evidence = liveEvidence ? null : JSON.parse(fs.readFileSync(arg("evidence"), "utf8"));
   const sb = readOnlyClient();
   const rawFleet = await readAll(sb, "textgrid_numbers", "*");
@@ -113,12 +117,12 @@ if (isMain) {
   const backfillSqlText = liveEvidence ? fs.readFileSync(BACKFILL, "utf8") : null;
   const sql = buildParitySql({ sqlText: fs.readFileSync(MIGRATION, "utf8"), graphRows, fleet: rawFleet, backfill: evidence?.backfill || [], backfillSqlText });
   if (arg("sql-out")) fs.writeFileSync(arg("sql-out"), `${sql};\n`);
-  if (dburlFile) {
+  if (runSql) {
     let fleet;
     let blocked;
     let evidenceRows = [];
     if (liveEvidence) {
-      evidenceRows = lines(runPsql(dburlFile, `WITH ${evidenceBlock(backfillSqlText)} SELECT phone_number, delivered, COALESCE(first_inbound::text, '') FROM evidence ORDER BY phone_number`));
+      evidenceRows = lines(await runPsql(`WITH ${evidenceBlock(backfillSqlText)} SELECT phone_number, delivered, COALESCE(first_inbound::text, '') FROM evidence ORDER BY phone_number`));
       const ev = new Map(evidenceRows.map(([phone, delivered, first]) => [phone, { delivered: Number(delivered), first: first || null }]));
       fleet = rawFleet.map((row) => {
         const e = ev.get(row.phone_number);
@@ -133,7 +137,7 @@ if (isMain) {
       fleet = applyBackfillToFleet(rawFleet, evidence.backfill);
       blocked = new Set(evidence.blocked || []);
     }
-    const sqlPick = new Map(lines(runPsql(dburlFile, sql)).map(([id, pool, phone, local, tier, mkt]) => [id, { pool: pool || null, phone: phone || null, local: local === "t", tier: tier || null, market: mkt || null }]));
+    const sqlPick = new Map(lines(await runPsql(sql)).map(([id, pool, phone, local, tier, mkt]) => [id, { pool: pool || null, phone: phone || null, local: local === "t", tier: tier || null, market: mkt || null }]));
     const graph = buildRoutingGraph(graphRows);
     let same = 0;
     const diffs = [];
@@ -155,6 +159,8 @@ if (isMain) {
     ].join("\n");
     console.log(md);
     if (arg("out")) fs.writeFileSync(arg("out"), md);
+    await sb.close();
     if (diffs.length) process.exit(1);
   }
+  await sb.close();
 }

@@ -46,6 +46,11 @@ import { acceptActiveOffer, recordSellerCounter, loadActiveOffer, loadAcceptedOf
 import { createClosingCaseFromAcceptance } from "@/lib/domain/closings/create-closing-case-from-acceptance.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import {
+  ACCEPTANCE_REVIEW_OUTCOME,
+  evaluateAutonomousAcceptance,
+  routeAcceptanceToHumanReview,
+} from "@/lib/domain/holds/automation-hold.js";
 
 export const FINALIZE_ACCEPTANCE_VERSION = "finalize_seller_acceptance_v1";
 
@@ -122,6 +127,62 @@ export async function finalizeSellerAcceptance({
 
   const supabase = injected || getDefaultSupabaseClient();
   if (!supabase) return { ...base, reason: "missing_supabase" };
+
+  // ── G. AUTONOMY GUARD (P0 containment 2026-10-16) — BEFORE ANY WRITE ───────
+  // An acceptance is automated only when no automation hold applies, the
+  // active offer was produced by the autopilot (not an operator), its price is
+  // within the MAO and the authorized ceiling, a valuation exists, and the
+  // opportunity is live. Otherwise it is routed to HUMAN REVIEW: the evidence
+  // is recorded, nothing is accepted, no counter is written, no closing case
+  // is created. Fail closed: a guard read failure is a review verdict.
+  // This runs for EVERY caller (inbound transition, gap recovery, replays).
+  let guard;
+  try {
+    guard = await evaluateAutonomousAcceptance({
+      opportunity_id,
+      thread_key,
+      property_id,
+      master_owner_id,
+      accepted_price,
+      acceptance_basis,
+      supabase,
+    });
+  } catch (error) {
+    guard = { allowed: false, reasons: ["acceptance_guard_lookup_failed"], detail: error?.message || "guard_failed" };
+  }
+  // A "yes" with NO active offer binds nothing on the existing fail-closed path
+  // (acceptActiveOffer -> no_active_offer, nothing written). That benign no-op
+  // is kept -- unless a hold applies or the agreed price is the seller's ask
+  // (which would WRITE a counter version): those are always routed to review.
+  const nothingToBind =
+    guard && !guard.offer && !guard.hold?.held && clean(acceptance_basis) !== "we_accepted_seller_ask" &&
+    !(guard.reasons || []).includes("acceptance_guard_lookup_failed");
+  if (!guard?.allowed && !nothingToBind) {
+    const routed = await routeAcceptanceToHumanReview({
+      verdict: guard,
+      opportunity_id,
+      thread_key,
+      property_id,
+      master_owner_id,
+      acceptance_event_id,
+      acceptance_at,
+      source: provenance?.source || provenance?.source_view || null,
+      supabase,
+    }).catch(() => ({ evidence: null, event_recorded: false }));
+    const lookupFailed = (guard?.reasons || []).some((r) => r === "acceptance_guard_lookup_failed" || r === "automation_hold_lookup_failed");
+    return {
+      ...base,
+      // A refusal on evidence is a handled outcome (ok:true); a refusal because
+      // the guard could not read its authorities is a failure (ok:false). Both
+      // accept nothing and create nothing.
+      ok: !lookupFailed,
+      routed_to_human_review: true,
+      review_reasons: guard?.reasons || [],
+      automation_hold: guard?.hold?.held ? { hold_ids: guard.hold.hold_ids || [], fail_closed: guard.hold.fail_closed === true } : null,
+      evidence_recorded: routed?.event_recorded === true,
+      reason: ACCEPTANCE_REVIEW_OUTCOME,
+    };
+  }
 
   // ── 0. Converge the offer VERSION to the agreed price ──────────────────────
   // When WE accepted the seller's ask, the agreed price is the ask -- not our

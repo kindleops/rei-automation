@@ -14,6 +14,18 @@
 //     carry a revocation phrase.
 // Rules only, no AI. English and Spanish keep their existing classifier lists;
 // the Spanish entries here fill colloquial forms those lists miss.
+//
+// P0 2026-10-19: the phrase lists below are kept, and the general per-language
+// GRAMMAR (multilingual-contact-revocation.js — stop / remove / no-contact /
+// unsubscribe / leave-me-alone / stop-asking-about-the-property families, with
+// accent folding, clitic imperatives, negation and the channel / language /
+// other-action carves) runs after them. Wrong-number and the uncertain
+// fail-safe are returned by analyzeContactRevocation, never by this matcher.
+import { analyzeContactRevocation, isChannelPreferenceOnly } from "./multilingual-contact-revocation.js";
+import { stopSpansAimedAtUs } from "./revocation-morphology.js";
+import { classifyStopScope, STOP_SCOPE } from "./stop-scope.js";
+
+export { analyzeContactRevocation };
 
 export const MULTILINGUAL_OPT_OUT_VERSION = "multilingual_opt_out_v1_2026_10_07";
 
@@ -23,8 +35,12 @@ const bareOf = (s) => fold(s).replace(/^[^\p{L}\p{M}\p{N}]+/u, "").replace(/[^\p
 
 /** Whole-message STOP keywords per language (after trimming punctuation). */
 const EXACT_KEYWORDS = Object.freeze({
-  Spanish: ["pare", "parar", "detener", "deténgase", "detengase", "cancelar", "baja", "darme de baja"],
-  Portuguese: ["pare", "parar", "cancelar", "sair", "descadastrar"],
+  // Operation Hidden Gold (F1): the bare imperatives a Spanish speaker texts back ("Para", "ALTO", "Basta",
+  // "Detente", "Cancela") are a STOP when they are the whole message (a sentence with them is read by the grammar)
+  Spanish: ["pare", "parar", "detener", "deténgase", "detengase", "cancelar", "baja", "darme de baja", "para", "alto", "basta", "detente", "deténte", "cancela", "no más", "no mas", "no más mensajes", "no mas mensajes", "ya basta"],
+  // Owner decision (2026-10-30): a standalone "Chega" / "Já chega" is a confirmed STOP; "chega" inside a sentence
+  // ("Ele chega amanhã", "não chega a 200 mil") is read by the grammar and is not one
+  Portuguese: ["pare", "parar", "cancelar", "sair", "descadastrar", "chega", "já chega", "ja chega", "para", "basta"],
   French: ["arrêt", "arret", "arrêtez", "arretez", "stop svp", "désabonner", "desabonner", "désinscrire"],
   German: ["stopp", "abbestellen", "abmelden", "aufhören", "aufhoeren"],
   Italian: ["basta messaggi", "annulla iscrizione", "cancellami", "disiscrivimi"],
@@ -42,7 +58,7 @@ const EXACT_KEYWORDS = Object.freeze({
 
 /** Contact-revocation phrases (anywhere in the message). */
 const PHRASES = Object.freeze([
-  ["Spanish", /\bd[eé]j(?:a|e|en|ame)\s+de\s+(?:escribir(?:me)?|mandar(?:me)?|enviar(?:me)?|contactar(?:me)?|llamar(?:me)?|molestar(?:me)?)\b|\bya\s+no\s+me\s+(?:escribas?|mandes?|env[ií]es?|contactes?|llames?)\b|\bno\s+me\s+vuelvas?\s+a\s+(?:escribir|mandar|contactar|llamar)\b|\bno\s+me\s+(?:mandes?|mande|env[ií]es?|env[ií]e)\s+(?:m[aá]s\s+)?(?:mensajes|textos)\b|\b(?:b[oó]rr|quit|sac)(?:a|e|en)(?:me)?\s+de\s+(?:tu|su)\s+lista\b|\bborre\s+mi\s+n[uú]mero\b/i],
+  ["Spanish", /(?<!\b(?:no|nunca)\s)\bd[eé]j(?:a|e|en|ame)\s+de\s+(?:escribir(?:me)?|mandar(?:me)?|enviar(?:me)?|contactar(?:me)?|llamar(?:me)?|molestar(?:me)?)\b|\bya\s+no\s+me\s+(?:escribas?|mandes?|env[ií]es?|contactes?|llames?)\b|\bno\s+me\s+vuelvas?\s+a\s+(?:escribir|mandar|contactar|llamar)\b|\bno\s+me\s+(?:mandes?|mande|env[ií]es?|env[ií]e)\s+(?:m[aá]s\s+)?(?:mensajes|textos)\b|\b(?:b[oó]rr|quit|sac)(?:a|e|en)(?:me)?\s+de\s+(?:tu|su)\s+lista\b|\bborre\s+mi\s+n[uú]mero\b/i],
   ["Portuguese", /\bpar[ea]\s+de\s+(?:me\s+)?(?:mandar|enviar|escrever|ligar|contatar|incomodar)\b|\bn[aã]o\s+me\s+(?:mande|envie|escreva|ligue|contate|procure)\s+mais\b|\b(?:remova|tire|apague)\s+(?:o\s+)?meu\s+n[uú]mero\b|\bme\s+(?:tire|remova)\s+da\s+(?:sua\s+)?lista\b/i],
   ["French", /\barr[eê]te[sz]?\s+de\s+m['’]?\s*(?:[eé]crire|envoyer|contacter|appeler|harceler)\b|\bne\s+m['’]?\s*(?:[eé]crivez|envoyez|contactez|appelez)\s+plus\b|\b(?:supprimez|retirez|effacez)\s+mon\s+num[eé]ro\b|\bretirez[- ]moi\s+de\s+(?:votre|la)\s+liste\b/i],
   ["German", /\bh[oö]ren\s+sie\s+auf,?\s+mir\s+zu\s+(?:schreiben|simsen|texten)\b|\bh[oö]r\s+auf,?\s+mir\s+zu\s+schreiben\b|\bschreiben\s+sie\s+mir\s+nicht\s+mehr\b|\bkontaktieren\s+sie\s+mich\s+nicht\s+mehr\b|\bkeine\s+(?:nachrichten|sms|textnachrichten)\s+mehr\b|\bl[oö]schen\s+sie\s+meine\s+nummer\b|\bnehmen\s+sie\s+mich\s+(?:von|aus)\s+(?:der|ihrer)\s+liste\b/i],
@@ -66,10 +82,40 @@ for (const [language, words] of Object.entries(EXACT_KEYWORDS)) for (const w of 
  * A confident opt-out in a registry language, or null.
  * @returns {{ language, rule_id, kind: 'keyword'|'phrase', version } | null}
  */
+// RC 8.5.15 (eval item #83, "…JesusSTOP 🛑"): a STOP glued to the previous
+// word, or a stop sign emoji, is a contact revocation. Read from the ORIGINAL
+// text: an upper-case STOP glued after a lower-case letter at the end of the
+// message ("JesusSTOP"), "stop 🛑" / "STOP🛑" anywhere, or a message that ends
+// in 🛑. Lower-case endings ("nonstop") stay ordinary words.
+const GLUED_STOP_RE = /\p{Ll}STOP[\s!.]*(?:\u{1F6D1}\uFE0F?[\s!.]*)*$/u;
+const STOP_SIGN_RE = /\bstop\s*\u{1F6D1}|\u{1F6D1}\uFE0F?[\s!.]*$/iu;
+// OWNER DECISION 2026-10-14 (locked): explicit STOP or ANY request to stop
+// messaging is a suppression. Production misses fixed by hand that day:
+// "…JesusSTOP 🛑", "Not interested please stop sending", "Stop asking me about
+// <address>". A stop aimed at OUR messages / questions, anywhere in the message.
+// "Stop calling, text me" (a channel preference) is not matched: calling is not
+// in the verb list.
+const STOP_REQUEST_RE = /\b(?:stop|quit|cease)\s+(?:sending|texting|txting|messaging|msging|contacting|bugging|bothering|harass\w*|reaching\s+out|writing|emailing|spamming)\b|\bplease\s+stop\b|\bstop\s+please\b|\bno\s+more\s+(?:texts?|messages?|msgs?)\b/i;
+export function matchGluedStop(message = "") {
+  const raw = fold(message);
+  if (!raw) return null;
+  if (GLUED_STOP_RE.test(raw) || STOP_SIGN_RE.test(raw)) {
+    return { language: "English", rule_id: "opt_out_glued_stop_or_stop_sign", kind: "glued_stop", version: MULTILINGUAL_OPT_OUT_VERSION };
+  }
+  if (STOP_REQUEST_RE.test(raw)) {
+    return { language: "English", rule_id: "opt_out_stop_messaging_request", kind: "stop_request", version: MULTILINGUAL_OPT_OUT_VERSION };
+  }
+  return null;
+}
+
 export function matchMultilingualOptOut(message = "") {
   const raw = fold(message);
   if (!raw) return null;
+  const glued = matchGluedStop(raw);
+  if (glued) return glued;
   const bare = bareOf(raw);
+  // a call-only prohibition with a text affirmative is a channel preference, never an opt-out
+  if (!EXACT_INDEX.has(bare) && isChannelPreferenceOnly(raw)) return null;
   if (EXACT_INDEX.has(bare)) {
     const language = EXACT_INDEX.get(bare);
     return { language, rule_id: `ml_opt_out_keyword_${language.split(" ")[0].toLowerCase()}`, kind: "keyword", version: MULTILINGUAL_OPT_OUT_VERSION };
@@ -77,6 +123,8 @@ export function matchMultilingualOptOut(message = "") {
   for (const [language, re] of PHRASES) {
     if (re.test(raw)) return { language, rule_id: `ml_opt_out_phrase_${language.split(" ")[0].toLowerCase()}`, kind: "phrase", version: MULTILINGUAL_OPT_OUT_VERSION };
   }
+  const grammar = analyzeContactRevocation(raw).opt_out;
+  if (grammar) return { language: grammar.language, rule_id: grammar.rule_id, kind: grammar.kind, family: grammar.family, version: grammar.version };
   return null;
 }
 
@@ -85,3 +133,26 @@ export function isMultilingualOptOut(message = "") {
 }
 
 export default matchMultilingualOptOut;
+
+// rc-8.5.21 v4: the CLASSIFICATION-level stop reading of a text (no model, no I/O) — the final dispatch guard's
+// independent check. confirmed = a revocation (grammar / phrase / glued STOP / bare carrier keyword);
+// uncertain = a possible opt-out (a family token, an uncertain stop-like word) or a stop word aimed at us.
+const BARE_CARRIER_STOP_RE = /^\s*(?:stop|stopall|stop\s*all|unsubscribe|cancel|end|quit|opt\s*out)\s*[.!]*\s*$/i;
+const STOP_WORD_RE = /stop(?!\s+(?:by|over|in|off|past|on\s+by|and\s+(?:see|look))\b)|unsubscribe|opt[\s-]?out|remove\s+(?:me|my)|take\s+me\s+off|(?:do\s*n[o']?t|never)\s+(?:text|contact|message|msg|bother)|no\s+more\s+(?:texts?|messages?)|leave\s+me\s+alone|lose\s+my\s+number|quit\s+(?:texting|messaging)/i;
+export function readStopLikeText(text = "") {
+  const body = String(text ?? "");
+  if (!body.trim()) return { confirmed: false, uncertain: false, sources: [] };
+  if (isChannelPreferenceOnly(body)) return { confirmed: false, uncertain: false, sources: ["channel_preference"] };
+  const hit = matchMultilingualOptOut(body);
+  if (hit) return { confirmed: true, uncertain: false, sources: [hit.rule_id] };
+  if (BARE_CARRIER_STOP_RE.test(body)) return { confirmed: true, uncertain: false, sources: ["bare_stop_keyword"] };
+  const a = analyzeContactRevocation(body);
+  if (a.possible_opt_out) return { confirmed: false, uncertain: true, sources: [a.possible_opt_out.rule_id] };
+  if (STOP_WORD_RE.test(stopSpansAimedAtUs(body))) {
+    // a stop verb aimed at communication ("Stop texting me", "don't contact me") is the revocation itself
+    const scope = classifyStopScope(body);
+    if (scope === STOP_SCOPE.COMMUNICATION) return { confirmed: true, uncertain: false, sources: ["stop_word_communication"] };
+    return { confirmed: false, uncertain: true, sources: ["stop_word"] };
+  }
+  return { confirmed: false, uncertain: false, sources: [] };
+}

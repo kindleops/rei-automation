@@ -24,6 +24,7 @@
 // rules in classify.js. Words shared with Spanish ("claro", "no", "si") are
 // left out so a Spanish reply is never relabelled.
 
+import { stopWordTargetsUs, NEGATED_CONTINUATION_RE, CONTINUATION_COMM_OBJECT_RE } from "./revocation-morphology.js";
 export const MULTILINGUAL_SHORT_REPLY_VERSION = "multilingual_short_replies_v1";
 
 const CANONICAL = Object.freeze({
@@ -317,6 +318,10 @@ export function parseLocalAmount(value) {
 
 // ─── public API ──────────────────────────────────────────────────────────────
 
+function untargetedContinuation(text) {
+  return NEGATED_CONTINUATION_RE.test(text) && !CONTINUATION_COMM_OBJECT_RE.test(text);
+}
+
 function matchLanguage(language, entry, text, whole, foldedWhole, { allowRomanized }) {
   const hits = new Set();
   const foldedText = fold(text);
@@ -328,7 +333,12 @@ function matchLanguage(language, entry, text, whole, foldedWhole, { allowRomaniz
     // Exact answers compare as written: folding "nö" to "no" would relabel an
     // English "No" as German. Unaccented variants are listed explicitly.
     if (exact.some((w) => w === whole)) hits.add(category);
-    if (phrases.some((p) => containsPhrase(text, p) || containsPhrase(foldedText, fold(p)))) hits.add(category);
+    // rc-8.5.21 v4 OBJECT / TARGET analysis: a single-word stop phrase ("arrête", "smettila", "хватит") inside a
+    // longer message counts only when it is aimed at us (bare, or with a communication object) and is not a
+    // negated first-person continuation ("j'arrête pas de recevoir des offres")
+    const phraseHit = (p) => (containsPhrase(text, p) || containsPhrase(foldedText, fold(p))) &&
+      !(category === "opt_out" && !/\s/.test(p.trim()) && p.trim() !== whole && (untargetedContinuation(text) || !stopWordTargetsUs(text, p) && !stopWordTargetsUs(foldedText, fold(p))));
+    if (phrases.some(phraseHit)) hits.add(category);
   }
   if (allowRomanized && entry.romanized) {
     for (const [category, words] of Object.entries(entry.romanized)) {

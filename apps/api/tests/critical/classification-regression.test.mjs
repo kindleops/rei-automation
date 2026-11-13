@@ -36,7 +36,10 @@ const TEST_CASES = [
   { text: "No thanks", expected: "not_interested" },
   { text: "I'm not interested in selling.", expected: "not_interested" },
   { text: "Yes but not for sale.", expected: "not_interested" },
-  { text: "Answer is no", expected: "not_interested" },
+  // OWNER DECISION LOCKED 2026-10-17: a direct no with NO established question answers nothing we know —
+  // a contextual-review hold (unclear), never certainty. With the ownership question it is the denial;
+  // with the selling question it is that decline (ownership-answer-forms-20261017.test.mjs).
+  { text: "Answer is no", expected: "unclear" },
   { text: "I'm not looking to sell.", expected: "not_interested" },
   { text: "It is mine. I am not selling it.", expected: "not_interested" },
   { text: "Not selling", expected: "not_interested" },
@@ -49,7 +52,8 @@ const TEST_CASES = [
   // Wrong Number
   { text: "Wrong number", expected: "wrong_number" },
   { text: "You have the wrong person", expected: "wrong_number" },
-  { text: "I don't own that house", expected: "wrong_number" },
+  // RC 8.5.15 (owner 2026-10-14): a written ownership denial is property-scoped, never wrong_number.
+  { text: "I don't own that house", expected: "property_specific_non_owner" },
   { text: "This is not Shirley...", expected: "wrong_number" },
 
   // Sold — property-scoped disposition (sold_property), never the
@@ -57,8 +61,8 @@ const TEST_CASES = [
   { text: "Sold it 10 yrs ago", expected: "sold_property" },
   { text: "Sold it last week for $80,000!", expected: "sold_property" },
   { text: "No It sold", expected: "sold_property" },
-  { text: "No la Mia es 2711 Degen Dr. Bonita CA 91902", expected: "wrong_number" },
-  { text: "esa. Casa. llanoesmia", expected: "wrong_number" },
+  { text: "No la Mia es 2711 Degen Dr. Bonita CA 91902", expected: "property_specific_non_owner" },
+  { text: "esa. Casa. llanoesmia", expected: "property_specific_non_owner" },
   
   // Opt Out
   { text: "Stop", expected: "opt_out" },

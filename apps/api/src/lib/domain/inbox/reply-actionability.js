@@ -44,6 +44,8 @@ export const NON_ACTIONABLE_REPLY_INTENTS = Object.freeze([
   "former_owner_respondent",
   "sold_property",
   "not_interested",
+  // owner 2026-10-17: declined the ownership question (ownership unverified) — never actionable / Priority
+  "ownership_declined_unverified",
   "need_time",
   "asking_price_implausible",
   "acknowledgement",
@@ -160,7 +162,7 @@ export function isReopeningReplyIntent(intent) {
 export const PRICE_GAP_INTENT = "asking_price_implausible";
 export const PRICE_GAP_REASON = "price_far_above_value";
 
-const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "unqualified", "sold", "suppressed", "opt_out"]);
+const NON_OWNER_DISPOSITIONS = new Set(["wrong_number", "wrong_person", "unqualified", "sold", "suppressed", "opt_out", "declined_unverified"]);
 
 function reasonCodesOf(row = {}) {
   const raw = row?.reason_codes;
@@ -248,7 +250,7 @@ function isTerminalRow(row = {}) {
   return row.is_suppressed === true
     || bucket === "suppressed"
     || bucket === "dead"
-    || ["wrong_number", "wrong_person", "sold", "unqualified", "suppressed", "opt_out"].includes(disposition);
+    || ["wrong_number", "wrong_person", "sold", "unqualified", "suppressed", "opt_out", "declined_unverified"].includes(disposition);
 }
 
 /**

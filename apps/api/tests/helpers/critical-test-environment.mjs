@@ -10,12 +10,28 @@
 process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 import { after, before, beforeEach } from 'node:test'
+import { __setAutomationHoldResolverForTests, checkAutomationHold as REGISTRY_AUTOMATION_HOLD_CHECKER } from '../../src/lib/domain/holds/automation-hold.js'
+import { __setSenderContinuityResolverForTests } from '../../src/lib/domain/delivery/sender-continuity.js'
 import { __setDeps as setNotificationIntelligenceDeps } from '../../src/lib/domain/notifications/notification-intelligence-service.js'
 import {
   clearSystemControlCache,
   primeSystemControlCache,
   primeSystemControlValue,
 } from '../../src/lib/system-control.js'
+
+// AUTOMATION HOLD test seam (P0 2026-10-16). Production resolves holds through
+// the automation_hold_for RPC and FAILS CLOSED when it cannot (no client / no
+// rpc / error). The ~800 legacy suites use bespoke Supabase fakes with no rpc,
+// so without this seam every one of them would read "held". Default: no holds.
+// The hold suites (automation-hold-*.test.mjs) clear this seam and exercise the
+// real fail-closed resolver against fakes that implement the RPC.
+__setAutomationHoldResolverForTests(() => ({ held: false, fail_closed: false, holds: [], hold_ids: [], reason: null, source: 'test_default_no_holds' }))
+// SENDER CONTINUITY test seam (owner P0 rc-8.5.21, delivery/sender-continuity.js). Production reads the
+// thread's established sender fresh (inbox_thread_state.our_number, else the last seller-seen outbound)
+// and FAILS CLOSED when it cannot. The legacy suites' fakes cannot answer that read, so the default here
+// is "nothing established" (a new conversation: the legacy selection runs unchanged). The continuity
+// suites (sender-continuity-*.test.mjs and the PG proofs) clear it and run the real reads.
+__setSenderContinuityResolverForTests(() => null)
 
 const ALLOWED_HOSTS = new Set([
   'localhost',
@@ -151,7 +167,15 @@ before(() => {
   setNotificationIntelligenceDeps({ supabase_override: makeInertNotificationClient() })
 })
 
+// rc-8.5.21: the automation-hold port (lib/domain/holds-port) FAILS CLOSED when no registry is
+// bound. INTEGRATED: before every test the port is re-bound to the REAL registry checker
+// (automation-hold.js checkAutomationHold), so every suite goes port -> registry -> the hotfix's
+// resolver test seam above (default: no holds). The hold tests reset it (__resetAutomationHoldChecker)
+// to prove the fail-closed default; TEST_NO_HOLD_CHECKER stays a pure "no hold" fake for injection.
+const HOLD_CHECKER = Symbol.for('lc.automation_hold.checker')
+export const TEST_NO_HOLD_CHECKER = async () => ({ held: false, hold_type: null, reason: null, hold_id: null })
 beforeEach(() => {
+  globalThis[HOLD_CHECKER] = REGISTRY_AUTOMATION_HOLD_CHECKER
   resetCriticalProcessEnv()
   delete process.env.SUPABASE_URL
   delete process.env.SUPABASE_SERVICE_ROLE_KEY

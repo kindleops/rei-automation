@@ -194,3 +194,4 @@ if (outDir) {
   writeOut(`${outDir}/dry-run.md`, md.join("\n"));
   writeOut(`${outDir}/dry-run.json`, { generated_at: now.toISOString(), summary, coverage_today: covA.metrics, coverage_after_onboarding: covB.metrics, graph_table: graphTable, backfill, results: results.map(({ A, B, ...rest }) => ({ ...rest, A: A.cell, A_detail: A.detail || null, B: B.cell, B_detail: B.detail || null })) });
 }
+await sb.close();

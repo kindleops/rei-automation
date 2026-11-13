@@ -39,6 +39,7 @@ const LOSS_ORDER: Array<{ key: string; label: string }> = [
   { key: 'wrong_number', label: 'Known wrong number' },
   { key: 'non_sms_capable', label: 'Not SMS-capable' },
   { key: 'suppressed', label: 'Opted out / suppressed' },
+  { key: 'prior_reply_not_owner', label: 'Said not the owner' },
   { key: 'pending_prior_touch', label: 'Contacted recently' },
   { key: 'active_queue_item', label: 'Already queued' },
   { key: 'no_sender_coverage', label: 'No sender route' },
@@ -168,7 +169,7 @@ export function CampaignReachMobile({
     ? (() => {
         const resolved = matched - n(blocks.missing_phone)
         const sms = resolved - n(blocks.wrong_number) - n(blocks.non_sms_capable)
-        const routed = sms - n(blocks.suppressed) - n(blocks.pending_prior_touch) - n(blocks.active_queue_item)
+        const routed = sms - n(blocks.suppressed) - n(blocks.prior_reply_not_owner) - n(blocks.pending_prior_touch) - n(blocks.active_queue_item)
         const ready = routed - n(blocks.no_sender_coverage)
         const w = (v: number) => Math.max(6, Math.min(100, (v / matched) * 100))
         const stages = [
@@ -187,7 +188,7 @@ export function CampaignReachMobile({
           null,
           { short: 'no phone', value: n(blocks.missing_phone) },
           { short: 'not SMS-capable', value: n(blocks.wrong_number) + n(blocks.non_sms_capable) },
-          { short: 'suppressed / prior touch / queued', value: n(blocks.suppressed) + n(blocks.pending_prior_touch) + n(blocks.active_queue_item) },
+          { short: 'suppressed / prior touch / queued', value: n(blocks.suppressed) + n(blocks.prior_reply_not_owner) + n(blocks.pending_prior_touch) + n(blocks.active_queue_item) },
           { short: 'no sender route', value: n(blocks.no_sender_coverage) },
         ]
         const rows: Row[] = []

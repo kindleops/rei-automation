@@ -7,7 +7,7 @@ import { evaluateQueueCreationRuntimeBrakes } from '@/lib/domain/queue/queue-con
 import {
   buildSendQueueDedupeKey,
   insertSupabaseSendQueueRow,
-  evaluateContactWindow,
+  evaluateRecipientWindowForEntry,
 } from '@/lib/supabase/sms-engine.js';
 import { normalizeCanonicalLanguage, normalizeCanonicalUseCase } from '@/lib/domain/templates/template-metadata-normalization.js';
 import { countSegments } from '@/lib/sms/personalize_template.js';
@@ -134,11 +134,19 @@ export async function enqueueCanonicalOutboundSms(input = {}, deps = {}) {
   const scheduled_for = clean(input.scheduled_for) || nowIso();
   const dedupe_key = buildCanonicalQueueDedupeKey({ ...input, use_case, idempotency_key });
 
-  const window = evaluateContactWindow({
-    scheduled_for_utc: scheduled_for,
+  // rc-8.5.21 (criterion 14): the dispatcher's recipient-window functions — the recipient phone first
+  // (the stored zone only narrows); a reply to the seller's inbound is judged as one (category 1)
+  const kind = String(input.message_type || input.action_type || 'auto_reply').toLowerCase()
+  const entry = /campaign|first_touch|opener/.test(kind) ? 'campaign' : /reply/.test(kind) && clean(source_event_id) ? 'reply' : 'followup'
+  const window = evaluateRecipientWindowForEntry({
+    entry,
+    recipient_phone: to_phone,
     timezone,
-    contact_window_start_hour: input.contact_window_start_hour ?? 9,
-    contact_window_end_hour: input.contact_window_end_hour ?? 20,
+    scheduled_for,
+    inbound_message_event_id: entry === 'reply' ? source_event_id : null,
+    inbound_received_at: entry === 'reply' ? clean(input.inbound_received_at) || clean(input.metadata?.inbound_received_at) || null : null,
+    property_geography: input.property_address_state ? { state: input.property_address_state, zip: input.property_address_zip || null } : null,
+    metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
   });
 
   const segments = countSegments(message_body);

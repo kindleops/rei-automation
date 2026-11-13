@@ -325,6 +325,8 @@ export function shouldSuppressSellerAutoReply(input) {
   const confidence = input?.classification?.confidence ?? 1;
   const automation_state = input?.conversation_context?.summary?.automation_state || "running";
   
+  // AUTOMATION HOLD (P0 2026-10-16) outranks everything, including force_queue_reply.
+  if (input?.automation_hold?.held === true) return { suppress: true, reason: "automation_hold" };
   if (!input.auto_reply_enabled && !input.force_queue_reply) return { suppress: true, reason: "auto_reply_disabled" };
   
   if (automation_state === "paused" || automation_state === "manual") return { suppress: true, reason: "manual_pause" };

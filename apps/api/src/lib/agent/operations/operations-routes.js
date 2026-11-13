@@ -17,7 +17,7 @@
 import { createAgentIdentityProvider } from '../security/agent-auth.js'
 import { createUserRateLimiter, resolveRateLimits } from '../security/rate-limit.js'
 import { isAgentEnabled } from '../config/agent-config.js'
-import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // Package A: the same constant, without the capability plane import
+import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // reconciliation (production Package A): the same constant, without the capability plane import
 import { operationsEnabled } from './operations-kinds.js'
 import { ACTION_STATES, ACTION_STATE_LABELS, ACTIVE_QUEUE_STATES } from './action-center.js'
 

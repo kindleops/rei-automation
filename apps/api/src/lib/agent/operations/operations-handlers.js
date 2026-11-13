@@ -1,10 +1,5 @@
 // 8.5.20 part C runtime handlers (R2 runtime; deterministic; no model; $0):
 //
-// PACKAGE A (hotfix/research-runtime, backport of rc-8.5.21 71479867): recovery.sweep,
-// inbox.action_center and ops.supervisor only. pipeline.reconcile (stage-change approvals through the
-// capability plane), the follow-up intent linkage and the auto-recovery sweeps are REMOVED (not unwired),
-// and owner-excluded records (missions/research-exclusions.js) never enter a job.
-//
 //   recovery.sweep        historical opportunity recovery → recovery.candidate findings +
 //                         review work items. NEVER sends, queues or schedules; has no
 //                         capability plane at all.
@@ -22,17 +17,19 @@
 // even when no row changed). The watermark advances only after a batch is fully recorded.
 import { RuntimePermanentError } from '../runtime/runtime-tick.js'
 import { missionIdentity } from '../missions/mission-kinds.js'
-import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // Package A: the same constant, without the capability plane import
+import { isExcludedRow } from '../missions/research-exclusions.js' // reconciliation (production Package A): owner exclusions never enter a job
+import { DEFAULT_ORG_ID } from '../runtime/pg-store.js' // reconciliation (production Package A): the same constant, without the capability plane import
+import { createSession } from '../capabilities/registry.js'
 import { normalizeConversationFacts } from './conversation-facts.js'
 import { classifyRecoveryCandidate, recoveryPriority, RECOVERY_CLASSES } from './recovery-classifier.js'
 import { deriveActionState, isLostConversation, summarizeActionStates, ACTION_RULES } from './action-center.js'
+import { normalizeOpportunityFacts, reconcileOpportunity } from './pipeline-reconciler.js'
 import { evaluateSupervisor } from './supervisor-checks.js'
 import { recoveryNextAction, recoveryLinkRequests } from './recovery-linkage.js'
 import { nurtureIntentFor } from './ownership-evidence.js'
 import { consultHold, HOLD_CAPABILITIES, heldLabel } from './automation-hold-gate.js'
 import { encodePropertyRef } from '../missions/mission-codec.js'
-import { isExcludedRow } from '../missions/research-exclusions.js'
-import { RECOVERY_SWEEP_KIND, ACTION_CENTER_KIND, OPS_SUPERVISOR_KIND, OPERATIONS_LIMITS } from './operations-kinds.js'
+import { RECOVERY_SWEEP_KIND, ACTION_CENTER_KIND, PIPELINE_RECONCILE_KIND, OPS_SUPERVISOR_KIND, OPERATIONS_LIMITS } from './operations-kinds.js'
 
 const clampInt = (v, d, lo, hi) => Math.min(Math.max(Math.trunc(Number(v) || d), lo), hi)
 const fail = (code) => { throw new RuntimePermanentError(code) }
@@ -100,7 +97,7 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
       const intents = []
       let excluded = 0
       for (const r of raw) {
-        // Package A: an owner-excluded conversation / property (research-exclusions.js) is never classified,
+        // reconciliation (production Package A): an owner-excluded conversation / property is never classified,
         // researched or turned into an operator item; it still advances the cursor below
         if (isExcludedRow(r)) { excluded += 1; continue }
         let f = normalizeConversationFacts(r)
@@ -150,9 +147,16 @@ export function createRecoverySweepHandler({ source, store, economicsFor = null,
           else research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (research.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
         }
       } else research.refused.LINKAGE_NOT_CONFIGURED = links.research.length
-      // Package A: the 8.5.21-a follow-up pipeline is NOT part of this package — a nurture intent is only
-      // counted (never enqueued, never executed); the follow-up linkage code is absent, not merely unwired.
-      if (intents.length) nurture.refused.FOLLOWUP_PIPELINE_NOT_CONFIGURED = intents.length
+      // genuine RECENT disinterest → the 30-day nurture intent for the 8.5.21-a follow-up pipeline (it owns execution)
+      if (linkage?.enqueueFollowupIntent) {
+        for (const intent of intents.slice(0, OPERATIONS_LIMITS.research_requests_per_job)) {
+          if ((await holdFor(intent.conversation_id, null, HOLD_CAPABILITIES.recovery_nurture)).held) { nurture.refused.AUTOMATION_HOLD = (nurture.refused.AUTOMATION_HOLD || 0) + 1; continue }
+          const r = await linkage.enqueueFollowupIntent(intent).catch((e) => ({ ok: false, reason: String(e?.code || 'ENQUEUE_FAILED') }))
+          if (r?.ok && r.deduped) nurture.deduped += 1
+          else if (r?.ok) nurture.enqueued += 1
+          else nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] = (nurture.refused[String(r?.reason || 'REFUSED').slice(0, 40)] || 0) + 1
+        }
+      } else if (intents.length) nurture.refused.FOLLOWUP_PIPELINE_NOT_CONFIGURED = intents.length
       await ctx.recordFinding({ finding_type: 'recovery.linkage', key: 'batch', source_id: 'agent.recovery_sweep', value: { research, nurture, held, valuation_requests: links.valuation.slice(0, 200).map((v) => ({ property_ref: encodePropertyRef(v.property_id), recovery_class: v.recovery_class, conversation_id: v.conversation_id })), by_next_action: links.by_action, sends: 0 }, confidence: 1 })
       await ctx.recordFinding({ finding_type: 'recovery.batch', key: 'batch', source_id: 'agent.recovery_sweep', value: { scanned: raw.length, by_class, actionable: candidates.length, findings_recorded: fs.length, economics_evaluated: econ, approved_programs: approved, pass_done: Boolean(cursor.pass_done_at), excluded_by_owner: excluded, research_requests: research, valuation_requests: links.valuation.length, by_next_action: links.by_action, held: { count: held.count, by_type: held.by_type, items: held.items }, sends: 0 }, confidence: 1 })
       await ctx.step('findings.done', { progress: { step: 'review_items', steps_done: 2, steps_total: 4, pct: 70 }, payload: { written: fs.length + 1 } })
@@ -191,7 +195,7 @@ export function createActionCenterHandler({ source, store, now = () => Date.now(
       await ctx.step('read', { progress: { step: 'read', steps_done: 0, steps_total: 4, pct: 5 } })
       const raw = await guarded(source.conversationFacts({ after_at: cur.after_at, after_id: cur.after_id, limit }), 'ACTION_CENTER_SOURCE_UNAVAILABLE')
       const read = raw.map(normalizeConversationFacts)
-      // Package A: owner-excluded conversations (research-exclusions.js) get no action state and no item
+      // reconciliation (production Package A): owner-excluded conversations get no action state and no item
       const facts = read.filter((f, i) => !isExcludedRow(raw[i]))
       const [approvals, work] = await Promise.all([
         store.pendingApprovalTargets({ org_id }).catch(() => []),
@@ -226,15 +230,69 @@ export function createActionCenterHandler({ source, store, now = () => Date.now(
   })
 }
 
-// ── pipeline.reconcile ── NOT IN PACKAGE A: it prepares stage-change approvals through the capability
-// plane (pipeline.propose_stage_change). Stages are out of scope; the handler is absent, not merely unwired.
+// ── pipeline.reconcile ──────────────────────────────────────────────────────
+/** @param {{ source: object, store: object, getPlane?: () => Promise<object|null>, now?: () => number, org_id?: string }} deps */
+export function createPipelineReconcileHandler({ source, store, getPlane = async () => null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
+  if (!source || !store) throw new Error('pipeline.reconcile: source and store required')
+  return Object.freeze({
+    kind: PIPELINE_RECONCILE_KIND,
+    async run(ctx) {
+      const identity = missionIdentity(ctx.job.requested_by)
+      if (!identity.verified) fail('MISSION_PRINCIPAL_INVALID')
+      const input = ctx.job.input || {}
+      const limit = clampInt(input.batch_limit, 300, 1, OPERATIONS_LIMITS.batch_max)
+      const maxProposals = input.propose === false ? 0 : clampInt(input.max_proposals, 5, 0, OPERATIONS_LIMITS.proposals_max)
+      const t = now()
+      const wm = input.schedule_watermark || {}
+      const after = ctx.job.schedule_id != null ? (wm.pass_done_at ? null : wm.after_id || null) : input.after_id || null
+      await ctx.step('read', { progress: { step: 'read', steps_done: 0, steps_total: 4, pct: 5 } })
+      const raw = await guarded(source.pipelineFacts({ after_id: after, limit }), 'PIPELINE_SOURCE_UNAVAILABLE')
+      const res = raw.map(normalizeOpportunityFacts).map((o) => reconcileOpportunity(o, { now: t }))
+      const by_issue = {}
+      for (const r of res) for (const i of r.issues) by_issue[i.code] = (by_issue[i.code] || 0) + 1
+      const results = res.filter((r) => !r.ok)
+      const clear = res.filter((r) => r.ok).map((r) => r.opportunity_id)
+      const cursor = { after_id: raw.length ? String(raw[raw.length - 1].opportunity_id) : after, pass_done_at: raw.length < limit ? new Date(t).toISOString() : null }
+      await ctx.step('read.done', { progress: { step: 'findings', steps_done: 1, steps_total: 4, pct: 35 }, payload: { scanned: raw.length, mismatched: results.length } })
+
+      for (const r of results.slice(0, OPERATIONS_LIMITS.findings_per_job)) await ctx.recordFinding({ finding_type: 'pipeline.mismatch', key: `opp.${r.opportunity_id}`, source_id: 'public.acquisition_opportunities', value: { opportunity_id: r.opportunity_id, conversation_id: r.conversation_id, property_ref: r.property_ref, stage: r.stage, status: r.status, issues: r.issues, proposal: r.proposal }, confidence: 1 })
+
+      // stage changes are PROPOSED (pending approvals); the capability's idempotency key (opportunity × stage) makes a replay a no-op
+      const proposals = []
+      const want = results.filter((r) => r.proposal).sort((a, b) => (b.issues.some((i) => i.severity === 'critical') ? 1 : 0) - (a.issues.some((i) => i.severity === 'critical') ? 1 : 0)).slice(0, maxProposals)
+      const plane = want.length ? await getPlane().catch(() => null) : null
+      if (want.length && !plane) for (const r of want) proposals.push({ opportunity_id: r.opportunity_id, to_stage: r.proposal.to_stage, status: 'skipped', code: 'CAPABILITIES_UNAVAILABLE' })
+      for (const r of plane ? want : []) {
+        const a = await plane.invoker.invoke({ capability_id: 'pipeline.propose_stage_change', input: { opportunity_id: r.opportunity_id, to_stage: r.proposal.to_stage, reason: r.proposal.reason.slice(0, 240) }, ctx: { org_id, identity, source: 'model', session: createSession() } })
+        proposals.push(a.ok ? { opportunity_id: r.opportunity_id, to_stage: r.proposal.to_stage, status: 'approval_pending', approval_id: a.approval_id || null, deduped: Boolean(a.deduped) } : { opportunity_id: r.opportunity_id, to_stage: r.proposal.to_stage, status: 'refused', code: String(a.code || 'REFUSED').slice(0, 60) })
+      }
+      await ctx.step('proposals.done', { progress: { step: 'items', steps_done: 2, steps_total: 4, pct: 65 }, payload: { proposals: proposals.length } })
+
+      const apBy = new Map(proposals.map((p) => [p.opportunity_id, p]))
+      const items = results.map((r) => ({
+        dedupe_key: `pipeline:opp:${r.opportunity_id}`, kind: 'pipeline_mismatch', severity: r.issues.some((i) => i.severity === 'critical') ? 'critical' : r.issues.some((i) => i.severity === 'warning') ? 'warning' : 'info',
+        title: `Pipeline: ${r.issues.map((i) => i.code).join(', ')}`.slice(0, 200), subject_type: 'opportunity', subject_id: r.opportunity_id,
+        priority: r.issues.some((i) => i.severity === 'critical') ? 200 : 50,
+        detail: { stage: r.stage, issues: r.issues.map((i) => ({ code: i.code, severity: i.severity })), proposal: r.proposal ? { to_stage: r.proposal.to_stage } : null, approval: apBy.get(r.opportunity_id) || null, conversation_id: r.conversation_id },
+      }))
+      for (const id of clear) items.push({ dedupe_key: `pipeline:opp:${id}`, resolve: true })
+      const synced = await syncItems(ctx, store, items)
+      await ctx.recordFinding({ finding_type: 'pipeline.batch', key: 'batch', source_id: 'agent.pipeline_reconcile', value: { scanned: raw.length, mismatched: results.length, by_issue, proposals: proposals.slice(0, 10), pass_done: Boolean(cursor.pass_done_at) }, confidence: 1 })
+      await ctx.step('items.done', { progress: { step: 'watermark', steps_done: 3, steps_total: 4, pct: 90 }, payload: synced })
+
+      if (ctx.job.schedule_id != null) await ctx.setWatermark(cursor)
+      await ctx.step('watermark', { progress: { step: 'watermark', steps_done: 4, steps_total: 4, pct: 99 } })
+      return { result: { mission: 'pipeline_reconcile', scanned: raw.length, mismatched: results.length, by_issue, proposals: proposals.slice(0, 10), items: synced, stage_writes: 0 } }
+    },
+  })
+}
 
 // ── ops.supervisor ──────────────────────────────────────────────────────────
 /**
  * @param {{ source: object, store: object, reads: object, now?: () => number, org_id?: string }} deps
  *   reads = the 8.5.18 mission read model (activitySince, spendTotals, researchLimits, pendingApprovals)
  */
-export function createOpsSupervisorHandler({ source, store, reads, holdsSource = null, followupSource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
+export function createOpsSupervisorHandler({ source, store, reads, holdsSource = null, followupSource = null, autoRecoverySource = null, now = () => Date.now(), org_id = DEFAULT_ORG_ID } = {}) {
   if (!source || !store || !reads) throw new Error('ops.supervisor: source, store and reads required')
   const settle = (p, code) => p.then((v) => v ?? { unavailable: code }, (e) => ({ unavailable: String(e?.code || code).toUpperCase().slice(0, 60) }))
   return Object.freeze({
@@ -261,8 +319,8 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
         // P0 2026-10-17: the follow-up lifecycle health view (counts + top non-success reasons)
         followupSource?.health ? settle(followupSource.health(), 'FOLLOWUP_LIFECYCLE_UNAVAILABLE') : Promise.resolve({ unavailable: 'FOLLOWUP_LIFECYCLE_SOURCE_NOT_CONFIGURED' }),
       ])
-      // Package A: the rc-8.5.21 v3 auto-recovery sweeps (queue / attempt repairs) are NOT in this package: report only
-      const autoRecovery = null
+      // rc-8.5.21 v3: the idempotent recovery sweeps (born off: only when the wiring passes the source)
+      const autoRecovery = autoRecoverySource?.run ? await settle(autoRecoverySource.run({ now: new Date(t).toISOString() }), 'AUTO_RECOVERY_UNAVAILABLE') : null
       const runtime = activity.unavailable ? activity : { jobs: activity.jobs.filter((j) => j.job_id !== ctx.job.job_id) }
       const spend = spendTotals.unavailable ? spendTotals : limits.unavailable ? limits : { ...spendTotals, limits }
       const ev = evaluateSupervisor({ snapshot, health, actionCenter, recovery, runtime, spend, approvals, researchValuation, valuationBatch, holds, followups, autoRecovery, now: t, thresholds: ctx.job.input?.thresholds || {} })
@@ -288,11 +346,12 @@ export function createOpsSupervisorHandler({ source, store, reads, holdsSource =
  * @param {{ source: object|null, store: object|null, reads: object, getPlane?: Function, economicsFor?: Function|null, now?: () => number }} deps
  * @returns {Record<string, { run: Function }>}  {} when the source or store is missing
  */
-export function buildOperationsHandlers({ source, store, reads, economicsFor = null, linkage = null, holdsSource = null, followupSource = null, now = () => Date.now() }) {
+export function buildOperationsHandlers({ source, store, reads, getPlane = async () => null, economicsFor = null, linkage = null, holdsSource = null, followupSource = null, autoRecoverySource = null, now = () => Date.now() }) {
   if (!source || !store) return {}
   return {
     [RECOVERY_SWEEP_KIND]: createRecoverySweepHandler({ source, store, economicsFor, linkage, now }),
     [ACTION_CENTER_KIND]: createActionCenterHandler({ source, store, now }),
-    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, holdsSource, followupSource, now }) } : {}),
+    [PIPELINE_RECONCILE_KIND]: createPipelineReconcileHandler({ source, store, getPlane, now }),
+    ...(reads ? { [OPS_SUPERVISOR_KIND]: createOpsSupervisorHandler({ source, store, reads, holdsSource, followupSource, autoRecoverySource, now }) } : {}),
   }
 }

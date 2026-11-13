@@ -131,6 +131,19 @@ function applyRelationshipOverride(canonical_decision = {}, relationship = null)
     overridden.route_hint = "consider_selling";
     overridden.should_mark_human_review = false;
     overridden.human_review_required = false;
+  } else if (relationship.relationship_claim === "ownership_unverified" && !relationship.referral_detected) {
+    // RC 8.5.15: S1 bare "No" -- property-scoped hold pending verification. No
+    // reply, no review, no nurture; never a phone suppression.
+    overridden.should_suppress_contact = false;
+    overridden.suppression_reason = null;
+    overridden.should_queue_reply = false;
+    overridden.reply_mode = "none";
+    overridden.safety_status = "held";
+    overridden.next_action = canonical_decision.next_action || "end_outreach_in_scope";
+    overridden.should_mark_human_review = false;
+    overridden.human_review_required = false;
+    overridden.human_review_reason = null;
+    overridden.audit_reason = canonical_decision.audit_reason || "s1_ownership_denied_unverified_no_followup";
   } else if (relationship.is_property_scoped || relationship.referral_detected) {
     overridden.should_suppress_contact = false;
     overridden.suppression_reason = null;

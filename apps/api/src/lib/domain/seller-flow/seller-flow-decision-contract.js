@@ -130,6 +130,8 @@ export function buildSellerFlowDecision({
   selected_participant_id = null,
   selected_sender_number = null,
   transition = null,
+  // P0 2026-10-17: the follow-up lifecycle is the writer of record (followup_execution_mode = live)
+  follow_up_lifecycle = false,
 } = {}) {
   const snapshot = intelligence?.intelligence_snapshot || {};
   const ownership_probe = contract?.ownership_probe_transition || null;
@@ -217,11 +219,16 @@ export function buildSellerFlowDecision({
     notification_events: buildNotificationEvents({ contract, automation_decision, execution }),
     rendered_message: execution?.rendered_message_text || null,
     queue_row_id: execution?.queue_row_id || null,
-    follow_up_at:
-      ownership_probe?.follow_up_at ||
-      follow_up?.scheduled_for ||
-      (transition?.follow_up?.create ? transition.follow_up.due_at : null) ||
-      null,
+    // W1 (P0 2026-10-17): legacy mode keeps the plan date; in lifecycle mode the date is the one the
+    // durable intent actually holds (follow_up.scheduled_for of a created intent), and the state patch
+    // never writes it (inbox_thread_state.follow_up_at is the intent projection).
+    follow_up_at: follow_up_lifecycle
+      ? (follow_up?.ok && follow_up?.lifecycle ? follow_up.scheduled_for || null : null)
+      : ownership_probe?.follow_up_at ||
+        follow_up?.scheduled_for ||
+        (transition?.follow_up?.create ? transition.follow_up.due_at : null) ||
+        null,
+    follow_up_lifecycle: follow_up_lifecycle === true,
     persisted_at: new Date().toISOString(),
     intelligence_snapshot: snapshot,
     automation_decision,
@@ -320,7 +327,7 @@ export function decisionToUniversalLeadStatePatch(decision = {}) {
   if (decision.temperature) patch.lead_temperature = decision.temperature;
   if (decision.disposition) patch.disposition = decision.disposition;
   if (decision.contactability) patch.contactability_status = decision.contactability;
-  if (decision.follow_up_at) patch.follow_up_at = decision.follow_up_at;
+  if (decision.follow_up_at && decision.follow_up_lifecycle !== true) patch.follow_up_at = decision.follow_up_at;
   if (decision.next_action) patch.next_action = decision.next_action;
   if (decision.next_action_due_at) patch.next_action_at = decision.next_action_due_at;
   return patch;

@@ -10,18 +10,17 @@
  *
  * Usage (from apps/api, so '@/…' resolves):
  *   node --import ./tests/register-aliases.mjs ../scripts/entity-graph/overview-parity-probe.mjs "Dallas, TX"
- * DATABASE_URL or /tmp/.dburl; every session is read-only with an 8 s / 30 s timeout. Prints counts only.
+ * Credential: LC_RO_ENTITY_GRAPH_DB_URL_FILE (the role-enforced read-only diagnostics credential; scripts/lib/prod-db-credentials.mjs);
+ * every session is also read-only with an 8 s / 30 s timeout. Prints counts only.
  */
-import fs from 'node:fs'
-import pg from 'pg'
+import { openReadOnlyPool } from '../lib/prod-db-credentials.mjs'
 
 const { buildEntityGraphOverview, __overviewTest } = await import('@/lib/domain/entity-graph/entity-graph-overview-service.js')
 const { flagTokenPatterns } = await import('@/lib/domain/entity-graph/entity-graph-field-filters.js')
 
 const market = process.argv[2] || 'Dallas, TX'
 const sections = (process.argv[3] || 'pinned,geography,property,distress,value,debt,ownership').split(',')
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim(), ssl: { rejectUnauthorized: false }, max: 4 })
-pool.on('connect', (c) => c.query('set default_transaction_read_only = on'))
+const pool = await openReadOnlyPool({ purpose: 'entity_graph', applicationName: 'lc-eg-overview-parity', max: 4 })
 const query = async (sql, params = [], ms = 30_000) => {
   const c = await pool.connect()
   try { await c.query(`set statement_timeout = ${Math.trunc(ms)}`); return await c.query(sql, params) } finally { c.release() }

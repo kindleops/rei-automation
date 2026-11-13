@@ -1,0 +1,127 @@
+{
+  "step": "restore",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_pi",
+  "admin_url": "postgresql://postgres@/postgres?host=/tmp/lc-mt-pi/pc&port=54398",
+  "started_at": "2026-10-30T15:33:53.363Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "/tmp/lc-mt-pi/pc"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "unix-socket",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": false,
+    "target": null
+  },
+  "status": "pass",
+  "results": {
+    "backup_sha256": "7fa4c228bc86b867738f17c585f1e433f942a9b6e85c96c4508c97d5b3232725",
+    "format": "custom",
+    "excluded_schemas": [
+      "auth",
+      "storage",
+      "vault",
+      "pgsodium",
+      "pgsodium_masks",
+      "realtime",
+      "_realtime",
+      "supabase_functions",
+      "supabase_migrations",
+      "net",
+      "graphql",
+      "_analytics",
+      "pgbouncer"
+    ],
+    "roles_created_on_local_server": [],
+    "auth_stub": true,
+    "options": [
+      "--no-owner",
+      "--no-privileges"
+    ],
+    "roles_named_by_archive": [
+      "agent_api",
+      "anon",
+      "authenticated",
+      "lc_action_gateway",
+      "lc_mcp_reader",
+      "postgres",
+      "service_role"
+    ],
+    "roles_not_created": [],
+    "data_restore": {
+      "ms": 1243,
+      "exit": 1,
+      "errors": 1,
+      "reported_ignored": 1,
+      "by_class": {
+        "expected_stub_schema_exists": 1
+      },
+      "objects": [
+        {
+          "class": "expected_stub_schema_exists",
+          "command": "CREATE SCHEMA auth;",
+          "toc": null
+        }
+      ]
+    },
+    "acl_pass": {
+      "entries": 379,
+      "ms": 281,
+      "exit": 0,
+      "errors": 0,
+      "reported_ignored": 0,
+      "by_class": {},
+      "objects": [],
+      "why": "the data restore runs with --no-privileges; the archive's GRANT / REVOKE entries are then restored alone (no owners), so the privilege self-checks the links and the §1 query run are judged on production's ACLs; grants to roles absent on this local server fail and are counted"
+    },
+    "restore_ms": 1648,
+    "key_table_counts": {
+      "public.properties": 12,
+      "public.eg_property_facts": 12,
+      "public.inbox_thread_state": 9,
+      "public.message_events": 22,
+      "public.campaigns": 0,
+      "public.campaign_targets": 0,
+      "public.campaign_target_graph": 11,
+      "public.send_queue": 0,
+      "public.sms_suppression_list": 2,
+      "public.phones": 10,
+      "public.master_owners": 11,
+      "public.prospects": 3,
+      "public.contact_property_resolution": 7,
+      "public.acquisition_opportunities": 3,
+      "public.seller_offers": 2,
+      "public.followup_intents": 1,
+      "public.property_acquisition_scores": 2,
+      "public.ai_generated_messages": 0,
+      "public.automation_holds": 1,
+      "public.automation_suppressions": 0,
+      "public.system_control": 2,
+      "agent.ops_work_item": 0,
+      "action_gateway.capability_grants": 0,
+      "action_gateway.action_intents": 0,
+      "action_gateway.seller_action_receipts": 0
+    },
+    "database_bytes": 14784179,
+    "schemas": [
+      "action_gateway",
+      "agent",
+      "auth",
+      "graphql_public",
+      "public"
+    ],
+    "extensions": [
+      "pgcrypto",
+      "plpgsql"
+    ],
+    "counts_are": "exact count(*) per key table; no row is read out"
+  },
+  "finished_at": "2026-10-30T15:33:55.150Z",
+  "ms": 1787
+}

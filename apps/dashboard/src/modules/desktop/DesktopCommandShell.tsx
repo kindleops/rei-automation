@@ -30,6 +30,8 @@ import { openInspector } from './inspector/inspector-store'
 // DEV or VITE_LC_AGENT_PROTOTYPE=1 only; a production build folds this to null.
 // (the env check is inlined so the bundler folds it and drops the chunk)
 const AgentHost = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../agent/AgentHost')) : null
+// Intelligence Command 8.5.17: the ⌘' composer overlay + ⌘⇧E (same flag as AgentHost)
+const IcShellHost = (import.meta.env.DEV || import.meta.env.VITE_LC_AGENT_PROTOTYPE === '1') ? lazy(() => import('../intelligence-command/IcShellHost')) : null
 
 // DEV: inspect any object from the console — window.__lcInspect({ type: 'property', id: '…' })
 if (import.meta.env.DEV && typeof window !== 'undefined') (window as unknown as { __lcInspect?: typeof openInspector }).__lcInspect = openInspector
@@ -160,6 +162,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       <TimeMachine />
       <BriefPlane />
       {AgentHost ? <Suspense fallback={null}><AgentHost /></Suspense> : null}
+      {IcShellHost ? <Suspense fallback={null}><IcShellHost /></Suspense> : null}
       {panel === 'profile' ? <button type="button" className="dsk-scrim" aria-label="Close" onClick={() => setPanel(null)} /> : null}
     </>
   )

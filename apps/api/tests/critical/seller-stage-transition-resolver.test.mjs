@@ -106,11 +106,13 @@ const MATRIX = [
     },
   },
   {
-    name: "make me an offer: no price re-ask, underwriting question + preliminary ADE",
+    // rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18): an offer request before any price asks for THEIR
+    // number once (never condition first); a repeat after the ask is held by the S3 deflection rule
+    name: "make me an offer: ask for their number ONCE (never condition before price) + preliminary ADE",
     input: { stage_before: "offer_interest", intent: "asks_offer", classification_confidence: 0.88 },
     expect: {
       stage_after: "asking_price",
-      required_template_use_case: "condition_probe",
+      required_template_use_case: "seller_asking_price",
       ade_action: ADE_ACTIONS.RUN_PRELIMINARY,
       // "asks_offer alone is NOT HOT" - operator ruling on lead temperature.
       // A seller asking what we would pay is engagement, not qualification:

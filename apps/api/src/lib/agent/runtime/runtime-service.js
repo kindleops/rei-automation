@@ -63,12 +63,12 @@ let inFlight = null
  * The scheduled tick (single flight per process: an overlapping cron call returns skipped).
  * @param {{ env?: object, store?: object, handlers?: object, now?: () => number }} [o]
  */
-export async function runScheduledRuntimeTick({ env = process.env, store = null, handlers = DEFAULT_RUNTIME_HANDLERS, now } = {}) {
+export async function runScheduledRuntimeTick({ env = process.env, store = null, handlers = DEFAULT_RUNTIME_HANDLERS, now, maintenance = [] } = {}) {
   const gate = runtimeGate(env)
   if (!gate.enabled) return { ok: true, skipped: gate.reason }
   if (inFlight) return { ok: true, skipped: 'in_flight' }
   try {
-    inFlight = (store ? Promise.resolve(store) : getVerifiedRuntimeStore(env)).then((s) => runRuntimeTick({ store: s, handlers, workerId: RUNTIME_WORKER_ID, budgetMs: tickBudgetMs(env), concurrent: tickConcurrent(env), ...(now ? { now } : {}) }))
+    inFlight = (store ? Promise.resolve(store) : getVerifiedRuntimeStore(env)).then((s) => runRuntimeTick({ store: s, handlers, workerId: RUNTIME_WORKER_ID, budgetMs: tickBudgetMs(env), concurrent: tickConcurrent(env), maintenance, ...(now ? { now } : {}) }))
     const summary = await inFlight
     return { ok: summary.errors.length === 0, skipped: null, summary }
   } finally {

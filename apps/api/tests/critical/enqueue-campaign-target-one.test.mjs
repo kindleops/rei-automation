@@ -371,6 +371,9 @@ const rejects = [
   // campaign even when its sms_suppression_list row is missing.
   ["thread is_suppressed, no list row", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: true, contactability_status: "contactable" }] }, ENQUEUE_REASON.THREAD_SUPPRESSED],
   ["thread opted_out, no list row", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: false, contactability_status: "opted_out" }] }, ENQUEUE_REASON.THREAD_SUPPRESSED],
+  // link 10: a lead archived (sold / unavailable / duplicate / dead) in agntei or LeadCommand, or whose property sold, is out of active work
+  ["lead archived (sold)", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: false, contactability_status: "contactable", is_archived: true, archive_scope: "lead", disposition: "sold" }] }, ENQUEUE_REASON.LEAD_ARCHIVED],
+  ["disposition duplicate, not archived", { inbox_thread_state: [{ thread_key: "+19514720295", is_suppressed: false, contactability_status: "contactable", is_archived: false, disposition: "duplicate" }] }, ENQUEUE_REASON.LEAD_ARCHIVED],
   ["no template assigned", { campaign_targets: baseTarget({ metadata: { candidate_snapshot: { seller_first_name: "Rodolfo" } } }) }, ENQUEUE_REASON.TEMPLATE_MISSING],
   ["template not in catalog", { sms_templates: [] }, ENQUEUE_REASON.TEMPLATE_NOT_FOUND],
   ["paused template", { ownership_template_rotation_control: [baseGov({ rotation_status: "pause", daily_cap: 0 })] }, ENQUEUE_REASON.TEMPLATE_UNGOVERNED],

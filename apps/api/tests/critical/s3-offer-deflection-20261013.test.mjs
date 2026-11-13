@@ -58,16 +58,18 @@ async function replay(message, q) {
 
 const ASKING_PRICE_USE_CASES = new Set(["seller_asking_price", "asking_price_follow_up"]);
 
+// rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18 "offer before price", supersedes the 2026-10-13 "advance to
+// the S4 condition question"): we asked for their number ONCE; a second offer request is research → a gated
+// offer recommendation for a PERSON — never a condition question before the price, never a number.
 for (const message of ["What would you like to offer?", "What's your offer", "make me an offer", "you tell me", "What would you offer?"]) {
-  test(`S3 sent -> ${JSON.stringify(message)} -> the S4 condition question, never a second asking-price ask`, async () => {
+  test(`S3 sent -> ${JSON.stringify(message)} -> held for a person (gated offer), never condition before price, never a second asking-price ask`, async () => {
     const r = await replay(message, "s3");
     assert.equal(r.classification.primary_intent, "asks_offer");
-    assert.equal(r.outcome, "auto_reply");
-    assert.equal(r.template?.use_case, "condition_probe");
+    assert.equal(r.outcome, "review");
+    assert.equal(r.text, null);
     assert.ok(!ASKING_PRICE_USE_CASES.has(r.template?.use_case));
-    assert.equal(r.decision.audit_reason, "offer_request_after_s3_advance_to_condition");
-    assert.equal(r.decision.required_template_use_case, "condition_probe");
-    assert.doesNotMatch(r.text, /\$\s?\d|\d{2,3}\s?k\b/i, "never a number");
+    assert.notEqual(r.template?.use_case, "condition_probe");
+    assert.equal(r.decision.human_review_reason, "offer_request_after_s3_price_withheld_gated_offer");
   });
 }
 
@@ -118,9 +120,10 @@ test("applyS3DeflectionRule: any S3 variant is rerouted; other intents, suppress
   const cls = { primary_intent: "asks_offer" };
   for (const variant of ["seller_asking_price", "asking_price_follow_up"]) {
     const out = applyS3DeflectionRule({ ...ask, required_template_use_case: variant, route_hint: variant }, { classification: cls, s3_already_asked: true });
-    assert.equal(out.required_template_use_case, "condition_probe", variant);
-    assert.deepEqual(out.allowed_template_stages, ["condition_probe"]);
-    assert.equal(out.condition_questions_forbidden, false);
+    assert.equal(out.should_queue_reply, false, variant);
+    assert.equal(out.should_mark_human_review, true, variant);
+    assert.equal(out.human_review_reason, "offer_request_after_s3_price_withheld_gated_offer", variant);
+    assert.equal(out.condition_questions_forbidden, true, "never unlocks the condition question");
   }
   assert.equal(applyS3DeflectionRule(ask, { classification: cls, s3_already_asked: false }), ask);
   assert.equal(applyS3DeflectionRule(ask, { classification: { primary_intent: "asking_price_provided" }, s3_already_asked: true }), ask);

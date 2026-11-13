@@ -158,6 +158,8 @@ export function createSellerCommunicationStore(deps = {}) {
           })
           .eq('id', attempt_id)
           .is('provider_request_started_at', null)
+          // rc-8.5.21 v3: an attempt the crash reaper already RESOLVED as never-started can never start
+          .is('completed_at', null)
           .select('id');
 
         if (error) {

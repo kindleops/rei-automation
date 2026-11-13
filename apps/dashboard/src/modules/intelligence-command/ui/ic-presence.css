@@ -1,0 +1,33 @@
+/* Intelligence presence in the Command Deck — one dot, one word. Cobalt only
+   while an agent computes, champagne gold when something waits on you, red
+   only for a real problem; idle is neutral ink. Hairline, never a fill. */
+.ic-pres {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 9px;
+  border-radius: 999px;
+  font: 600 11.5px/1 var(--lc-font-ui);
+  color: var(--lc-ink-2);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line, rgba(255, 255, 255, 0.09));
+  white-space: nowrap;
+  transition: background 0.14s, color 0.14s;
+}
+.ic-pres:hover { color: var(--lc-ink-1); background: var(--lc-glass-selected-fill, rgba(255, 255, 255, 0.05)); }
+.ic-pres:focus-visible { outline: 1px solid rgb(var(--lc-champagne-rgb, 214, 192, 146)); outline-offset: 1px; }
+.ic-pres i { width: 6px; height: 6px; border-radius: 50%; background: var(--lc-ink-4); }
+.ic-pres.is-investigating i { background: rgb(var(--lc-cobalt-rgb, 99, 140, 255)); animation: ic-pres-pulse 1.6s ease-in-out infinite; }
+.ic-pres.is-awaiting_approval { color: rgb(var(--lc-champagne-rgb, 214, 192, 146)); }
+.ic-pres.is-awaiting_approval i { background: rgb(var(--lc-champagne-rgb, 214, 192, 146)); }
+.ic-pres.is-problem { color: rgb(var(--lc-crit-rgb)); }
+.ic-pres.is-problem i { background: rgb(var(--lc-crit-rgb)); }
+:root[data-nexus-theme='light'] .ic-pres.is-awaiting_approval, :root[data-nexus-theme='light'] .ic-pres.is-awaiting_approval i { color: rgb(146, 110, 40); }
+:root[data-nexus-theme='light'] .ic-pres.is-awaiting_approval i { background: rgb(146, 110, 40); }
+@keyframes ic-pres-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ic-pres, .ic-pres i { animation: none; transition: none; } }
+/* the deck is tight below ultrawide: the dot speaks, the word lives in the tooltip */
+@media (max-width: 1799px) { .ic-pres { padding: 0; width: 28px; justify-content: center; } .ic-pres span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } }

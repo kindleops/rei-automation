@@ -1,0 +1,23 @@
+cluster: started (unix socket only) data=/tmp/lc-mt-pi/cluster-r1fPsO/data
+[lc_mcp_full_history] database lc_mt_lc_mcp_full_history_4d001675
+  ok  setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only) (57 ms)
+  ok  setup supabase-shim.sql (44 ms)
+  ok  setup lc_mcp_reader_supabase_emulation.sql (156 ms)
+  ok  setup PROPOSED_20261019150000_lc_mcp_reader.sql (140 ms)
+  ok  setup lc_mcp_conversation_intel_emulation.sql (79 ms)
+  ok  setup PROPOSED_20261026120000_lc_mcp_conversation_intel.sql (122 ms)
+  ok  cycle 1: pretest PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql (63 ms)
+  ok  cycle 1: pretest left no trace (fingerprint 42f87ed536e2380c)
+  ok  cycle 1: APPLY PROPOSED_20261030120000_lc_mcp_full_history.sql (49 ms)
+  ok  cycle 1: posttest PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql (66 ms)
+  ok  ROLLBACK FILE PROPOSED_20261030120000_lc_mcp_full_history_rollback.sql (66 ms)
+  ok  rollback posttest PROPOSED_20261030120000_lc_mcp_full_history_rollback_posttest.sql (68 ms)
+  ok  rollback restored the pre-apply fingerprint 42f87ed536e2380c
+  ok  cycle 2 (re-apply): pretest PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql (48 ms)
+  ok  cycle 2 (re-apply): pretest left no trace (fingerprint 42f87ed536e2380c)
+  ok  cycle 2 (re-apply): APPLY PROPOSED_20261030120000_lc_mcp_full_history.sql (71 ms)
+  ok  cycle 2 (re-apply): posttest PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql (77 ms)
+[lc_mcp_full_history] PASS
+cluster: stopped
+
+run-migration-test: 1/1 PASS

@@ -19,6 +19,9 @@
  * workflow, agent) is judged by the same rule at the same place.
  */
 
+import { carriesAiTemplateMasquerade, lookupAiGeneratedMessageByQueueKey, rowSourceIsAi, verifyAiGeneratedRecordForRow, isVerifiedAiGeneratedRow } from "@/lib/domain/messages/ai-generated-message.js";
+import { storedMessageOrigin } from "@/lib/domain/messages/message-origin.js";
+
 export const TEMPLATE_NOT_IN_SUPABASE = "template_not_in_supabase";
 
 /** Template ids that are code-registry copy, never an sms_templates row. */
@@ -197,6 +200,42 @@ export async function evaluateTemplateAuthority({
     manual_operator_send &&
     (TEMPLATE_PICKED_MANUAL_SOURCES.has(source) || TEMPLATE_PICKED_MANUAL_ACTIONS.has(action));
 
+  // ── MESSAGE ORIGIN (8.5.16, owner directive 2026-10-15) ─────────────────────
+  // template_id is required ONLY for template-originated messages. An ai_generated
+  // message carries NO template id; its authority is its immutable
+  // public.ai_generated_messages record (body hash, binding, validation, authorisation).
+  // An 'ai-msg:' template id is a masquerade and is refused on every row. Rows without
+  // a stored origin (every existing producer) are judged exactly as before.
+  if (carriesAiTemplateMasquerade(queue_row)) {
+    return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_template_masquerade_refused", template_id };
+  }
+  const origin = storedMessageOrigin(queue_row);
+  if (origin === "ai_generated" || rowSourceIsAi(queue_row)) {
+    if (origin !== "ai_generated") {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_conversation_requires_ai_generated_origin", template_id };
+    }
+    if (manual_operator_send) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_generated_is_not_operator_copy", template_id };
+    }
+    if (template_id) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_generated_must_not_carry_template_id", template_id };
+    }
+    if (skipLookup) {
+      // test runtime with a fake client: the static binding (origin, no template id, body hash) still binds
+      return isVerifiedAiGeneratedRow(queue_row)
+        ? { allowed: true, reason: "ai_generated_lookup_skipped_test_runtime", template_id: null, message_origin: "ai_generated" }
+        : { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: "ai_generated_body_mismatch", template_id: null };
+    }
+    const ai_lookup = await lookupAiGeneratedMessageByQueueKey(supabase, queue_row?.queue_key);
+    if (ai_lookup.read_failed) {
+      return { allowed: false, deferred: true, reason: "template_authority_read_failed", template_id: null };
+    }
+    const verdict = verifyAiGeneratedRecordForRow(queue_row, ai_lookup.record);
+    if (!verdict.ok) {
+      return { allowed: false, reason: TEMPLATE_NOT_IN_SUPABASE, detail: verdict.reason, template_id: null };
+    }
+    return { allowed: true, reason: "ai_generated_message", template_id: null, message_origin: "ai_generated", ai_message_id: ai_lookup.record?.id || null, body_binding: "match" };
+  }
   // Operator-typed composer text: the operator's own words (tracked on the
   // row as manual_composer copy). A template the operator PICKED must be a
   // real row — checked below like any automated send.

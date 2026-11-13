@@ -14,6 +14,9 @@ const NON_OWNER_CANONICAL_INTENTS = new Set([
   "co_owner_respondent",
   "executor_heir_respondent",
   "entity_representative_respondent",
+  // OWNER DECISION 2026-10-17: no seller-interest template for a declined-unverified contact either
+  // (the conservative property-scoped template policy; it records NO non-ownership fact)
+  "ownership_declined_unverified",
 ]);
 
 const RELATIONSHIP_USE_CASE_BY_INTENT = Object.freeze({
@@ -26,6 +29,7 @@ const RELATIONSHIP_USE_CASE_BY_INTENT = Object.freeze({
   agent_representative_respondent: "agent_representative",
   co_owner_respondent: "authorized_spouse",
   executor_heir_respondent: "executor_or_heir",
+  ownership_declined_unverified: "ownership_declined_unverified",
   entity_representative_respondent: "entity_representative",
 });
 

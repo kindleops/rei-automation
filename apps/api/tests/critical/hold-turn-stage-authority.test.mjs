@@ -132,7 +132,9 @@ test("interest re-expressed at S4 asks the condition question, never re-asks the
   assert.notEqual(d.required_template_use_case, "seller_asking_price");
 });
 
-test('"make me an offer" held at S3 probes condition instead of re-asking the declined price', () => {
+// rc-8.5.21 v3 (S1–S5 BINDING + owner rule 10-18, supersedes "probes condition"): at S3, a price withheld
+// after our ask is research → a gated offer for a PERSON — never a re-ask, never condition first
+test('"make me an offer" held at S3 is a person (gated offer): never re-asks the declined price, never condition first', () => {
   const transition = resolveSellerStageTransition({
     stage_before: "asking_price",
     intent: "asks_offer",
@@ -144,9 +146,9 @@ test('"make me an offer" held at S3 probes condition instead of re-asking the de
     new_facts: {},
     confidence: 0.9,
   });
-  const d = resolveTransitionDirective({ transition, turn_intent: "asks_offer" });
-  assert.ok(d);
-  assert.equal(d.required_template_use_case, "condition_probe");
+  assert.equal(transition.review_required, true);
+  assert.equal(transition.review_reason, "offer_request_price_withheld_gated_offer");
+  assert.equal(resolveTransitionDirective({ transition, turn_intent: "asks_offer" }), null, "no template directive: a person");
 });
 
 test("condition disclosed at S1 asks the ownership question first", () => {

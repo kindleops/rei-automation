@@ -3,7 +3,8 @@
  * Entity Graph property facts — READ-ONLY prod parity + timing probe.
  * Run from apps/api (statement_timeout 30 s, default_transaction_read_only on):
  *   node --import ./tests/register-aliases.mjs ../../scripts/entity-graph/facts-parity-probe.mjs
- * DATABASE_URL comes from /tmp/.dburl and is never printed. No names / phones are printed:
+ * Credential: LC_RO_ENTITY_GRAPH_DB_URL_FILE (the role-enforced read-only diagnostics credential; scripts/lib/prod-db-credentials.mjs); the
+ * runtime pool is handed the VERIFIED read-only URL, never printed. No names / phones are printed:
  * ids are compared as sets / sequences and only counts and timings are reported.
  *
  * Checks (interim LIVE mode; TABLE mode runs the same assertions once the read model exists):
@@ -14,8 +15,10 @@
  *   5. timings          first sort / page 2 / header values, cold process
  */
 import fs from 'node:fs'
+import { resolveReadOnlyUrl } from '../lib/prod-db-credentials.mjs'
 
-process.env.DATABASE_URL = process.env.DATABASE_URL || fs.readFileSync('/tmp/.dburl', 'utf8').trim()
+// the runtime pool (getPgPool) connects with this env var: give it the role-verified read-only URL
+process.env.DATABASE_URL = (await resolveReadOnlyUrl({ purpose: 'entity_graph' })).url
 const { getPgPool, queryWithTimeout } = await import('@/lib/postgres/client.js')
 const pool = getPgPool()
 pool.on('connect', (c) => { c.query("set default_transaction_read_only = on; set statement_timeout = '30s'") })

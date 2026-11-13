@@ -1,0 +1,1497 @@
+{
+  "kind": "leadcommand_migration_rehearsal",
+  "date": "2026-10-30",
+  "branch": "feat/hidden-gold-full",
+  "environment": "disposable PostgreSQL 17 clusters (private, unix socket only), one fresh cluster and database per link, schema built from emulation fixtures + real prerequisite migrations",
+  "production_copy": false,
+  "statement": "This is a disposable-schema rehearsal. It is NOT a rehearsal on a production copy; that requires the owner's copy (scripts/db/prod-copy-rehearsal.mjs).",
+  "runner": "scripts/db/run-migration-test.mjs (manifest scripts/db/migration-tests.manifest.mjs)",
+  "cycle": [
+    "setup",
+    "pretest",
+    "pretest leaves no trace",
+    "apply",
+    "posttest",
+    "rollback",
+    "rollback posttest",
+    "fingerprint == pre-apply",
+    "pretest",
+    "apply",
+    "posttest"
+  ],
+  "recommended_production_order": [
+    "lc_mcp_reader",
+    "lc_mcp_conversation_intel",
+    "lc_mcp_corpus_census",
+    "lc_mcp_acquisition_reads",
+    "lc_mcp_full_history",
+    "action_gateway_ohg",
+    "action_gateway_standing_reply",
+    "ai_generated_outbound",
+    "action_gateway_agent_message"
+  ],
+  "all_pass": true,
+  "born_off": {
+    "action_gateway_ohg": "no standing grants exist after apply; the four OHG actions are callable only with owner-minted grants",
+    "action_gateway_standing_reply": "posttest asserts no grant carries standing_seller_facing (born OFF)",
+    "action_gateway_agent_message": "posttest asserts agent_text_refusal() = AGENT_TEXT_KILL_SWITCH_OFF; ai_agent_text_enabled absent",
+    "reader_links_and_ai_generated_outbound": "add no switch, no grant and no send path"
+  },
+  "owner_boundary": "pretest / posttest / rollback-posttest fixtures are disposable-only (run-migration-test.mjs, owner boundary 2026-10-15); production gets the read-only checks of docs/PI-MIGRATION-REHEARSAL.md sections 4 and 7",
+  "per_link": {
+    "description": "each link alone on a fresh private cluster, scripts/db/run-migration-test.mjs",
+    "links": [
+      {
+        "id": "lc_mcp_reader",
+        "result": "PASS",
+        "setup_steps": 3,
+        "timings_ms": {
+          "pretest": 42,
+          "apply": 94,
+          "posttest": 431,
+          "rollback": 44,
+          "rollback_posttest": 38,
+          "reapply": 109,
+          "reapply_posttest": 476
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "1d6cbbc448ed5945",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+            "ms": 36
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_reader_supabase_emulation.sql",
+            "ms": 102
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261019150000_lc_mcp_reader_pretest.sql",
+            "ms": 42
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 1d6cbbc448ed5945)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 94
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261019150000_lc_mcp_reader_posttest.sql",
+            "ms": 431
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261019150000_lc_mcp_reader_rollback.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261019150000_lc_mcp_reader_rollback_posttest.sql",
+            "ms": 38
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 1d6cbbc448ed5945",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261019150000_lc_mcp_reader_pretest.sql",
+            "ms": 43
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 1d6cbbc448ed5945)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 109
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261019150000_lc_mcp_reader_posttest.sql",
+            "ms": 476
+          }
+        ]
+      },
+      {
+        "id": "lc_mcp_conversation_intel",
+        "result": "PASS",
+        "setup_steps": 5,
+        "timings_ms": {
+          "pretest": 41,
+          "apply": 92,
+          "posttest": 142,
+          "rollback": 41,
+          "rollback_posttest": 85,
+          "reapply": 86,
+          "reapply_posttest": 138
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "a2d1f48c85c990a8",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+            "ms": 63
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_reader_supabase_emulation.sql",
+            "ms": 112
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 103
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_conversation_intel_emulation.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261026120000_lc_mcp_conversation_intel_pretest.sql",
+            "ms": 41
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint a2d1f48c85c990a8)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261026120000_lc_mcp_conversation_intel.sql",
+            "ms": 92
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261026120000_lc_mcp_conversation_intel_posttest.sql",
+            "ms": 142
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback.sql",
+            "ms": 41
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261026120000_lc_mcp_conversation_intel_rollback_posttest.sql",
+            "ms": 85
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint a2d1f48c85c990a8",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261026120000_lc_mcp_conversation_intel_pretest.sql",
+            "ms": 40
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint a2d1f48c85c990a8)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261026120000_lc_mcp_conversation_intel.sql",
+            "ms": 86
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261026120000_lc_mcp_conversation_intel_posttest.sql",
+            "ms": 138
+          }
+        ]
+      },
+      {
+        "id": "lc_mcp_corpus_census",
+        "result": "PASS",
+        "setup_steps": 7,
+        "timings_ms": {
+          "pretest": 48,
+          "apply": 82,
+          "posttest": 104,
+          "rollback": 38,
+          "rollback_posttest": 78,
+          "reapply": 89,
+          "reapply_posttest": 125
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "448adbf47d5a1fa0",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+            "ms": 35
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 41
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_reader_supabase_emulation.sql",
+            "ms": 115
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 99
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_conversation_intel_emulation.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261026120000_lc_mcp_conversation_intel.sql",
+            "ms": 95
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_corpus_census_emulation.sql",
+            "ms": 45
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261026150000_lc_mcp_corpus_census_pretest.sql",
+            "ms": 48
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 448adbf47d5a1fa0)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261026150000_lc_mcp_corpus_census.sql",
+            "ms": 82
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261026150000_lc_mcp_corpus_census_posttest.sql",
+            "ms": 104
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261026150000_lc_mcp_corpus_census_rollback.sql",
+            "ms": 38
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261026150000_lc_mcp_corpus_census_rollback_posttest.sql",
+            "ms": 78
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 448adbf47d5a1fa0",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261026150000_lc_mcp_corpus_census_pretest.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 448adbf47d5a1fa0)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261026150000_lc_mcp_corpus_census.sql",
+            "ms": 89
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261026150000_lc_mcp_corpus_census_posttest.sql",
+            "ms": 125
+          }
+        ]
+      },
+      {
+        "id": "lc_mcp_acquisition_reads",
+        "result": "PASS",
+        "setup_steps": 6,
+        "timings_ms": {
+          "pretest": 50,
+          "apply": 99,
+          "posttest": 133,
+          "rollback": 41,
+          "rollback_posttest": 77,
+          "reapply": 88,
+          "reapply_posttest": 135
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "829cf85a39f269ff",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+            "ms": 33
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 43
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_reader_supabase_emulation.sql",
+            "ms": 110
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 101
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_conversation_intel_emulation.sql",
+            "ms": 61
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_acquisition_reads_emulation.sql",
+            "ms": 59
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 829cf85a39f269ff)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql",
+            "ms": 99
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql",
+            "ms": 133
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback.sql",
+            "ms": 41
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_rollback_posttest.sql",
+            "ms": 77
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 829cf85a39f269ff",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261027130000_lc_mcp_acquisition_reads_pretest.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 829cf85a39f269ff)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261027130000_lc_mcp_acquisition_reads.sql",
+            "ms": 88
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261027130000_lc_mcp_acquisition_reads_posttest.sql",
+            "ms": 135
+          }
+        ]
+      },
+      {
+        "id": "lc_mcp_full_history",
+        "result": "PASS",
+        "setup_steps": 6,
+        "timings_ms": {
+          "pretest": 63,
+          "apply": 49,
+          "posttest": 66,
+          "rollback": 66,
+          "rollback_posttest": 68,
+          "reapply": 71,
+          "reapply_posttest": 77
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "42f87ed536e2380c",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_mcp_reader role (cluster-global; disposable cluster only)",
+            "ms": 57
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_reader_supabase_emulation.sql",
+            "ms": 156
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019150000_lc_mcp_reader.sql",
+            "ms": 140
+          },
+          {
+            "ok": true,
+            "step": "setup lc_mcp_conversation_intel_emulation.sql",
+            "ms": 79
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261026120000_lc_mcp_conversation_intel.sql",
+            "ms": 122
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql",
+            "ms": 63
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 42f87ed536e2380c)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261030120000_lc_mcp_full_history.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql",
+            "ms": 66
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261030120000_lc_mcp_full_history_rollback.sql",
+            "ms": 66
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261030120000_lc_mcp_full_history_rollback_posttest.sql",
+            "ms": 68
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 42f87ed536e2380c",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261030120000_lc_mcp_full_history_pretest.sql",
+            "ms": 48
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 42f87ed536e2380c)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261030120000_lc_mcp_full_history.sql",
+            "ms": 71
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261030120000_lc_mcp_full_history_posttest.sql",
+            "ms": 77
+          }
+        ]
+      },
+      {
+        "id": "action_gateway_ohg",
+        "result": "PASS",
+        "setup_steps": 27,
+        "timings_ms": {
+          "pretest": 69,
+          "apply": 61,
+          "posttest": 110,
+          "rollback": 103,
+          "rollback_posttest": 94,
+          "reapply": 56,
+          "reapply_posttest": 99
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "f051cdf5ee8be705",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_action_gateway role (cluster-global; disposable cluster only)",
+            "ms": 37
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "setup 20260831000000_durable_run_locks_and_idempotency_ledger.sql",
+            "ms": 53
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010120000_agent_s3_persistence.sql",
+            "ms": 114
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010130000_agent_research_ro.sql",
+            "ms": 65
+          },
+          {
+            "ok": true,
+            "step": "setup send_queue_live_baseline.sql",
+            "ms": 53
+          },
+          {
+            "ok": true,
+            "step": "setup public.system_control + public.send_queue (runtime fixture)",
+            "ms": 39
+          },
+          {
+            "ok": true,
+            "step": "setup operations_public_baseline.sql",
+            "ms": 57
+          },
+          {
+            "ok": true,
+            "step": "setup automation_holds_public_baseline.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261012140000_intel_runtime.sql",
+            "ms": 105
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql",
+            "ms": 46
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013161000_conversation_decide_event_budget.sql",
+            "ms": 46
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013120000_agent_capabilities.sql",
+            "ms": 60
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013160000_conversation_ai_shadow.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014120000_persistent_missions.sql",
+            "ms": 51
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016140000_operations_action_center.sql",
+            "ms": 70
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017122000_conversation_turn_operator_items.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016200000_automation_holds_registry.sql",
+            "ms": 70
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017120000_followup_intent_lifecycle.sql",
+            "ms": 81
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_baseline.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t2_baseline.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261015190000_negotiation_authority.sql",
+            "ms": 65
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016161000_negotiation_send_authorization.sql",
+            "ms": 70
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t34_baseline.sql",
+            "ms": 45
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019160000_action_gateway.sql",
+            "ms": 155
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020100000_action_gateway_t2.sql",
+            "ms": 102
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020110000_action_gateway_t34.sql",
+            "ms": 151
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261027120000_action_gateway_ohg_pretest.sql",
+            "ms": 69
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint f051cdf5ee8be705)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261027120000_action_gateway_ohg.sql",
+            "ms": 61
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261027120000_action_gateway_ohg_posttest.sql",
+            "ms": 110
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261027120000_action_gateway_ohg_rollback.sql",
+            "ms": 103
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261027120000_action_gateway_ohg_rollback_posttest.sql",
+            "ms": 94
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint f051cdf5ee8be705",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261027120000_action_gateway_ohg_pretest.sql",
+            "ms": 67
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint f051cdf5ee8be705)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261027120000_action_gateway_ohg.sql",
+            "ms": 56
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261027120000_action_gateway_ohg_posttest.sql",
+            "ms": 99
+          }
+        ]
+      },
+      {
+        "id": "action_gateway_standing_reply",
+        "result": "PASS",
+        "setup_steps": 28,
+        "timings_ms": {
+          "pretest": 44,
+          "apply": 50,
+          "posttest": 101,
+          "rollback": 47,
+          "rollback_posttest": 99,
+          "reapply": 64,
+          "reapply_posttest": 87
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "85289131b97d3d32",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_action_gateway role (cluster-global; disposable cluster only)",
+            "ms": 38
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "setup 20260831000000_durable_run_locks_and_idempotency_ledger.sql",
+            "ms": 60
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010120000_agent_s3_persistence.sql",
+            "ms": 111
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010130000_agent_research_ro.sql",
+            "ms": 60
+          },
+          {
+            "ok": true,
+            "step": "setup send_queue_live_baseline.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "setup public.system_control + public.send_queue (runtime fixture)",
+            "ms": 40
+          },
+          {
+            "ok": true,
+            "step": "setup operations_public_baseline.sql",
+            "ms": 69
+          },
+          {
+            "ok": true,
+            "step": "setup automation_holds_public_baseline.sql",
+            "ms": 57
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261012140000_intel_runtime.sql",
+            "ms": 122
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013161000_conversation_decide_event_budget.sql",
+            "ms": 54
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013120000_agent_capabilities.sql",
+            "ms": 64
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013160000_conversation_ai_shadow.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014120000_persistent_missions.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016140000_operations_action_center.sql",
+            "ms": 68
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017122000_conversation_turn_operator_items.sql",
+            "ms": 39
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016200000_automation_holds_registry.sql",
+            "ms": 82
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017120000_followup_intent_lifecycle.sql",
+            "ms": 93
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_baseline.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t2_baseline.sql",
+            "ms": 53
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261015190000_negotiation_authority.sql",
+            "ms": 64
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016161000_negotiation_send_authorization.sql",
+            "ms": 51
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t34_baseline.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019160000_action_gateway.sql",
+            "ms": 157
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020100000_action_gateway_t2.sql",
+            "ms": 106
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020110000_action_gateway_t34.sql",
+            "ms": 137
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261027120000_action_gateway_ohg.sql",
+            "ms": 63
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261028100000_action_gateway_standing_reply_pretest.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 85289131b97d3d32)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql",
+            "ms": 101
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261028100000_action_gateway_standing_reply_rollback.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261028100000_action_gateway_standing_reply_rollback_posttest.sql",
+            "ms": 99
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 85289131b97d3d32",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261028100000_action_gateway_standing_reply_pretest.sql",
+            "ms": 46
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 85289131b97d3d32)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+            "ms": 64
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261028100000_action_gateway_standing_reply_posttest.sql",
+            "ms": 87
+          }
+        ]
+      },
+      {
+        "id": "ai_generated_outbound",
+        "result": "PASS",
+        "setup_steps": 3,
+        "timings_ms": {
+          "pretest": 41,
+          "apply": 47,
+          "posttest": 52,
+          "rollback": 44,
+          "rollback_posttest": 46,
+          "reapply": 49,
+          "reapply_posttest": 52
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "553fad6fd457acfa",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 43
+          },
+          {
+            "ok": true,
+            "step": "setup send_queue_live_baseline.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261015130000_message_origin_ai_generated_messages.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261029090000_ai_generated_outbound_pretest.sql",
+            "ms": 41
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 553fad6fd457acfa)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261029090000_ai_generated_outbound.sql",
+            "ms": 47
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261029090000_ai_generated_outbound_posttest.sql",
+            "ms": 52
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261029090000_ai_generated_outbound_rollback.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261029090000_ai_generated_outbound_rollback_posttest.sql",
+            "ms": 46
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 553fad6fd457acfa",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261029090000_ai_generated_outbound_pretest.sql",
+            "ms": 40
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 553fad6fd457acfa)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261029090000_ai_generated_outbound.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261029090000_ai_generated_outbound_posttest.sql",
+            "ms": 52
+          }
+        ]
+      },
+      {
+        "id": "action_gateway_agent_message",
+        "result": "PASS",
+        "setup_steps": 32,
+        "timings_ms": {
+          "pretest": 45,
+          "apply": 146,
+          "posttest": 108,
+          "rollback": 121,
+          "rollback_posttest": 93,
+          "reapply": 148,
+          "reapply_posttest": 104
+        },
+        "pretest_left_no_trace": true,
+        "rollback_fingerprint_restored": true,
+        "fingerprint": "2d8e3f10f2e0d57a",
+        "reapply_posttest_ok": true,
+        "steps": [
+          {
+            "ok": true,
+            "step": "setup drop a leftover lc_action_gateway role (cluster-global; disposable cluster only)",
+            "ms": 39
+          },
+          {
+            "ok": true,
+            "step": "setup supabase-shim.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "setup 20260831000000_durable_run_locks_and_idempotency_ledger.sql",
+            "ms": 73
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010120000_agent_s3_persistence.sql",
+            "ms": 116
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261010130000_agent_research_ro.sql",
+            "ms": 67
+          },
+          {
+            "ok": true,
+            "step": "setup send_queue_live_baseline.sql",
+            "ms": 58
+          },
+          {
+            "ok": true,
+            "step": "setup public.system_control + public.send_queue (runtime fixture)",
+            "ms": 38
+          },
+          {
+            "ok": true,
+            "step": "setup operations_public_baseline.sql",
+            "ms": 62
+          },
+          {
+            "ok": true,
+            "step": "setup automation_holds_public_baseline.sql",
+            "ms": 44
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261012140000_intel_runtime.sql",
+            "ms": 112
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014121000_runtime_kind_limits_event_budget.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013161000_conversation_decide_event_budget.sql",
+            "ms": 43
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013120000_agent_capabilities.sql",
+            "ms": 63
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261013160000_conversation_ai_shadow.sql",
+            "ms": 69
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261014120000_persistent_missions.sql",
+            "ms": 55
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016140000_operations_action_center.sql",
+            "ms": 75
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017122000_conversation_turn_operator_items.sql",
+            "ms": 63
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016200000_automation_holds_registry.sql",
+            "ms": 85
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261017120000_followup_intent_lifecycle.sql",
+            "ms": 83
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_baseline.sql",
+            "ms": 58
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t2_baseline.sql",
+            "ms": 51
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261015190000_negotiation_authority.sql",
+            "ms": 55
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261016161000_negotiation_send_authorization.sql",
+            "ms": 48
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_t34_baseline.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261019160000_action_gateway.sql",
+            "ms": 185
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020100000_action_gateway_t2.sql",
+            "ms": 111
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261020110000_action_gateway_t34.sql",
+            "ms": 151
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261027120000_action_gateway_ohg.sql",
+            "ms": 55
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261028100000_action_gateway_standing_reply.sql",
+            "ms": 69
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261015130000_message_origin_ai_generated_messages.sql",
+            "ms": 50
+          },
+          {
+            "ok": true,
+            "step": "setup PROPOSED_20261029090000_ai_generated_outbound.sql",
+            "ms": 58
+          },
+          {
+            "ok": true,
+            "step": "setup action_gateway_agent_message_baseline.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest PROPOSED_20261029100000_action_gateway_agent_message_pretest.sql",
+            "ms": 45
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: pretest left no trace (fingerprint 2d8e3f10f2e0d57a)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: APPLY PROPOSED_20261029100000_action_gateway_agent_message.sql",
+            "ms": 146
+          },
+          {
+            "ok": true,
+            "step": "cycle 1: posttest PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql",
+            "ms": 108
+          },
+          {
+            "ok": true,
+            "step": "ROLLBACK FILE PROPOSED_20261029100000_action_gateway_agent_message_rollback.sql",
+            "ms": 121
+          },
+          {
+            "ok": true,
+            "step": "rollback posttest PROPOSED_20261029100000_action_gateway_agent_message_rollback_posttest.sql",
+            "ms": 93
+          },
+          {
+            "ok": true,
+            "step": "rollback restored the pre-apply fingerprint 2d8e3f10f2e0d57a",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest PROPOSED_20261029100000_action_gateway_agent_message_pretest.sql",
+            "ms": 49
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): pretest left no trace (fingerprint 2d8e3f10f2e0d57a)",
+            "ms": null
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): APPLY PROPOSED_20261029100000_action_gateway_agent_message.sql",
+            "ms": 148
+          },
+          {
+            "ok": true,
+            "step": "cycle 2 (re-apply): posttest PROPOSED_20261029100000_action_gateway_agent_message_posttest.sql",
+            "ms": 104
+          }
+        ]
+      }
+    ]
+  },
+  "reader_family_one_database": {
+    "description": "links 1-5 applied cumulatively on ONE database (each link's emulation, then pretest/apply/posttest), the section 7 reader validation, rollbacks 5->1 with rollback posttests, catalog compared with a twin database holding the same emulations and no link",
+    "log": "docs/prod-copy-rehearsal/pi-2026-10-30/reader_family_chain.log",
+    "result": "PASS"
+  },
+  "production_shaped_all_nine_one_database": {
+    "description": "scripts/db/prod-copy-rehearsal.mjs on a SYNTHETIC production-shaped dump (scripts/db/prod-copy-synthetic-build.mjs: the release chain to #28 + reader 1.0 + the synthetic corpus), private PG17 cluster: guard, validate-backup, restore, prereqs, migrate (#29, #30, #31, A, B: two cycles, rollback in reverse, fingerprint + row counts restored, V-A / V-B / V-OFF, switches OFF), census (applies reader 1.1 and 1.2 in the documented order), then link 5 by hand (pretest, apply, section 7 validation, rollback, rollback posttest, fingerprint, re-apply). Link 1 was part of the dump (baseline), not applied by this run. Synthetic data, not production data.",
+    "evidence": "docs/prod-copy-rehearsal/pi-2026-10-30/prodshape/",
+    "migrate": {
+      "status": "pass",
+      "timings": [
+        {
+          "cycle": "cycle 1",
+          "link": "#29",
+          "pretest_ms": 37,
+          "apply_ms": 53,
+          "posttest_ms": 95,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 1",
+          "link": "#30",
+          "pretest_ms": 17,
+          "apply_ms": 169,
+          "posttest_ms": 25,
+          "posttest": "advisory_fail"
+        },
+        {
+          "cycle": "cycle 1",
+          "link": "#31",
+          "pretest_ms": 14,
+          "apply_ms": 49,
+          "posttest_ms": 90,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 1",
+          "link": "A",
+          "pretest_ms": 16,
+          "apply_ms": 99,
+          "posttest_ms": 86,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 1",
+          "link": "B",
+          "pretest_ms": 26,
+          "apply_ms": 171,
+          "posttest_ms": 102,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 2",
+          "link": "#29",
+          "pretest_ms": 67,
+          "apply_ms": 55,
+          "posttest_ms": 85,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 2",
+          "link": "#30",
+          "pretest_ms": 20,
+          "apply_ms": 153,
+          "posttest_ms": 27,
+          "posttest": "advisory_fail"
+        },
+        {
+          "cycle": "cycle 2",
+          "link": "#31",
+          "pretest_ms": 18,
+          "apply_ms": 55,
+          "posttest_ms": 94,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 2",
+          "link": "A",
+          "pretest_ms": 16,
+          "apply_ms": 85,
+          "posttest_ms": 22,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "cycle 2",
+          "link": "B",
+          "pretest_ms": 14,
+          "apply_ms": 152,
+          "posttest_ms": 103,
+          "posttest": "pass"
+        },
+        {
+          "cycle": "rollback",
+          "link": "B",
+          "rollback_ms": 120,
+          "rollback_posttest_ms": 69
+        },
+        {
+          "cycle": "rollback",
+          "link": "A",
+          "rollback_ms": 45,
+          "rollback_posttest_ms": 12
+        },
+        {
+          "cycle": "rollback",
+          "link": "#31",
+          "rollback_ms": 51,
+          "rollback_posttest_ms": 75
+        },
+        {
+          "cycle": "rollback",
+          "link": "#30",
+          "rollback_ms": 44,
+          "rollback_posttest_ms": 81
+        },
+        {
+          "cycle": "rollback",
+          "link": "#29",
+          "rollback_ms": 105,
+          "rollback_posttest_ms": 85
+        }
+      ],
+      "checks": {
+        "fingerprint_pre_apply": "34ec5ac68b13452d",
+        "fingerprint_after_rollback": "34ec5ac68b13452d",
+        "rollback_restored_row_counts": true,
+        "reapply_matches_first_apply": true,
+        "verify_after_cycle1": {
+          "V-A": {
+            "has_columns": true,
+            "no_agent_records_yet": true,
+            "replies_bound": true
+          },
+          "V-B": {
+            "self_check": true,
+            "registry_rows": true,
+            "handoff_kind": true,
+            "composers_retired": true,
+            "gateway_writer": true,
+            "no_worker_fn_for_gateway": true,
+            "no_anon": true,
+            "feed_empty": true
+          },
+          "V-OFF": {
+            "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+            "at_switch": null,
+            "new_grants": 0,
+            "standing_at": 0
+          },
+          "ok": true,
+          "expected_v_off": {
+            "refusal": "AGENT_TEXT_KILL_SWITCH_OFF",
+            "at_switch": null,
+            "new_grants": 0,
+            "standing_at": 0
+          }
+        },
+        "switches_after_reapply": {
+          "ok": true,
+          "switches": [
+            {
+              "key": "ai_agent_text_enabled",
+              "value": "absent",
+              "off": true
+            },
+            {
+              "key": "ai_agent_message_enabled",
+              "value": "absent",
+              "off": true
+            },
+            {
+              "key": "ai_conversation_send_enabled",
+              "value": "false",
+              "off": true
+            }
+          ],
+          "rule": "absent or false (each is enabled only by the value true)"
+        }
+      }
+    },
+    "census_status": "pass",
+    "full_history": {
+      "log": "docs/prod-copy-rehearsal/pi-2026-10-30/prodshape/full_history.log",
+      "fingerprint_restored": true,
+      "posttest": "advisory_fail: it asserts the runner emulation's seed thread P5, absent from the synthetic corpus (same treatment as #30 in the tool)"
+    }
+  },
+  "not_done": [
+    "a rehearsal on a copy of PRODUCTION (needs the owner's backup and authorizations A1-A7 of docs/PRODUCTION-COPY-REHEARSAL.md)",
+    "prod-copy-rehearsal.mjs does not yet know link 5 (lc_mcp_full_history); it was applied by hand on the copy"
+  ]
+}

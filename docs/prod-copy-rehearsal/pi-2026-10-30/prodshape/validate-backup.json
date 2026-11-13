@@ -1,0 +1,86 @@
+{
+  "step": "validate-backup",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_pi",
+  "admin_url": "postgresql://postgres@/postgres?host=/tmp/lc-mt-pi/pc&port=54398",
+  "started_at": "2026-10-30T15:33:52.787Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "/tmp/lc-mt-pi/pc"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "unix-socket",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": false,
+    "target": null
+  },
+  "status": "pass",
+  "results": {
+    "file": "/tmp/lc-mt-pi/pc/synthetic.dump",
+    "format": "custom",
+    "bytes": 1181513,
+    "pg_restore": "pg_restore (PostgreSQL) 17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+    "sha256": "7fa4c228bc86b867738f17c585f1e433f942a9b6e85c96c4508c97d5b3232725",
+    "archive": {
+      "header": {
+        "dbname": "lc_prodcopy_synth_src_pi",
+        "TOC Entries": "1449",
+        "Compression": "gzip",
+        "Dump Version": "1.16-0",
+        "Format": "CUSTOM",
+        "Dumped from database version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+        "Dumped by pg_dump version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)"
+      },
+      "toc_entries": 1445,
+      "by_type": {
+        "SCHEMA": 4,
+        "COMMENT": 82,
+        "ACL": 377,
+        "EXTENSION": 1,
+        "FUNCTION": 225,
+        "TABLE": 88,
+        "SEQUENCE": 9,
+        "SEQUENCE OWNED BY": 1,
+        "VIEW": 6,
+        "MATERIALIZED VIEW": 2,
+        "DEFAULT": 1,
+        "TABLE DATA": 88,
+        "SEQUENCE SET": 9,
+        "CONSTRAINT": 119,
+        "CHECK CONSTRAINT": 1,
+        "INDEX": 110,
+        "TRIGGER": 77,
+        "FK CONSTRAINT": 54,
+        "ROW SECURITY": 69,
+        "POLICY": 117,
+        "DEFAULT ACL": 3,
+        "MATERIALIZED VIEW DATA": 2
+      },
+      "by_schema": {
+        "-": 15,
+        "action_gateway": 213,
+        "agent": 461,
+        "auth": 2,
+        "public": 754
+      },
+      "table_data_entries": 88
+    },
+    "key_tables_with_data": {
+      "public.properties": true,
+      "public.eg_property_facts": true,
+      "public.inbox_thread_state": true,
+      "public.message_events": true,
+      "public.campaign_target_graph": true,
+      "public.sms_suppression_list": true,
+      "public.phones": true
+    },
+    "never_printed": "row data, names, phone numbers, addresses, message bodies"
+  },
+  "finished_at": "2026-10-30T15:33:53.236Z",
+  "ms": 449
+}

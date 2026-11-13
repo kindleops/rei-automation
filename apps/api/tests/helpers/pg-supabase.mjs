@@ -51,7 +51,7 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
         const colsSql = (cols) => (!cols || cols === '*' ? '*' : cols.split(',').map((c) => ident(c.trim())).join(', '))
         let sql
         if (st.op === 'select') {
-          sql = `select ${colsSql(st.cols)} from ${schema}.${ident(table)}${where}${st.order.length ? ` order by ${st.order.map(([c, asc]) => `${ident(c)} ${asc ? 'asc' : 'desc'}`).join(', ')}` : ''}${st.limit != null ? ` limit ${Number(st.limit)}` : ''}`
+          sql = `select ${colsSql(st.cols)} from ${schema}.${ident(table)}${where}${st.order.length ? ` order by ${st.order.map(([c, asc]) => `${ident(c)} ${asc ? 'asc' : 'desc'}`).join(', ')}` : ''}${st.limit != null ? ` limit ${Number(st.limit)}` : ''}${st.offset ? ` offset ${Number(st.offset)}` : ''}`
         } else if (st.op === 'insert' || st.op === 'upsert') {
           const rows = Array.isArray(st.payload) ? st.payload : [st.payload]
           const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => types.has(c))
@@ -99,6 +99,8 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
         return b
       },
       limit(n) { st.limit = n; return b },
+      // PostgREST range(from, to): inclusive bounds → offset / limit
+      range(from, to) { st.offset = Math.max(0, Number(from) || 0); st.limit = Math.max(0, Number(to) - Number(from) + 1); return b },
       maybeSingle() { st.single = true; return b },
       single() { st.single = true; return b },
       insert(payload) { st.op = 'insert'; st.payload = payload; return b },
@@ -106,7 +108,7 @@ export function pgSupabase(pool, { schema = 'public' } = {}) {
       update(payload) { st.op = 'update'; st.payload = payload; return b },
       then(res, rej) { return exec().then(res, rej) },
     }
-    for (const k of ['contains', 'range', 'delete', 'match', 'filter', 'textSearch']) b[k] = () => { if (process.env.PG_SUPABASE_DEBUG) console.error('PG_SUPABASE_UNSUPPORTED', table, k); throw new Error(`pg-supabase: ${k} is not implemented (no silent no-ops)`) }
+    for (const k of ['contains', 'delete', 'match', 'filter', 'textSearch']) b[k] = () => { if (process.env.PG_SUPABASE_DEBUG) console.error('PG_SUPABASE_UNSUPPORTED', table, k); throw new Error(`pg-supabase: ${k} is not implemented (no silent no-ops)`) }
     return b
   }
   async function rpc(fn, args = {}) {

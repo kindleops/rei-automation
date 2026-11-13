@@ -28,6 +28,7 @@
 import { CLEANUP_SOURCE, CLEANUP_CATEGORY } from "./new-replies-cleanup.js";
 import { buildCleanupReplyRow, checkCleanupRowAgainstRunner } from "./cleanup-reply-row.js";
 import { normalizeVendorDnc } from "./vendor-dnc-lookup.js";
+import { lifecycleLive as followUpLifecycleLive, planFollowUpIntent } from "../followups/followup-lifecycle.js";
 
 const clean = (v) => String(v ?? "").trim();
 
@@ -355,6 +356,18 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
   });
 
   if (!threadKey) return { ok: false, reason: "missing_thread_key", steps };
+  // W4 (P0 2026-10-17): in lifecycle mode follow_up_at is the intent projection — the nurture patch never
+  // writes it, and a nurture that the cleanup holds (vendor DNC) is a HELD intent with its reason, not a
+  // bare date.
+  let lifecycle_live_cached = null;
+  const lifecycleLiveNow = async () => {
+    if (lifecycle_live_cached === null) {
+      lifecycle_live_cached = typeof deps.followUpLifecycleLive === "function"
+        ? (await deps.followUpLifecycleLive()) === true
+        : await followUpLifecycleLive({ supabase: deps.supabase });
+    }
+    return lifecycle_live_cached;
+  };
   if (!isInCleanupCohort(deps.cohort, { thread_id: thread.id, thread_key: threadKey })) {
     return { ok: false, reason: deps.cohort ? "outside_frozen_cohort" : "cohort_gate_missing", steps };
   }
@@ -471,7 +484,7 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
             operational_status: "follow_up_due",
             next_action: "schedule_follow_up",
             next_action_at: addDaysIso(now, 30),
-            follow_up_at: addDaysIso(now, 30),
+            ...((await lifecycleLiveNow()) ? {} : { follow_up_at: addDaysIso(now, 30) }),
           },
           meta: meta(plan.why),
         }));
@@ -486,7 +499,18 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
           vendor_dnc = null;
         }
         if (vendor_dnc !== false) {
-          record(action, { ok: true, skipped: true, held: true, held_reason: vendor_dnc === true ? REPLY_HOLD.VENDOR_DNC : REPLY_HOLD.VENDOR_DNC_UNKNOWN });
+          const held_reason = vendor_dnc === true ? REPLY_HOLD.VENDOR_DNC : REPLY_HOLD.VENDOR_DNC_UNKNOWN;
+          if (await lifecycleLiveNow()) {
+            const planner = deps.planFollowUpIntent || planFollowUpIntent;
+            const held = await planner({
+              thread_key: threadKey, property_id: thread.property_id || null, master_owner_id: thread.master_owner_id || null,
+              kind: "not_interested_nurture", intent: "not_interested", due_at: addDaysIso(now, 30), writer: CLEANUP_SOURCE,
+              cause: `${CLEANUP_SOURCE}:${thread.id || threadKey}`, state: "held", reason: `cleanup_hold:${held_reason}`,
+            }, { supabase: deps.supabase });
+            record(action, { ok: held?.ok !== false, skipped: true, held: true, held_reason, followup_intent_id: held?.intent?.id || null });
+            break;
+          }
+          record(action, { ok: true, skipped: true, held: true, held_reason });
           break;
         }
         // The canonical nurture scheduler: deferred row, template resolved at

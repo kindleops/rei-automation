@@ -23,7 +23,12 @@ begin
     update agent.runtime_limits set kind_limits = kind_limits || jsonb_build_object('conversation.decide',
       jsonb_build_object('enabled', false, 'max_concurrency', 1, 'armed_by', 'a2ee0ffe-6f27-475b-a795-ee617c9472c6', 'event_budget_cap_usd', 0.01)) where id = 1;
     raise exception 'assert: before the fix the event_budget_cap_usd key must be refused (defect not reproduced)';
-  exception when check_violation then null;
+  exception
+    when check_violation then null;
+    -- the launch's apply-one (docs/ACTION-MCP.md §7) runs every pretest inside a READ ONLY transaction: the write that
+    -- reproduces the defect is refused before the CHECK can judge it. The prerequisites above are still verified; the
+    -- reproduction belongs to the migration test runner (read-write, disposable). Staging rehearsal 2026-11-06.
+    when read_only_sql_transaction then raise notice 'pretest(runtime_kind_limits_event_budget): read-only pretest, defect reproduction skipped (the migration test runner reproduces it)';
   end;
   raise notice 'pretest(runtime_kind_limits_event_budget): prerequisites OK, defect reproduced';
 end $$;

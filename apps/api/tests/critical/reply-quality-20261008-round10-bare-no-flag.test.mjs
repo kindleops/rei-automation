@@ -47,12 +47,12 @@ const replay = (message, opts = {}) => {
 // decline (30-day nurture) and never reaches the clarifier gate. This file
 // exercises the clarifier gate itself, so it runs in the retained
 // LC_BARE_NO_OWNERSHIP_MODE=clarify mode (set per replay below).
-test("default mode: a bare 'No' is a decline and never reaches the clarifier gate", async () => {
+test("default mode (owner 2026-10-14, RC 8.5.15): a bare 'No' denies ownership and never reaches the clarifier gate", async () => {
   const r = await replay("No", { mode: null, catalog: [...CATALOG, CLARIFIER_ROW], executorOverrides: { bareNoAutoClarifierGate: async () => true } });
-  assert.equal(r.classification.primary_intent, "not_interested");
+  assert.equal(r.classification.primary_intent, "property_specific_non_owner");
   assert.equal(r.classification.automation_decision.clarification_use_case ?? null, null);
   assert.equal(r.text, null);
-  assert.equal(r.decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+  assert.equal(r.decision.audit_reason, "s1_ownership_denied_unverified_no_followup");
 });
 
 // ── 2. BARE_NO_AUTO_CLARIFIER (default OFF) ─────────────────────────────────

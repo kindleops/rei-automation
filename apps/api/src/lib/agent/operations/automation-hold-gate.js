@@ -1,20 +1,26 @@
-// Automation-hold consultation — PACKAGE A (hotfix/research-runtime) version.
+// Automation-hold consultation (8.5.21-b, owner P0 2026-10-16).
 //
-// rc-8.5.21 binds this gate to the hold registry of hotfix/automation-holds
-// (public.automation_holds + lib/domain/holds/automation-hold.js) through the hold port. Package A
-// deploys on production 6ecbae6b, which has NEITHER the registry NOR the port, and must not wait for
-// them. Package A's acting paths are research-only (property.research enqueues and the valuation dry
-// run): nothing here contacts a seller, queues a message or writes a stage, offer or disposition.
+// ONE authority: public.automation_holds + lib/domain/holds/automation-hold.js (rc-8.5.20-holds,
+// behavior-equivalent to hotfix/automation-holds), reached through its port interface
+//   checkAutomationHold({ threadKey, threadId, propertyId, opportunityId, masterOwnerId, capability })
+//     → { held, hold_type, reason, hold_id }
+// Every acting path of 8.5.21-b consults it BEFORE acting (recovery research / nurture enqueue,
+// valuation refresh, the negotiation composer, the turn-engine research hook). Held items are
+// REPORTED ("held: operator review"), never acted on.
 //
-// The Package A authority is therefore the owner's FIXED exclusion list
-// (missions/research-exclusions.js: the static permanent exclusion of automation-hold-core — Maxwell —
-// plus Hartford, CLOSED LOST by owner decision 2026-10-19). An injected checker (tests, or a later
-// composition root bound to the registry) is used as given and FAILS CLOSED: a throw or a verdict
-// without held:boolean is a hold. The interface is the rc-8.5.21 one, so the rc-8.5.21 merge replaces
-// this file without touching any caller.
+// rc-8.5.21 integration: this gate is NOT a second mechanism. consultHold delegates to 8.5.21-a's
+// hold port (lib/domain/holds-port/automation-hold-port.js), which is bound to the registry's
+// checkAutomationHold. An injected checker (composition roots pass checkAutomationHold explicitly;
+// tests pass fakes) is used as given; with none, the port's bound registry is used — never "not
+// consulted". The integration placeholder that held everything (failClosedHoldCheck) is removed.
+// FAIL CLOSED (the port's rules): a throw, a verdict without held:boolean, a missing capability, an
+// unmapped capability or an unbound registry is a hold.
+import { checkAutomationHoldPort } from '../../domain/holds-port/automation-hold-port.js'
+// reconciliation (production Package A): the owner's fixed exclusions (Maxwell, Hartford CLOSED LOST 2026-10-19) also
+// hold when the registry reports nothing (for example before its migration is applied in that database).
 import { researchExclusionFor } from '../missions/research-exclusions.js'
 
-export const HOLD_GATE_VERSION = 'automation-hold-gate.package-a.v1'
+export const HOLD_GATE_VERSION = 'automation-hold-gate.v2'
 export const HOLD_CAPABILITIES = Object.freeze({
   recovery_research: 'recovery.research_enqueue',
   recovery_nurture: 'recovery.nurture_intent',
@@ -23,25 +29,19 @@ export const HOLD_CAPABILITIES = Object.freeze({
   research_hook: 'property.research_enqueue',
 })
 
-const held = (hold_type, reason, hold_id = null) => ({ held: true, hold_type, reason, hold_id, consulted: true })
-
 /**
- * @param {Function|null} check  an injected checkAutomationHold (or a test fake); null ⇒ the Package A exclusion list
+ * @param {Function|null} check  checkAutomationHold (or a test fake); null ⇒ the port's bound registry
  * @param {{ threadKey?, threadId?, propertyId?, opportunityId?, masterOwnerId?, capability: string }} args
  * @returns {Promise<{ held: boolean, hold_type: string|null, reason: string|null, hold_id: string|null, consulted: true }>}
  */
 export async function consultHold(check, args = {}) {
-  if (!args?.capability) return held('lookup_error', 'automation_hold_capability_required')
-  const ex = researchExclusionFor({ thread_id: args.threadId, thread_key: args.threadKey, property_id: args.propertyId, opportunity_id: args.opportunityId })
-  if (ex) return held(ex.hold_type, ex.reason, ex.key)
-  if (typeof check !== 'function') return { held: false, hold_type: null, reason: null, hold_id: null, consulted: true }
-  try {
-    const r = await check({ threadKey: args.threadKey ?? null, threadId: args.threadId ?? null, propertyId: args.propertyId ?? null, opportunityId: args.opportunityId ?? null, masterOwnerId: args.masterOwnerId ?? null, capability: args.capability })
-    if (!r || typeof r.held !== 'boolean') return held('lookup_error', 'automation_hold_result_invalid')
-    return r.held ? held(r.hold_type || 'hold', r.reason || 'automation_hold', r.hold_id || null) : { held: false, hold_type: null, reason: null, hold_id: null, consulted: true }
-  } catch {
-    return held('lookup_error', 'automation_hold_lookup_failed')
-  }
+  const r = await checkAutomationHoldPort(args, { checker: typeof check === 'function' ? check : null })
+  if (r.held) return { held: true, hold_type: r.hold_type ?? null, reason: r.reason ?? null, hold_id: r.hold_id ?? null, consulted: true }
+  // reconciliation (production Package A): the registry is the authority; where it reports nothing (for example before
+  // the registry migration is applied in that database), the owner's fixed exclusions still hold
+  const ex = researchExclusionFor({ thread_id: args.threadId ?? null, thread_key: args.threadKey ?? null, property_id: args.propertyId ?? null, opportunity_id: args.opportunityId ?? null })
+  if (ex) return { held: true, hold_type: ex.hold_type, reason: ex.reason, hold_id: ex.key, consulted: true }
+  return { held: false, hold_type: null, reason: null, hold_id: null, consulted: true }
 }
 
 /** Report label for a held item (supervisor / brief / work items): "held: <type>". */

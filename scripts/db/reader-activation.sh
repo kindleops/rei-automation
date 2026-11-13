@@ -1,0 +1,150 @@
+#!/bin/bash
+# LeadCommand: apply the READ-ONLY reader links 1–5 to production, the owner's authorization of 2026-10-30.
+#
+#   Links, in this order only (docs/PI-MIGRATION-REHEARSAL.md §1):
+#     1 PROPOSED_20261019150000_lc_mcp_reader          2 PROPOSED_20261026120000_lc_mcp_conversation_intel
+#     3 PROPOSED_20261026150000_lc_mcp_corpus_census   4 PROPOSED_20261027130000_lc_mcp_acquisition_reads
+#     5 PROPOSED_20261030120000_lc_mcp_full_history
+#   Never links 6–9 (the sending family). Nothing here enables SMS.
+#
+# Run it on the operator machine, from a checkout of preserve/agntei-agent-texts-unreviewed:
+#   PROD_ADMIN_URL      the production admin connection string, set in the environment by the owner (never printed,
+#                       never written to a file by this script)
+#   EXPECTED_DB_HOST    the production host the owner expects (compared with the URL's host before anything runs)
+#   BACKUP_CONFIRMED    the timestamp of the platform backup / PITR point the owner confirmed (recorded, not checked)
+#   OUT                 where the evidence goes (default ./reader-activation-<UTC timestamp>)
+#   MODE=preflight      read-only checks only (the default); MODE=apply runs the preflight, then the OUTSTANDING links
+#   EXPECTED_INVENTORY  the fingerprint of the inventory the owner reviewed; apply refuses without it or if production changed
+#   LINK1_COMPLETION_APPROVED  the inventory fingerprint the owner approved for completing a partial/divergent link 1
+#                       (scripts/db/reader-reconcile.mjs prints it with exactly what completing link 1 would change)
+#
+# It stops at the first unexpected result. Each link runs in one transaction (ON_ERROR_STOP), so a failed link leaves
+# nothing of itself; links already applied stay, and their rollbacks (§5, reverse order) are printed.
+set -u
+here=$(cd "$(dirname "$0")/../.." && pwd); M=$here/supabase/migrations; MODE=${MODE:-preflight}
+OUT=${OUT:-$PWD/reader-activation-$(date -u +%Y%m%dT%H%M%SZ)}; mkdir -p "$OUT"; chmod 700 "$OUT"
+LINKS=(PROPOSED_20261019150000_lc_mcp_reader PROPOSED_20261026120000_lc_mcp_conversation_intel PROPOSED_20261026150000_lc_mcp_corpus_census PROPOSED_20261027130000_lc_mcp_acquisition_reads PROPOSED_20261030120000_lc_mcp_full_history)
+# the reviewed files (LeadCommand bc94ff83); a different file is refused
+SHA=(31a2afb415793ef6 037bedb92904fe56 91e43d634d7c3d52 10ec163f8d82df7c 435dfb8629782461)
+log() { echo "$(date -u +%FT%TZ) $*" | tee -a "$OUT/activation.log"; }
+# portable on macOS (BSD date has no %N, /bin/bash is 3.2, sha256sum may be absent)
+now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+sha16() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-16; }
+die() { log "STOP: $*"; applied_rollbacks; exit 1; }
+APPLIED=()
+applied_rollbacks() { [ ${#APPLIED[@]} -eq 0 ] && return; log "links applied so far: ${APPLIED[*]}"; log "to undo them, in this order (each in one transaction, then compare the §4.2 counts):"; for ((i=${#APPLIED[@]}-1; i>=0; i--)); do log "  psql \"\$PROD_ADMIN_URL\" --single-transaction -v ON_ERROR_STOP=1 -f $M/${APPLIED[$i]}_rollback.sql"; done; }
+[ -n "${PROD_ADMIN_URL:-}" ] || die "PROD_ADMIN_URL is not set (the owner sets it in this shell; it is never printed)"
+[ -n "${EXPECTED_DB_HOST:-}" ] || die "EXPECTED_DB_HOST is not set"
+host=$(python3 -c 'import os,urllib.parse as u;print(u.urlparse(os.environ["PROD_ADMIN_URL"]).hostname or "")')
+[ "$host" = "$EXPECTED_DB_HOST" ] || die "the connection's host does not match EXPECTED_DB_HOST (neither is logged)"
+P() { psql "$PROD_ADMIN_URL" -X -q -v ON_ERROR_STOP=1 "$@"; }
+RO() { PGOPTIONS='-c default_transaction_read_only=on' psql "$PROD_ADMIN_URL" -X -q -A -t -v ON_ERROR_STOP=1 "$@"; }
+
+log "mode $MODE; host matches EXPECTED_DB_HOST; checkout $(git -C "$here" rev-parse --short HEAD); backup confirmed: ${BACKUP_CONFIRMED:-(not given)}"
+# ---- 0. the files are the reviewed ones --------------------------------------------------------------------------------
+for i in "${!LINKS[@]}"; do f=$M/${LINKS[$i]}.sql; [ -f "$f" ] || die "missing $f"
+  s=$(sha16 "$f"); [ "$s" = "${SHA[$i]}" ] || die "${LINKS[$i]}: sha256 $s is not the reviewed ${SHA[$i]}"
+  [ -f "$M/${LINKS[$i]}_rollback.sql" ] || die "missing rollback for ${LINKS[$i]}"; done
+log "files: the five reviewed links and their rollbacks are present"
+# ---- 1. read-only preflight (a read-only session: nothing can be written) ---------------------------------------------
+RO -c "select current_database(), current_user, version()" > "$OUT/identity.txt" || die "cannot connect read-only"
+log "identity: $(tr '\n' ' ' < "$OUT/identity.txt" | cut -c1-160)"
+# reconcile what production already holds with the reviewed files (read-only catalog metadata; nothing is dropped,
+# revoked or replaced to force an apply): scripts/db/reader-reconcile.sql + .mjs
+RO -f "$here/scripts/db/reader-reconcile.sql" > "$OUT/inventory.json" || die "the reconciliation inventory could not be read"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory.json" > "$OUT/reconciliation.md"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory.json" --json > "$OUT/reconciliation.json"
+v() { python3 -c "import json,sys;print(json.load(open('$OUT/reconciliation.json'))['verdict']['$1'])"; }
+FP=$(python3 -c "import json;print(json.load(open('$OUT/reconciliation.json'))['production']['fingerprint'])")
+log "reconciliation (inventory $FP): link1 $(v 1), link2 $(v 2), link3 $(v 3), link4 $(v 4), link5 $(v 5); report: reconciliation.md"
+# the owner's reviewed inventory: the fresh one must be the same production state (EXPECTED_INVENTORY=<fingerprint>)
+if [ -n "${EXPECTED_INVENTORY:-}" ]; then [ "$FP" = "$EXPECTED_INVENTORY" ] || die "production changed since the reviewed inventory: fingerprint $FP, reviewed $EXPECTED_INVENTORY (compare reconciliation.md with the reviewed one)"; log "inventory unchanged since the owner's review ($FP)"
+elif [ "$MODE" = "apply" ]; then die "EXPECTED_INVENTORY is not set: give the fingerprint of the inventory the owner reviewed (reader-reconcile.mjs prints it)"; fi
+TODO=(); seen_absent=0
+for i in 1 2 3 4 5; do st=$(v $i); l=${LINKS[$((i-1))]}
+  case "$st" in
+    identical) [ $seen_absent = 1 ] && die "link $i is already in production but an earlier link is not: out of order, review reconciliation.md"; log "link $i already in production exactly as reviewed: not re-applied";;
+    absent) seen_absent=1; TODO+=("$l");;
+    partial|divergent)
+      if [ $i = 1 ] && [ "${LINK1_COMPLETION_APPROVED:-}" = "$FP" ]; then
+        log "link 1 is $st; the owner approved completing it for exactly this inventory ($FP): the reviewed link 1 is applied (its effects are listed in reconciliation.md)"; seen_absent=1; TODO+=("$l")
+      else die "link $i is $st in production: nothing is applied. The owner reviews reconciliation.md$([ $i = 1 ] && echo "; to complete link 1 exactly as listed there, set LINK1_COMPLETION_APPROVED=$FP")"; fi;;
+    *) die "link $i: unexpected verdict $st";;
+  esac; done
+[ ${#TODO[@]} -gt 0 ] || { log "every reader link is already in production as reviewed: nothing to apply"; }
+# baseline: the roles, the schema, and the row count of every relation the reader may read (plus §4.2's)
+RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-before.txt"
+# the catalog snapshot (any role can read it): every public function with its definition hash, every relation with
+# its kind and RLS flag, every policy. After the apply only the applied links' functions may differ (§3 below).
+snap() { RO -c "select 'fn ' || p.oid::regprocedure::text || ' ' || md5(regexp_replace(pg_get_functiondef(p.oid), '\s+', ' ', 'g')) || ' ' || coalesce(p.proacl::text, '-') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind in ('f','p')
+  union all select 'rel ' || c.relname || ' ' || c.relkind::text || ' ' || c.relrowsecurity::text || ' ' || coalesce(c.relacl::text, '-') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p','v','m','f')
+  union all select 'pol ' || c.relname || ' ' || pol.polname || ' ' || pol.polcmd::text || ' ' || coalesce(pg_get_expr(pol.polqual, pol.polrelid), '-') from pg_policy pol join pg_class c on c.oid = pol.polrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'
+  order by 1" > "$OUT/.snap" || return 1; sort "$OUT/.snap"; rm -f "$OUT/.snap"; }
+snap > "$OUT/catalog-before.txt" && [ -s "$OUT/catalog-before.txt" ] || die "the catalog snapshot could not be read"
+# a full schema dump is extra evidence when this login may read every table (pg_dump of the server's major version)
+major=$(RO -c "select current_setting('server_version_num')::int / 10000")
+PG_DUMP=${PG_DUMP:-$( [ -x /usr/lib/postgresql/$major/bin/pg_dump ] && echo /usr/lib/postgresql/$major/bin/pg_dump || command -v pg_dump )}
+if "$PG_DUMP" --schema-only --no-owner --schema=public "$PROD_ADMIN_URL" 2>"$OUT/pg_dump.err" | grep -vE '^(--|\\(un)?restrict )' > "$OUT/schema-before.sql" && [ -s "$OUT/schema-before.sql" ]; then log "schema dump recorded"
+else log "schema dump not available to this login ($(head -1 "$OUT/pg_dump.err" | cut -c1-120)); the catalog snapshot is the schema record"; rm -f "$OUT/schema-before.sql"; fi
+rels=$(grep -oE "rels text\[\] := array\[[^]]*\]" "$M/${LINKS[0]}.sql" | grep -oE "'[a-z_0-9]+'" | tr -d "'" | sort -u)
+counts() { for t in $rels inbox_thread_state messages message_events send_queue system_control idempotency_ledger ai_generated_messages; do
+  if [ "$(RO -c "select to_regclass('public.$t') is not null")" = "t" ]; then n=$(RO -c "select count(*) from public.$t" 2>/dev/null || echo error); else n=absent; fi
+  printf '%s\t%s\n' "$t" "$n"; done | sort -u; }
+counts > "$OUT/counts-before.tsv"; log "baseline: $(wc -l < "$OUT/counts-before.tsv") relations counted; roles and schema recorded"
+grep -q $'\terror$' "$OUT/counts-before.tsv" && die "a baseline count failed (see counts-before.tsv)"
+[ "$MODE" = "apply" ] || { log "preflight passed (read-only). Outstanding: ${TODO[*]:-none}. Re-run with MODE=apply to apply exactly those."; exit 0; }
+[ -n "${BACKUP_CONFIRMED:-}" ] || die "BACKUP_CONFIRMED is not set: confirm the platform backup / PITR point first (§4.1)"
+# ---- 2. apply links 1–5, in order, one transaction each ---------------------------------------------------------------
+for l in ${TODO[@]+"${TODO[@]}"}; do t0=$(now_ms) || die "the timer failed"
+  P --single-transaction -f "$M/$l.sql" > "$OUT/$l.log" 2>&1 || { tail -5 "$OUT/$l.log" | tee -a "$OUT/activation.log"; die "$l failed (rolled back as one transaction)"; }
+  APPLIED+=("$l"); t1=$(now_ms) || die "the timer failed"; log "applied $l ($((t1 - t0)) ms)"; done
+# every outstanding link must have been applied before anything is validated
+[ "${#APPLIED[@]}" = "${#TODO[@]}" ] || die "only ${#APPLIED[@]} of ${#TODO[@]} outstanding links were applied: stopping before validation"
+# ---- 3. validation (§7), read-only enforcement, unchanged data ---------------------------------------------------------
+v=$(RO -F ' ' -c "select r.rolcanlogin = false and r.rolbypassrls = false and r.rolsuper = false,
+  has_function_privilege('lc_mcp_reader','public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)','EXECUTE'),
+  has_function_privilege('lc_mcp_reader','public.lc_mcp_lead_conversation(text,uuid,integer,timestamp with time zone,text,integer)','EXECUTE'),
+  has_function_privilege('lc_mcp_reader','public.lc_mcp_corpus_census(text)','EXECUTE'),
+  has_function_privilege('lc_mcp_reader','public.lc_mcp_thread_contact_eligibility(uuid)','EXECUTE'),
+  not has_function_privilege('anon','public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)','EXECUTE'),
+  pg_get_functiondef('public.lc_mcp_conversation_worklist(text,integer,text,timestamp with time zone,uuid,integer)'::regprocedure) ~ '36500'
+  from pg_roles r where r.rolname = 'lc_mcp_reader'")
+log "validation (role safe, worklist, conversation, census, acquisition reads, no anon, full history): $v"
+[ "$v" = "t t t t t t t" ] || die "a validation check is false"
+w=$(RO -c "select count(*) from information_schema.role_table_grants where grantee = 'lc_mcp_reader' and privilege_type <> 'SELECT'")
+[ "$w" = "0" ] || die "lc_mcp_reader holds $w non-SELECT table privileges"
+# read-only enforcement by privilege introspection, never by switching role: on Supabase `postgres` holds the reader
+# role without SET (its PostgreSQL 16+ creator self-grant), and nothing here grants it. The reader's own reads are
+# proven in Phase 2, through PostgREST, with the reader's token.
+wr=$(RO -c "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p','v','m','f') and has_table_privilege('lc_mcp_reader', c.oid, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')")
+[ "$wr" = "0" ] || die "lc_mcp_reader may write to $wr relation(s) in public (directly or through PUBLIC)"
+[ "$(RO -c "select has_schema_privilege('lc_mcp_reader', 'public', 'CREATE')")" = "f" ] || die "lc_mcp_reader may CREATE in schema public"
+L4=$M/${LINKS[3]}.sql
+# the array literal of one inventory variable of link 4 (one line: "  <name> text[] := array[...];")
+arr() { python3 -c "import re,sys; m=re.search(r'^\s*$1 text\[\] := (array\[.*\]);\s*\$', open('$L4').read(), re.M); print(m.group(1) if m else 'NULL')"; }
+sc=$(RO -c "with o as (select array(select f from unnest($(arr optional_fns)) f where to_regprocedure(f) is not null) as opt)
+  select (r->>'ok') || ' ' || jsonb_array_length(r->'relations') || ' relations, ' || jsonb_array_length(r->'functions') || ' functions' || coalesce(', findings ' || nullif(r->>'findings', '[]'), '')
+  from o, lateral (select public.lc_mcp_reader_self_check($(arr rels), $(arr fns) || o.opt, 'lc_mcp_reader') as r) x")
+log "reader self-check (privilege introspection of lc_mcp_reader): $sc"
+case "$sc" in true*) ;; *) die "the reader self-check is not ok: $sc";; esac
+log "read-only enforcement: no write privilege on any public relation (direct or via PUBLIC), no CREATE on public, self-check ok"
+page=$(RO -c "select (w->>'total') || ' threads with a seller message on record (first page ' || jsonb_array_length(w->'rows') || ' rows)' from public.lc_mcp_conversation_worklist('recent_inbound', 0, null, null, null, 25) w" | head -1)
+log "all-history worklist (definer read, called by the owner): $page"
+counts > "$OUT/counts-after.tsv"
+diff "$OUT/counts-before.tsv" "$OUT/counts-after.tsv" > "$OUT/counts-diff.txt" || die "row counts changed (counts-diff.txt): investigate before anything else"
+log "data unchanged: every counted relation has the same row count before and after"
+snap > "$OUT/catalog-after.txt" && [ -s "$OUT/catalog-after.txt" ] || die "the post-apply catalog snapshot could not be read"
+removed=$(comm -23 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt"); added=$(comm -13 "$OUT/catalog-before.txt" "$OUT/catalog-after.txt")
+allowed=$(for l in ${TODO[@]+"${TODO[@]}"}; do grep -oiE "create (or replace )?function public\.[a-z0-9_]+" "$M/$l.sql" | awk '{print $NF}' | sed 's/^public\.//'; done | sort -u)
+bad_removed=$(printf '%s\n' "$removed" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; echo "$k $n"; done)
+bad_added=$(printf '%s\n' "$added" | grep -v '^$' | while read -r k n rest; do f=${n%%(*}; [ "$k" = fn ] && printf '%s\n' "$allowed" | grep -qx "$f" && continue; [ "$k" = pol ] && printf '%s\n' ${TODO[@]+"${TODO[@]}"} | grep -q lc_mcp_reader$ && [ "$(echo "$rest" | cut -d' ' -f1)" = lc_mcp_reader_select ] && continue; [ "$k" = rel ] && printf '%s\n' ${TODO[@]+"${TODO[@]}"} | grep -q lc_mcp_reader$ && continue; echo "$k $n"; done)
+[ -z "$bad_removed$bad_added" ] || { printf 'removed or changed:\n%s\nadded or changed:\n%s\n' "$bad_removed" "$bad_added" > "$OUT/catalog-unexpected.txt"; die "the catalog changed beyond the applied links' own functions (catalog-unexpected.txt)"; }
+log "catalog: only the applied links' functions changed ($(printf '%s\n' "$added" | grep -c '^fn ') function entries added or replaced); no relation or policy changed"
+RO -c "select rolname, rolcanlogin, rolbypassrls, rolsuper from pg_roles order by 1" > "$OUT/roles-after.txt"
+diff "$OUT/roles-before.txt" "$OUT/roles-after.txt" | grep -E '^[<>]' | grep -v 'lc_mcp_reader' && die "roles other than lc_mcp_reader changed"
+# after: every link must now be in production exactly as reviewed
+RO -f "$here/scripts/db/reader-reconcile.sql" > "$OUT/inventory-after.json" || die "the post-apply inventory could not be read"
+node "$here/scripts/db/reader-reconcile.mjs" "$OUT/inventory-after.json" > "$OUT/reconciliation-after.md"; rc=$?
+[ $rc = 0 ] && grep -q "link 5: ALREADY IN PRODUCTION" "$OUT/reconciliation-after.md" || die "after the apply, a reader link is not exactly as reviewed (reconciliation-after.md)"
+log "post-apply reconciliation: links 1–5 are all in production exactly as reviewed"
+log "DONE: applied ${TODO[*]:-nothing (all were already in production)}. Next: mint the reader token (docs/LEADCOMMAND-MCP-1.0.md §4.2) into a 0600 file and start the reader (runbook Phase 2)."

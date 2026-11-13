@@ -201,6 +201,7 @@ function fakeDb(tables, { failTable = null } = {}) {
         select: () => chain,
         eq: (c, v) => (filters.push((r) => String(r[c] ?? "") === String(v)), chain),
         in: (c, vs) => (filters.push((r) => vs.map(String).includes(String(r[c] ?? ""))), chain),
+        order: () => chain,
         limit: async () => {
           calls.push(table);
           if (table === failTable) return { data: null, error: new Error(`${table} unavailable`) };
@@ -220,7 +221,9 @@ test("loader: reads every source with both phone shapes; a failing table fails c
   const r = await runSendTimeContactGuard(opener({ to_phone_number: "+13145550101" }), { supabase: db, now: NOW });
   assert.equal(r.reason, R.AUTOMATION_SUPPRESSION, "a 10-digit automation_suppressions row matches an E.164 row");
   for (const t of ["sms_suppression_list", "automation_suppressions", "inbox_thread_state", "phones", "message_events"]) assert.ok(db.calls.includes(t), t);
-  for (const t of ["sms_suppression_list", "automation_suppressions", "inbox_thread_state", "phones", "message_events", "send_queue"]) {
+  // rc-8.5.21: the property-scoped resolution store is read too, and fails closed like the rest
+  assert.ok(db.calls.includes("contact_property_resolution"))
+  for (const t of ["sms_suppression_list", "automation_suppressions", "inbox_thread_state", "phones", "message_events", "send_queue", "contact_property_resolution"]) {
     const failing = fakeDb({}, { failTable: t });
     const res = await runSendTimeContactGuard(opener(), { supabase: failing, now: NOW });
     assert.equal(res.reason, R.READ_FAILED, `read error on ${t}`);

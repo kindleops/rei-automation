@@ -137,6 +137,9 @@ export const DISPOSITION_CODES = Object.freeze({
   DUPLICATE: 'duplicate',
   UNQUALIFIED: 'unqualified',
   NO_RESPONSE: 'no_response',
+  // OWNER DECISION LOCKED 2026-10-17: declined engagement to the OWNERSHIP question, ownership UNVERIFIED.
+  // NEVER not_interested (that triggers the 30-day nurture); NOT a suppression; NOT a denial.
+  DECLINED_UNVERIFIED: 'declined_unverified',
   NONE: 'none',
 });
 
@@ -152,6 +155,7 @@ export const DISPOSITION_META = Object.freeze({
   [DISPOSITION_CODES.DUPLICATE]: { label: 'Duplicate', color: '#94a3b8' },
   [DISPOSITION_CODES.UNQUALIFIED]: { label: 'Unqualified', color: '#7d8797' },
   [DISPOSITION_CODES.NO_RESPONSE]: { label: 'No Response', color: '#aab3c5' },
+  [DISPOSITION_CODES.DECLINED_UNVERIFIED]: { label: 'Declined · Ownership Unverified', color: '#8e96a8' },
   [DISPOSITION_CODES.NONE]: { label: 'None', color: '#64748b' },
 });
 
@@ -308,6 +312,8 @@ const DISPOSITION_ALIAS_MAP = Object.freeze({
   duplicate: DISPOSITION_CODES.DUPLICATE,
   unqualified: DISPOSITION_CODES.UNQUALIFIED,
   no_response: DISPOSITION_CODES.NO_RESPONSE,
+  declined_unverified: DISPOSITION_CODES.DECLINED_UNVERIFIED,
+  ownership_declined_unverified: DISPOSITION_CODES.DECLINED_UNVERIFIED,
   none: DISPOSITION_CODES.NONE,
   null: DISPOSITION_CODES.NONE,
   '': DISPOSITION_CODES.NONE,

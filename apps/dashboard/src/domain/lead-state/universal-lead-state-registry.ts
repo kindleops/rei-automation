@@ -79,7 +79,7 @@ export const LEAD_TEMPERATURE_META: Record<LeadTemperatureCode, { label: string;
 
 export const DISPOSITION_ORDER = [
   'interested', 'not_interested', 'wrong_person', 'wrong_number', 'referred',
-  'sold', 'duplicate', 'unqualified', 'no_response', 'none',
+  'sold', 'duplicate', 'unqualified', 'no_response', 'declined_unverified', 'none',
 ] as const
 
 export type DispositionCode = typeof DISPOSITION_ORDER[number]
@@ -94,6 +94,8 @@ export const DISPOSITION_META: Record<DispositionCode, { label: string; color: s
   duplicate: { label: 'Duplicate', color: '#94a3b8' },
   unqualified: { label: 'Unqualified', color: '#7d8797' },
   no_response: { label: 'No Response', color: '#aab3c5' },
+  // owner 2026-10-17: declined the ownership question, ownership unverified (never the nurture lane)
+  declined_unverified: { label: 'Declined · Ownership Unverified', color: '#8e96a8' },
   none: { label: 'None', color: '#64748b' },
 }
 
@@ -260,6 +262,8 @@ const DISPOSITION_ALIASES: Record<string, DispositionCode> = {
   duplicate: 'duplicate',
   unqualified: 'unqualified',
   no_response: 'no_response',
+  declined_unverified: 'declined_unverified',
+  ownership_declined_unverified: 'declined_unverified',
   none: 'none',
   null: 'none',
   '': 'none',

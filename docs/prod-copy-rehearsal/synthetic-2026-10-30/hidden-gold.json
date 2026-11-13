@@ -1,0 +1,334 @@
+{
+  "step": "hidden-gold",
+  "tool": "prod-copy-rehearsal/1",
+  "tool_sha256": "60291ba3ab65c67404ff55196f950be224425a0a829ca01ad44a7455902c6bb3",
+  "database": "lc_prodcopy_synth_20261030",
+  "admin_url": "postgres://postgres@127.0.0.1:54341/postgres",
+  "started_at": "2026-10-30T05:20:19.291Z",
+  "guard": {
+    "static": "pass",
+    "hosts": [
+      "127.0.0.1"
+    ],
+    "admin": {
+      "database": "postgres",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    },
+    "target_exists": true,
+    "target": {
+      "database": "lc_prodcopy_synth_20261030",
+      "server_address": "127.0.0.1",
+      "server_version": "17.11 (Ubuntu 17.11-1.pgdg24.04+2)",
+      "server_version_num": 170011
+    }
+  },
+  "status": "pass",
+  "results": {
+    "reader_stack": {
+      "applied": [],
+      "note": "reader 1.0, 1.1 and 1.2 already present"
+    },
+    "read_only": {
+      "default_transaction_read_only": "on",
+      "write_probe_refused_sqlstate": "25006",
+      "how": "PGOPTIONS=-c default_transaction_read_only=on and SET default_transaction_read_only = on in every census / hidden-gold session"
+    },
+    "parameters": {
+      "window_days": 365,
+      "market": null,
+      "category": "recent_inbound",
+      "rule": "lc_opportunity_rank_v1"
+    },
+    "as_of": "2026-10-30T05:20:19.689Z",
+    "pages_read": 1,
+    "threads_with_inbound_in_window": 8,
+    "analysed": 8,
+    "excluded_before_ranking": {
+      "opted_out": 1,
+      "not_owner": 1,
+      "negative": 1
+    },
+    "by_category": {
+      "unanswered_interested_seller": 2,
+      "interested_seller": 1,
+      "unanswered_seller": 1,
+      "seller_stated_price": 1
+    },
+    "eligibility": {
+      "threads": 5,
+      "eligible": 1,
+      "blocked": 2,
+      "unknown": 2,
+      "contactable": 1,
+      "unknown_counted_as_contactable": 0,
+      "by_blocking_reason": {
+        "suppression_list_active": 1,
+        "hold_blocks_ai_action": 1,
+        "hold_active": 1
+      },
+      "by_unknown_reason": {
+        "ownership_unconfirmed": 1,
+        "line_type_unknown": 1
+      },
+      "rule": "contactable = eligible only; unknown and blocked are never contactable; eligible is a read of the send-time guard inputs, never a send authorization"
+    },
+    "eligibility_source": "lc_mcp_thread_contact_eligibility (reader 1.3) + the worklist contact reading, judged fail-closed",
+    "ranked": [
+      {
+        "thread_id": "5e000000-0000-4000-8000-000000000101",
+        "property_id": "S01",
+        "category": "unanswered_interested_seller",
+        "score": 100,
+        "factors": [
+          {
+            "factor": "interest",
+            "points": 40
+          },
+          {
+            "factor": "price_ask_candidate",
+            "points": 15
+          },
+          {
+            "factor": "timeline",
+            "points": 10
+          },
+          {
+            "factor": "unanswered_verified",
+            "points": 15
+          },
+          {
+            "factor": "waiting_over_24h",
+            "points": 5
+          },
+          {
+            "factor": "waiting_over_72h",
+            "points": 5
+          },
+          {
+            "factor": "decision_engine_tier_a",
+            "points": 10
+          }
+        ],
+        "evidence_message_ids": [
+          "5e000000-0000-4000-8000-00000000a012",
+          "5e000000-0000-4000-8000-00000000a014"
+        ],
+        "eligibility": {
+          "verdict": "eligible",
+          "contactable": true,
+          "blocking_reasons": [],
+          "unknown_reasons": []
+        },
+        "next_step": "draft_reply_for_human_approval",
+        "flags": [
+          "overdue_response"
+        ],
+        "interest": "interest",
+        "verified": "unanswered",
+        "last_inbound_at": "2026-10-27T05:20:01.488Z",
+        "rank": 1
+      },
+      {
+        "thread_id": "5e000000-0000-4000-8000-000000000102",
+        "property_id": "S02",
+        "category": "unanswered_interested_seller",
+        "score": 75,
+        "factors": [
+          {
+            "factor": "interest",
+            "points": 40
+          },
+          {
+            "factor": "offer_request",
+            "points": 15
+          },
+          {
+            "factor": "unanswered_verified",
+            "points": 15
+          },
+          {
+            "factor": "waiting_over_24h",
+            "points": 5
+          }
+        ],
+        "evidence_message_ids": [
+          "5e000000-0000-4000-8000-00000000a022"
+        ],
+        "eligibility": {
+          "verdict": "unknown",
+          "contactable": false,
+          "blocking_reasons": [],
+          "unknown_reasons": [
+            "ownership_unconfirmed"
+          ]
+        },
+        "next_step": "human_review_eligibility_unknown",
+        "flags": [
+          "decision_engine_missing",
+          "overdue_response"
+        ],
+        "interest": "interest",
+        "verified": "unanswered",
+        "last_inbound_at": "2026-10-28T23:20:01.488Z",
+        "rank": 2
+      },
+      {
+        "thread_id": "5e000000-0000-4000-8000-000000000106",
+        "property_id": "S06",
+        "category": "interested_seller",
+        "score": 50,
+        "factors": [
+          {
+            "factor": "interest",
+            "points": 40
+          },
+          {
+            "factor": "timeline",
+            "points": 10
+          }
+        ],
+        "evidence_message_ids": [
+          "5e000000-0000-4000-8000-00000000a062"
+        ],
+        "eligibility": {
+          "verdict": "unknown",
+          "contactable": false,
+          "blocking_reasons": [],
+          "unknown_reasons": [
+            "line_type_unknown"
+          ]
+        },
+        "next_step": "monitor",
+        "flags": [
+          "decision_engine_missing"
+        ],
+        "interest": "interest",
+        "verified": "answered",
+        "last_inbound_at": "2026-10-28T05:20:01.488Z",
+        "rank": 3
+      },
+      {
+        "thread_id": "5e000000-0000-4000-8000-000000000105",
+        "property_id": "S05",
+        "category": "seller_stated_price",
+        "score": 38,
+        "factors": [
+          {
+            "factor": "interest",
+            "points": 40
+          },
+          {
+            "factor": "price_ask_candidate",
+            "points": 15
+          },
+          {
+            "factor": "decision_engine_tier_b",
+            "points": 6
+          },
+          {
+            "factor": "decision_engine_stale",
+            "points": -3
+          },
+          {
+            "factor": "contact_blocked",
+            "points": -20
+          }
+        ],
+        "evidence_message_ids": [
+          "5e000000-0000-4000-8000-00000000a052"
+        ],
+        "eligibility": {
+          "verdict": "blocked",
+          "contactable": false,
+          "blocking_reasons": [
+            "hold_blocks_ai_action",
+            "hold_active"
+          ],
+          "unknown_reasons": []
+        },
+        "next_step": "human_review_blocker",
+        "flags": [
+          "decision_engine_stale"
+        ],
+        "interest": "interest",
+        "verified": "answered",
+        "last_inbound_at": "2026-09-26T05:20:01.488Z",
+        "rank": 4
+      },
+      {
+        "thread_id": "5e000000-0000-4000-8000-000000000108",
+        "property_id": "S08",
+        "category": "unanswered_seller",
+        "score": 10,
+        "factors": [
+          {
+            "factor": "label_only",
+            "points": 5
+          },
+          {
+            "factor": "unanswered_verified",
+            "points": 15
+          },
+          {
+            "factor": "waiting_over_24h",
+            "points": 5
+          },
+          {
+            "factor": "waiting_over_72h",
+            "points": 5
+          },
+          {
+            "factor": "contact_blocked",
+            "points": -20
+          }
+        ],
+        "evidence_message_ids": [
+          "5e000000-0000-4000-8000-00000000a082"
+        ],
+        "eligibility": {
+          "verdict": "blocked",
+          "contactable": false,
+          "blocking_reasons": [
+            "suppression_list_active"
+          ],
+          "unknown_reasons": []
+        },
+        "next_step": "human_review_blocker",
+        "flags": [
+          "decision_engine_missing",
+          "overdue_response"
+        ],
+        "interest": "label_only",
+        "verified": "unanswered",
+        "last_inbound_at": "2026-10-20T05:20:01.488Z",
+        "rank": 5
+      }
+    ],
+    "rule": "lc_opportunity_rank_v1",
+    "factors": {
+      "interest": 40,
+      "label_only": 5,
+      "offer_request": 15,
+      "price_ask_candidate": 15,
+      "timeline": 10,
+      "unanswered_verified": 15,
+      "waiting_over_24h": 5,
+      "waiting_over_72h": 5,
+      "overdue_commitment": 10,
+      "decision_engine_tier_a": 10,
+      "decision_engine_tier_b": 6,
+      "decision_engine_tier_c": 2,
+      "decision_engine_stale": -3,
+      "contact_blocked": -20,
+      "identity_conflict": -5
+    },
+    "category_rule": "first match: unanswered_interested_seller (verified unanswered + interest in the seller's words) · seller_stated_price · offer_requested · interested_seller · timeline_stated · unanswered_seller · label_only · other",
+    "window_note": "the reader worklist covers threads whose last inbound is within 365 days (its bound is 365); older threads are counted by the census (last_inbound_older_than_365d), not ranked",
+    "output_policy": "opaque ids (thread / property / message ids), categories, scores, factor names and an eligibility verdict; no names, phones, addresses or message text",
+    "owner_only_text": "off (default)"
+  },
+  "finished_at": "2026-10-30T05:20:20.703Z",
+  "ms": 1412
+}

@@ -155,6 +155,10 @@
   transition: box-shadow var(--lc-dur-fast) var(--lc-ease-standard), background-color var(--lc-dur-instant);
 }
 .lc-field__input::placeholder { color: var(--lc-ink-3); }
+/* acknowledgement checkbox under a prompt field (lcPrompt `acknowledge`) */
+.lc-field--check { flex-direction: row; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer; }
+.lc-field--check input { margin: 2px 0 0; accent-color: rgb(var(--lc-select-rgb)); flex: none; }
+.lc-field--check .lc-field__label { color: var(--lc-ink-1); }
 .lc-field__input:focus { background: var(--lc-inner-bg-hover); box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.45), 0 0 0 4px rgba(var(--lc-select-rgb), 0.1); }
 
 /* ── LOADING PLANE ──────────────────────────────────────────────────────── */

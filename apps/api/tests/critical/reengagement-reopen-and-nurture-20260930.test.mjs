@@ -284,15 +284,16 @@ test("the not-interested rule keeps nurture follow-ups", () => {
 test("cancel_pending_queue cancels the campaign touch and keeps the follow-up this reply scheduled", async () => {
   const db = fakeDb({
     send_queue: [
-      { id: "touch-2", to_phone_number: DIANE, queue_status: "scheduled", type: "campaign", use_case_template: "ownership_check" },
-      { id: "nurture", to_phone_number: DIANE, queue_status: "scheduled", type: "followup", use_case_template: "nurture_not_interested" },
-      { id: "no-reply", to_phone_number: DIANE, queue_status: "scheduled", type: "followup", use_case_template: "ownership_check" },
+      // W3 (P0 2026-10-17): the event cancels only what was pending BEFORE the triggering inbound
+      { id: "touch-2", to_phone_number: DIANE, queue_status: "scheduled", type: "campaign", use_case_template: "ownership_check", created_at: "2026-09-29T10:00:00.000Z" },
+      { id: "nurture", to_phone_number: DIANE, queue_status: "scheduled", type: "followup", use_case_template: "nurture_not_interested", created_at: "2026-09-30T12:00:02.000Z" },
+      { id: "no-reply", to_phone_number: DIANE, queue_status: "scheduled", type: "followup", use_case_template: "ownership_check", created_at: "2026-09-29T11:00:00.000Z" },
     ],
   });
   const rule = stageTemperatureRules.find((r) => r.rule_key === "stage.not_interested_cold");
   const action = rule.actions.find((a) => a.action_type === "cancel_pending_queue");
   const result = await executeAutomationAction({
-    event: { id: "evt-1", event_type: "inbound_message_received", conversation_thread_id: DIANE, payload: { from_phone_number: DIANE, thread_key: DIANE } },
+    event: { id: "evt-1", event_type: "inbound_message_received", conversation_thread_id: DIANE, payload: { from_phone_number: DIANE, thread_key: DIANE, inbound_received_at: "2026-09-30T12:00:00.000Z" } },
     run: { id: "run-1" },
     rule,
     action,

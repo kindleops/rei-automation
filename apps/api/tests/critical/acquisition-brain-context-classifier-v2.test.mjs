@@ -156,9 +156,10 @@ test("contextual yes/no across outbound questions", async () => {
     heuristicOnly: true,
     conversation_context: baseCtx("ownership_check"),
   });
-  // Owner 2026-10-13: a bare "no" to the ownership question is a decline (30-day nurture).
-  assert.equal(noOwn.primary_intent, "not_interested");
-  assert.ok(noOwn.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"));
+  // RC 8.5.15 (owner 2026-10-14, supersedes 2026-10-13): a bare "no" to the
+  // ownership question DENIES ownership -- property-scoped, no nurture.
+  assert.equal(noOwn.primary_intent, "property_specific_non_owner");
+  assert.ok(noOwn.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_ownership_unverified"));
 
   const noProp = await classify("no", null, {
     heuristicOnly: true,
@@ -246,7 +247,8 @@ test("ownership neighbors never false owner", async () => {
     ["Property manager here", "tenant_occupied"],
     // Certification pass 2026-08-25: sold → property-scoped sold_property.
     ["Sold it years ago", "sold_property"],
-    ["Never owned it", "wrong_number"],
+    // RC 8.5.15 (owner 2026-10-14): a written ownership denial is property-scoped (property_specific_non_owner), never wrong_number + suppression.
+    ["Never owned it", "property_specific_non_owner"],
     ["Wrong number", "wrong_number"],
     ["Stop texting me", "opt_out"],
   ];
@@ -345,7 +347,8 @@ test("terminal safety: opt-out and wrong-number never ownership", async () => {
     assert.ok(
       // sold_property is equally terminal-safe: never ownership, never a
       // reply lane (certification pass 2026-08-25).
-      ["opt_out", "wrong_number", "sold_property"].includes(c.primary_intent),
+      // property_specific_non_owner (RC 8.5.15 written denial) is terminal-safe too.
+      ["opt_out", "wrong_number", "sold_property", "property_specific_non_owner"].includes(c.primary_intent),
       `${text} -> ${c.primary_intent}`
     );
   }

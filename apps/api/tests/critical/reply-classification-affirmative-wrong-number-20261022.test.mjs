@@ -81,8 +81,14 @@ test("negations never become ownership_confirmed", async () => {
     const r = await run(m, ctx);
     assert.notEqual(r.primary_intent, "ownership_confirmed", m);
   }
-  // "that's not me" keeps its existing wrong-person reading.
-  assert.equal((await run("that's not me", ctx)).primary_intent, "wrong_number");
+  // agntei reconciliation: production (c5a7104f) read "that's not me" as a contact-wide wrong number. The
+  // reconciled code carries the owner rule of 2026-10-17 ("a property denial is never global", rc-8.5.21 v3/v4):
+  // to OUR ownership question it is a written ownership denial scoped to this property; the phone is not
+  // archived and nothing is suppressed globally. Founder decision item: confirm before the reconciled web deploy.
+  const notMe = await run("that's not me", ctx);
+  assert.equal(notMe.primary_intent, "property_specific_non_owner");
+  assert.ok(notMe.matched_rule_ids.includes("written_ownership_denial_property_scoped"));
+  assert.equal(notMe.automation_decision.suppression_action, "none");
 });
 
 test("'not the right number' to OUR ownership question is the same wrong number as 'wrong number'", async () => {
@@ -166,6 +172,12 @@ test("STOP is absolute: a wrong-number reply that also says stop is an opt-out",
 });
 
 test("'No' and 'No thanks' to the ownership question keep their locked routing", async () => {
+  // agntei reconciliation: production's routing is the LC_BARE_NO_OWNERSHIP_MODE=not_interested mode of the
+  // reconciled code; the default is the owner decision of 2026-10-17 ("Answer is no" = ownership unverified),
+  // asserted in the next test. Founder decision item: confirm before the reconciled web deploy.
+  const prevMode = process.env.LC_BARE_NO_OWNERSHIP_MODE
+  process.env.LC_BARE_NO_OWNERSHIP_MODE = "not_interested"
+  try {
   const ctx = await contextAfter(S1, "ownership_check");
   for (const m of ["No", "No thanks"]) {
     const r = await run(m, ctx);
@@ -173,6 +185,17 @@ test("'No' and 'No thanks' to the ownership question keep their locked routing",
     assert.ok(r.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_not_interested"), m);
     assert.equal(r.automation_decision.suppression_action, "none", m);
   }
+  } finally {
+    if (prevMode === undefined) delete process.env.LC_BARE_NO_OWNERSHIP_MODE; else process.env.LC_BARE_NO_OWNERSHIP_MODE = prevMode
+  }
+});
+
+test("reconciliation: by default (owner decision 2026-10-17) a bare 'No' to the ownership question is ownership unverified, never a global suppression", async () => {
+  const ctx = await contextAfter(S1, "ownership_check");
+  const r = await run("No", ctx);
+  assert.equal(r.primary_intent, "property_specific_non_owner");
+  assert.ok(r.matched_rule_ids.includes("ctx_bare_no_after_ownership_check_ownership_unverified"));
+  assert.equal(r.automation_decision.suppression_action, "none");
 });
 
 test("Spanish replies are untouched (no English rule reads them)", async () => {

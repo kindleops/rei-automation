@@ -11,6 +11,8 @@ import { UUID, str, obj, clean, lower, isoOrNull } from './_schema.js'
 const STAGE_RE = '^[a-z][a-z0-9_]{1,39}$'
 /** Closed-won is a closing-authority action, never a proposed stage move. */
 const CLOSING_ONLY = new Set(['closed', 'closed_won'])
+/** Contract / closing stages an agent (Action Gateway) request may never reach. */
+const CONTRACT_STAGES = new Set(['formal_contract', 'contract_to_close', 'disposition', 'under_contract', 'prepared_to_close', 'closed', 'closed_won', 'closed_lost'])
 
 function stageSnapshot(row) {
   return { opportunity_id: row?.id || null, stage: lower(row?.acquisition_stage) || null, status: lower(row?.opportunity_status) || null, stage_entered_at: isoOrNull(row?.stage_entered_at) }
@@ -87,7 +89,12 @@ export const pipelineCapabilities = [
       return stageSnapshot(await ctx.services.pipeline.get(target.opportunity_id))
     },
     async executeApproved(change, ctx) {
-      const r = await ctx.services.pipeline.transition(change.opportunity_id, { to_stage: change.to_stage, reason: change.reason, source: 'agent_approval', actor: ctx.approver })
+      // R1: the source is SERVER-derived. A request the Action Gateway filed carries its authenticated agent
+      // (action_gateway:<agent>, set by the gateway, bound by the payload hash); anything else is agent_approval.
+      // Neither is a manual or closing-authority source, so the money / contract guard applies in full.
+      const gatewaySourced = /^action_gateway:agt_[a-z0-9][a-z0-9_]{2,40}$/.test(String(change.source || ''))
+      if (CLOSING_ONLY.has(lower(change.to_stage)) || (gatewaySourced && CONTRACT_STAGES.has(lower(change.to_stage)))) return { ok: false, code: 'CLOSING_AUTHORITY_ONLY', from_stage: change.from_stage, to_stage: change.to_stage }
+      const r = await ctx.services.pipeline.transition(change.opportunity_id, { to_stage: change.to_stage, reason: change.reason, source: gatewaySourced ? change.source : 'agent_approval', actor: ctx.approver })
       const back = stageSnapshot(await ctx.services.pipeline.get(change.opportunity_id))
       return { ok: r?.ok === true && back.stage === lower(change.to_stage), code: r?.ok ? null : clean(r?.code || r?.error) || 'transition_refused', from_stage: change.from_stage, to_stage: change.to_stage, readback: { stage: back.stage, status: back.status } }
     },

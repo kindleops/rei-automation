@@ -466,11 +466,17 @@ test("quiet hours: a lead with no resolved timezone is HELD (TIMEZONE_UNRESOLVED
   const IN_WINDOW_CHICAGO = "2026-04-25T15:00:00.000Z"; // 10:00 Central
   const BEFORE_OPEN_CHICAGO = "2026-04-25T11:00:00.000Z"; // 06:00 Central
 
+  // Merged with rc-8.5.21 (the plan-time check is the dispatcher's recipient-window policy): the
+  // recipient phone's area code is recipient evidence, so a lead that NOTHING places carries a
+  // phone whose area code names no zone (555), and a lead WITH a zone carries a Central (312) phone.
+  const UNPLACED_PHONE = (id) => `+1555000${String(id).padStart(4, "0")}`;
+  const CENTRAL_PHONE = (id) => `+1312555${String(id).padStart(4, "0")}`;
+
   // No zone and no property state/ZIP to place the lead: held, whatever
   // within_contact_window_now says, at a moment that is inside Chicago hours.
   for (const within_contact_window_now of [true, false]) {
     const held = await evaluateCandidateEligibility(
-      makeCandidate(41, { timezone: null, property_address_state: null, identity_alignment: verified }),
+      makeCandidate(41, { canonical_e164: UNPLACED_PHONE(41), timezone: null, property_address_state: null, identity_alignment: verified }),
       { template_use_case: "ownership_check", within_contact_window_now, now: IN_WINDOW_CHICAGO },
       deps
     );
@@ -482,7 +488,7 @@ test("quiet hours: a lead with no resolved timezone is HELD (TIMEZONE_UNRESOLVED
 
   // Through normalizeCandidateRow, which still stamps America/Chicago on
   // candidate.timezone for scheduling: the eligibility check ignores that default.
-  const normalized = normalizeCandidateRow(makeCandidate(42, { timezone: null, property_address_state: null }));
+  const normalized = normalizeCandidateRow(makeCandidate(42, { canonical_e164: UNPLACED_PHONE(42), timezone: null, property_address_state: null }));
   assert.equal(normalized.timezone, "America/Chicago");
   assert.equal(normalized.stored_timezone, null);
   const held_normalized = await evaluateCandidateEligibility(
@@ -495,7 +501,7 @@ test("quiet hours: a lead with no resolved timezone is HELD (TIMEZONE_UNRESOLVED
 
   // A lead WITH a zone evaluates normally: eligible inside its hours ...
   const ok = await evaluateCandidateEligibility(
-    makeCandidate(43, { timezone: "America/Chicago", identity_alignment: verified }),
+    makeCandidate(43, { canonical_e164: CENTRAL_PHONE(43), timezone: "America/Chicago", identity_alignment: verified }),
     { template_use_case: "ownership_check", within_contact_window_now: true, now: IN_WINDOW_CHICAGO },
     deps
   );
@@ -503,7 +509,7 @@ test("quiet hours: a lead with no resolved timezone is HELD (TIMEZONE_UNRESOLVED
   assert.equal(ok.contact_window.timezone, "America/Chicago");
   // ... and outside them it is the ordinary contact-window block, not a hold.
   const early = await evaluateCandidateEligibility(
-    makeCandidate(44, { timezone: "America/Chicago", identity_alignment: verified }),
+    makeCandidate(44, { canonical_e164: CENTRAL_PHONE(44), timezone: "America/Chicago", identity_alignment: verified }),
     { template_use_case: "ownership_check", within_contact_window_now: true, now: BEFORE_OPEN_CHICAGO },
     deps
   );

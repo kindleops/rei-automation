@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { stampOutboundQuestionKind } from '@/lib/domain/queue/outbound-question-kind.js'
 import { isTemplateHoldReason } from '@/lib/domain/campaigns/campaign-template-hold.js'
 import { cappedSendableTemplateIds, governanceApplies, governanceExcludedTemplateIds, loadGovernance, loadTemplateUsedToday, UNGOVERNED_POLICY } from '@/lib/domain/campaigns/template-governance.js'
 import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
@@ -99,6 +100,7 @@ import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stag
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import { CAMPAIGN_CAP_COLUMNS, isValidCampaignCapInput, parseCampaignCap, zeroCampaignCaps } from '@/lib/domain/campaigns/campaign-caps.js'
+import { HOLD_CAPABILITIES, loadActiveAutomationHolds, matchAutomationHolds } from '@/lib/domain/holds/automation-hold.js'
 import {
   acquireCampaignExecutionLock,
   checkpointCampaignHydration,
@@ -4261,7 +4263,7 @@ export { resolveCampaignTargetReadiness }
 // resolveCampaignTargetReadiness lives in campaign-target-readiness.js (one
 // per-row readiness truth, shared with Entity Graph's eligibility column).
 
-function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
+export function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
   /**
    * The person the target refers to, in canonical terms first.
@@ -4361,7 +4363,14 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
         to_phone_number: row.canonical_e164,
         market: row.market,
         state: row.state,
-        language: row.language,
+        // rc-8.5.21 (row 8992ba40): ONE language truth. The snapshot carries the SAME resolved
+        // language as the target (prospect / master_owner first, then the graph), plus the graph's
+        // own value and a conflict flag, so no reader can pick a different language than the
+        // template assignment did.
+        language: clean(row.resolved_language || row.language) || null,
+        graph_language: clean(row.language) || null,
+        language_source: clean(row.resolved_language_source) || (clean(row.language) ? 'graph' : 'unknown'),
+        language_conflict: Boolean(clean(row.resolved_language) && clean(row.language) && clean(row.resolved_language).toLowerCase() !== clean(row.language).toLowerCase()),
         timezone: row.timezone,
         contact_window: row.contact_window,
         owner_name: row.owner_name,
@@ -8206,6 +8215,8 @@ const PLAN_SKIP_LABELS = Object.freeze({
   active_queue_row_exists: 'already queued',
   prior_contacted_suppression: 'already contacted',
   prior_reply_not_owner: 'replied not the owner',
+  ownership_property_unresolved_hold: 'ownership denial, property unresolved (held for review)',
+  ownership_declined_unverified_hold: 'declined, ownership unverified (held for this property)',
   graph_suppression_or_queue_block: 'suppressed',
   duplicate_phone_in_launch_batch: 'duplicate phone',
   per_sender_cap_reached: 'sender daily cap reached',
@@ -8794,7 +8805,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       ...(openerReplyFacts.get(phoneLookupKey) || {}),
     })
     if (notOwner.excluded) {
-      recordSkip('prior_reply_not_owner', target, { scope: notOwner.scope, signal: notOwner.signal, source: notOwner.source })
+      // owner rule 2 (2026-10-17): an unidentified-property denial HOLDS the target for operator
+      // resolution — skipped under its own reason, never counted as "replied not the owner"
+      recordSkip(notOwner.hold ? 'ownership_property_unresolved_hold' : notOwner.declined ? 'ownership_declined_unverified_hold' : 'prior_reply_not_owner', target, { scope: notOwner.scope, signal: notOwner.signal, source: notOwner.source })
       continue
     }
     if (candidate.true_post_contact_suppression || candidate.wrong_number || candidate.pending_prior_touch || candidate.active_queue_item) {
@@ -9097,6 +9110,41 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
            * all eleven other conditions.
            */
           origin_surface: 'internal_canary',
+        }
+      }
+
+      // rc-8.5.15.1: this batch bypasses the canonical writer, so it stamps
+      // metadata.question_kind itself (the repeat-asking-price guard keys on it).
+      for (const queueRow of queueRows) {
+        queueRow.metadata = stampOutboundQuestionKind(queueRow)
+      }
+
+      // AUTOMATION HOLD (P0 2026-10-16): this batch bypasses the canonical
+      // writer, so the hold is applied here: held threads / properties / owners
+      // never get a campaign row. One read of the (tiny) active hold set; a
+      // failed read aborts the hydration (fail closed) rather than enqueueing
+      // around it. The send_queue trigger backs this up.
+      {
+        const holdSet = await loadActiveAutomationHolds({ supabase })
+        if (!holdSet.ok) throw new Error(`automation_hold_lookup_failed: ${holdSet.error || 'unknown'}`)
+        // Always matched: matchAutomationHolds also applies the static permanent exclusions.
+        const kept = queueRows.filter((r) => !matchAutomationHolds(holdSet.holds, { thread_key: r?.thread_key || r?.to_phone_number, property_id: r?.property_id, master_owner_id: r?.master_owner_id }, HOLD_CAPABILITIES.CAMPAIGN).length)
+        if (kept.length !== queueRows.length) {
+          console.warn('[CAMPAIGN_ROWS_EXCLUDED_BY_AUTOMATION_HOLD]', { campaign_id: campaignId, excluded: queueRows.length - kept.length })
+          queueRows.splice(0, queueRows.length, ...kept)
+        }
+      }
+
+      // CONTACT RESTRICTIONS (rc-8.5.21 v3 P0-C, RT-47): this batch bypasses the canonical writer, so
+      // it applies the writer's restriction check itself — a suppressed / opted-out / precautionary-held
+      // phone, a property-denied / declined / do-not-contact property × contact, an ownership thread
+      // hold never gets a campaign row. A failed read throws (fail closed).
+      {
+        const { filterBulkRowsByContactRestrictions } = await import('@/lib/domain/queue/enqueue-contact-restrictions.js')
+        const verdict = await filterBulkRowsByContactRestrictions(queueRows, { supabase })
+        if (verdict.refused.length) {
+          console.warn('[CAMPAIGN_ROWS_REFUSED_BY_CONTACT_RESTRICTIONS]', { campaign_id: campaignId, refused: verdict.refused.length, reasons: [...new Set(verdict.refused.map((r) => r.guard_reason))] })
+          queueRows.splice(0, queueRows.length, ...verdict.kept)
         }
       }
 

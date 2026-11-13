@@ -56,6 +56,8 @@ export const NURTURE_TEMPLATE_CANDIDATES = Object.freeze({
   conditional_interest: ["consider_selling_follow_up", "not_ready", "consider_selling"],
   maybe_depends_on_price: ["consider_selling_follow_up", "not_ready", "seller_asking_price"],
   need_time: ["not_ready", "consider_selling_follow_up", "consider_selling"],
+  // rc-8.5.21: a seller-requested check-back — the re-engagement family only, never the S1 pool
+  seller_callback: ["not_ready", "consider_selling_follow_up"],
   unclear: ["soft_followup", "consider_selling_follow_up", "consider_selling"],
 });
 
@@ -337,7 +339,15 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
    *   QUARANTINED COPY IS UNREACHABLE. Demoted templates are excluded here,
    *   which is what makes quarantine mean anything at dispatch time.
    */
-  const rowLanguage = clean(queue_row.language) || "English";
+  // P0 2026-10-19 (owner rule: never fall back to English for a non-English contact): the row's
+  // OWN language — column, then metadata — or a hold for a person. Never English by default.
+  const rowLanguage = clean(
+    queue_row.language || meta.language || meta.selected_template_language || meta.template_language
+  );
+  if (!rowLanguage) {
+    warn("[ROTATION_LANGUAGE_UNKNOWN_HOLD]", { queue_row_id: queue_row.id || null, use_case });
+    return { ok: true, resolved: false, hold: true, use_case, reason: "rotation_language_unknown" };
+  }
   const stage_code = clean(meta.stage_code || queue_row.current_stage_code || meta.current_stage_code);
 
   let query = supabase

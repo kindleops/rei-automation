@@ -59,7 +59,8 @@ with pending_send as (
         when s.is_suppressed = true then 'suppressed'
         when lower(coalesce(s.disposition, '')) = any (array['wrong_number','wrong_person']) then 'dead'
         -- 7.2: sold / unqualified close the thread for this property
-        when lower(coalesce(s.disposition, '')) = any (array['sold','unqualified']) then 'dead'
+        -- owner 2026-10-17: declined_unverified (ownership unverified) also closes it — never follow_up
+        when lower(coalesce(s.disposition, '')) = any (array['sold','unqualified','declined_unverified']) then 'dead'
         when lower(coalesce(s.disposition, '')) = 'not_interested' then 'follow_up'
         when s.latest_direction = 'inbound' then 'new_replies'
         else 'cold'
@@ -78,15 +79,15 @@ with pending_send as (
     f.f_disposition = any (array['wrong_number','wrong_person']) as f_wrong_number_contact,
     f.f_delivery = '' or f.f_delivery = any (array['sent','delivered','accepted','queued','pending','sending','submitted','delivery_unknown']) as f_delivery_ok,
     f.f_out_at is not null and (f.last_inbound_at is null or f.last_inbound_at < f.f_out_at) as f_outbound_last_no_reply,
-    f.f_disposition = any (array['sold','unqualified']) as f_closed_disposition,
+    f.f_disposition = any (array['sold','unqualified','declined_unverified']) as f_closed_disposition,
     -- 8.5: every NON-ACTIONABLE latest reply (reply-actionability.js NON_ACTIONABLE_REPLY_INTENTS)
-    f.f_last_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_reply_resolved,
-    f.f_thread_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_thread_resolved,
+    f.f_last_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','ownership_declined_unverified','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_reply_resolved,
+    f.f_thread_intent = any (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','ownership_declined_unverified','need_time','asking_price_implausible','acknowledgement','reaction_only']) as f_thread_resolved,
     -- 8.5: PRIORITY_REPLY_INTENTS / POSITIVE_REPLY_INTENTS
     f.f_thread_intent = any (array['asking_price_provided','asks_offer','contract_requested','seller_interested','callback_requested','voicemail_call_request']) as f_priority_intent,
     f.f_thread_intent = any (array['asking_price_provided','asks_offer','contract_requested','seller_interested','callback_requested','voicemail_call_request','ownership_confirmed','latent_interest','condition_disclosed']) as f_positive_intent,
     -- 8.5: a parked nurture re-opens on a later understood, actionable reply
-    (f.f_last_intent <> all (array['', 'unclear']) and f.f_last_intent <> all (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','need_time','asking_price_implausible','acknowledgement','reaction_only'])) as f_reopening_reply,
+    (f.f_last_intent <> all (array['', 'unclear']) and f.f_last_intent <> all (array['opt_out','hostile_or_legal','hostile_or_troll','wrong_number','wrong_person','property_specific_non_owner','tenant_respondent','former_owner_respondent','sold_property','not_interested','ownership_declined_unverified','need_time','asking_price_implausible','acknowledgement','reaction_only'])) as f_reopening_reply,
     f.f_direction = 'inbound' and coalesce(f.last_inbound_at, f.latest_message_at) is not null
       and (f.last_outbound_at is null or coalesce(f.last_inbound_at, f.latest_message_at) >= f.last_outbound_at) as f_unanswered,
     f.f_last_intent = any (array['reaction_only','acknowledgement']) as f_nonengagement_latest
