@@ -137,6 +137,16 @@
     // flipped LAST), and then only ARMED rules evaluate. Send-incapable.
     "CRON_SIGNAL_EVALUATE_ENABLED": "true",
     "SIGNAL_CENTER_ENABLED": "true",
+    // AGNTEI AGENT TEXTS (Action Gateway executor). Job flag: the */1 lane calls
+    // /api/internal/agent/runtime/tick (CRON_SECRET auth). Container ceilings:
+    // AGENT_RUNTIME_ENABLED (with the AGENT_ENABLED secret) arms the tick,
+    // LC_ACTION_GATEWAY_EXECUTION registers the action_gateway.execute kind.
+    // Inert until the DB opens it: agent.runtime_limits runtime_enabled,
+    // emergency_stop and kind_limits, plus ai_agent_text_enabled and the
+    // gateway grant tiers; every send still passes the queue's operator brakes.
+    "CRON_AGENT_RUNTIME_ENABLED": "true",
+    "AGENT_RUNTIME_ENABLED": "1",
+    "LC_ACTION_GATEWAY_EXECUTION": "1",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",

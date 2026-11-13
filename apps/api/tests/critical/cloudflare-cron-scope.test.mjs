@@ -117,9 +117,11 @@ const EG_OVERVIEW_SNAPSHOT_JOB_PATHS = ["/api/internal/entity-graph/overview-sna
 
 /**
  * R2 agent runtime tick (Intelligence 2.0) — registered on the send-incapable
- * "*\/1" lane, NOT commissioned: CRON_AGENT_RUNTIME_ENABLED and the container
- * ceiling AGENT_RUNTIME_ENABLED are absent from every wrangler config. Writes
- * only schema agent; runs only registered deterministic handlers.
+ * "*\/1" lane. Commissioned in PRODUCTION only for agntei agent texts
+ * (CRON_AGENT_RUNTIME_ENABLED + the container ceilings AGENT_RUNTIME_ENABLED and
+ * LC_ACTION_GATEWAY_EXECUTION); absent from staging. The DB (agent.runtime_limits)
+ * decides what is claimed; the action_gateway.execute kind enqueues through the
+ * canonical send paths, under every queue brake.
  */
 const AGENT_RUNTIME_JOB_PATHS = ["/api/internal/agent/runtime/tick"];
 
@@ -285,6 +287,9 @@ test("production declares the reconciliation and send schedules, and only approv
   assert.deepEqual(
     enabled.sort(),
     [
+      // agntei agent texts: the R2 runtime tick (Action Gateway executor), commissioned in the
+      // agent-text release. Inert until agent.runtime_limits opens it (see the */1 lane test).
+      "CRON_AGENT_RUNTIME_ENABLED",
       // Campaign execution, operator-commissioned 2026-09-28.
       "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED",
       "CRON_CAMPAIGN_FEED_ENABLED",
@@ -490,7 +495,7 @@ test("the Notification Center projector rides its own lane at 30 s: commissioned
   assert.notEqual((await configVars(STAGING)).CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true", "staging shares the production DB: no projector");
 });
 
-test("the R2 agent runtime tick rides the send-incapable */1 lane, never the send lane, and is switched OFF everywhere (flag + ceiling default-deny)", async () => {
+test("the R2 agent runtime tick rides the send-incapable */1 lane, never the send lane; commissioned in production only (flag + ceilings), OFF in staging", async () => {
   const code = await workerCode();
   const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
   const lane = table[1].match(/"\*\/1 \* \* \* \*":\s*\[([^\]]*)\]/);
@@ -509,11 +514,18 @@ test("the R2 agent runtime tick rides the send-incapable */1 lane, never the sen
   // ceiling into the container (tests/critical/agent-research-redteam.test.mjs asserts it never is). Production's
   // decision stands; RC 8.5.15's forward would need the owner's explicit change to that list.
   assert.ok(!list[1].includes('"AI_CONVERSATION_SHADOW_ENABLED"'), "the conversation shadow ceiling is NOT forwarded (production decision)");
-  for (const cfg of [PRODUCTION, STAGING]) {
-    const vars = await configVars(cfg);
-    assert.notEqual(vars.CRON_AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
-    assert.notEqual(vars.AGENT_RUNTIME_ENABLED, "true", "not commissioned: the owner flips this");
-    assert.notEqual(vars.AI_CONVERSATION_SHADOW_ENABLED, "true", "not commissioned: the owner flips this");
+  // agntei agent texts: PRODUCTION commissions the tick (job flag + runtime ceiling + the Action Gateway executor
+  // ceiling, which the reviewed allowlist forwards). The DB still decides: agent.runtime_limits runtime_enabled /
+  // emergency_stop / kind_limits, ai_agent_text_enabled and the gateway grant tiers. STAGING stays uncommissioned.
+  assert.ok(list[1].includes('"LC_ACTION_GATEWAY_EXECUTION"'), "the executor ceiling is forwarded by the reviewed allowlist");
+  const prod = await configVars(PRODUCTION);
+  assert.equal(prod.CRON_AGENT_RUNTIME_ENABLED, "true", "production: the tick job flag");
+  assert.equal(prod.AGENT_RUNTIME_ENABLED, "1", "production: the runtime ceiling");
+  assert.equal(prod.LC_ACTION_GATEWAY_EXECUTION, "1", "production: the Action Gateway executor ceiling");
+  assert.notEqual(prod.AI_CONVERSATION_SHADOW_ENABLED, "true", "not commissioned: the owner flips this");
+  const staging = await configVars(STAGING);
+  for (const k of ["CRON_AGENT_RUNTIME_ENABLED", "AGENT_RUNTIME_ENABLED", "LC_ACTION_GATEWAY_EXECUTION", "AI_CONVERSATION_SHADOW_ENABLED"]) {
+    assert.ok(!["true", "1", "on"].includes(String(staging[k] ?? "").toLowerCase()), `staging: ${k} not commissioned`);
   }
 });
 

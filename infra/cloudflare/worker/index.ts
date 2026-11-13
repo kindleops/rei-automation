@@ -261,6 +261,11 @@ const AGENT_FORWARDED_VARS = [
   "AGENT_USER_DAILY_RUNS",
   // R2 persistent runtime ceiling (default off): the tick route is inert without it.
   "AGENT_RUNTIME_ENABLED",
+  // Action Gateway executor ceiling (born off): registers the action_gateway.execute kind (agntei agent texts
+  // and the other gateway actions) in the runtime tick. Necessary, never sufficient: the DB gates
+  // agent.runtime_limits (runtime_enabled, emergency_stop, kind_limits), system_control ai_agent_text_enabled
+  // and the gateway's grant tiers still decide whether anything is claimed or sent.
+  "LC_ACTION_GATEWAY_EXECUTION",
   // PACKAGE A research runtime (hotfix/research-runtime; each default off, all SEND-INCAPABLE): register the
   // property.research / valuation.refresh (dry run) / operations handlers. The DB (agent.runtime_limits
   // kind_limits, runtime_enabled, emergency_stop) still decides whether any of them is claimed.
@@ -382,6 +387,7 @@ interface Env {
   AGENT_RATE_READS_PER_MIN?: string;
   AGENT_USER_DAILY_RUNS?: string;
   AGENT_RUNTIME_ENABLED?: string;
+  LC_ACTION_GATEWAY_EXECUTION?: string;
   PROPERTY_RESEARCH_ENABLED?: string;
   VALUATION_REFRESH_ENABLED?: string;
   AGENT_OPERATIONS_ENABLED?: string;
