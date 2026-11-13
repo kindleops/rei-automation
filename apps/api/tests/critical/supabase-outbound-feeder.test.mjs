@@ -59,6 +59,9 @@ const baseCandidate = {
   canonical_e164: "+15550001234",
   market: "test_market",
   state: "tx",
+  // Quiet hours: TX is split-zone, so state alone does not place the lead and
+  // the feeder would hold it (TIMEZONE_UNRESOLVED). The zone is explicit.
+  timezone: "America/Chicago",
   seller_first_name: "Test",
   seller_full_name: "Test Seller",
   owner_display_name: "Test Seller",
