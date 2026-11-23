@@ -7,9 +7,12 @@ import { child } from '@/lib/logging/logger.js'
 import { resolveInboxSchedule } from '@/lib/domain/inbox/resolve-inbox-schedule.js'
 import {
   evaluateReleaseGate,
+  finalGateFactsApply,
   isHistoricalRow,
   isPausedReviewRow,
+  loadRowHistoryFacts,
 } from '@/lib/domain/queue/final-dispatch-gate.js'
+import { signOwnerRelease } from '@/lib/domain/queue/owner-release-signature.js'
 
 const logger = child({ module: 'cockpit.cockpit_service' })
 
@@ -238,14 +241,33 @@ async function loadThreadLastInboundAt(row, supabase) {
   }
 }
 
+// The audit event IS half of the release: the final dispatch gate refuses a
+// signed release whose matching QUEUE_OWNER_RELEASE event (same dedupe key,
+// row, actor, time and signature) it cannot read.
 async function defaultReleaseAudit(entry, { supabase }) {
   const { error } = await supabase.from('automation_events').insert({
     event_type: 'QUEUE_OWNER_RELEASE',
-    dedupe_key: `queue_owner_release:${entry.queue_item_id}:${entry.at}`,
+    dedupe_key: entry.audit_key || `queue_owner_release:${entry.queue_item_id}:${entry.at}`,
     queue_item_id: entry.queue_item_id,
+    status: 'completed',
+    source: 'cockpit_owner_release',
     payload: entry,
   })
   return { ok: !error, error: error?.message || null }
+}
+
+/**
+ * The marker-independent history (send_queue_status_history,
+ * send_authority_events) in production; null in the legacy test runtime with
+ * a fake client (the same precedent as the final gate's live reads).
+ */
+async function loadReleaseHistory(row, supabase) {
+  try {
+    if (!(await finalGateFactsApply(supabase))) return null
+    return await loadRowHistoryFacts(row, { supabase })
+  } catch {
+    return { history_error: 'history_read_failed' }
+  }
 }
 
 async function defaultDispatchGate(row, { supabase }) {
@@ -283,6 +305,11 @@ export async function runQueueAction({
   getValue = getSystemValue,
   releaseAudit = defaultReleaseAudit,
   dispatchGate = defaultDispatchGate,
+  // The authenticated operator principal (cockpit/_shared.js
+  // resolveOperatorPrincipal), built from the verified session by the route.
+  // An owner release is attributed ONLY to operator.id, never to request text.
+  operator = null,
+  env = process.env,
 } = {}) {
   const queueItemId = clean(payload.queue_item_id || payload.queue_id || payload.id)
   const dryRun = asBoolean(payload.dry_run, true)
@@ -319,8 +346,11 @@ export async function runQueueAction({
   // the seller has replied past, or one older than the reauthorization window.
   // Such a row needs the explicit owner release (actor + reason + confirm),
   // which is what the final dispatch gate accepts as a per-row reauthorization.
+  // Round 2: the trigger-written status / freeze history decides as well as the
+  // markers, so a row whose status was flipped back by hand is still historical.
+  const release_history = RELEASING_ACTIONS.has(action) ? await loadReleaseHistory(row, supabase) : null
   const historical = RELEASING_ACTIONS.has(action) && action !== 'owner-release'
-    ? isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase) })
+    ? isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase), history: release_history })
     : { historical: false }
   if (historical.historical) {
     return blockedResponse(action, 'historical_row_requires_owner_release', {
@@ -332,16 +362,30 @@ export async function runQueueAction({
   }
   let release_entry = null
   if (action === 'owner-release') {
-    const releasable = held || isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase) }).historical
+    const releasable = held || isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase), history: release_history }).historical
     if (!releasable) return blockedResponse(action, 'owner_release_row_not_held', { queue_item_id: queueItemId, dry_run: dryRun })
     const ids = Array.isArray(payload.release_ids) ? payload.release_ids.map(clean) : []
-    const actor = clean(payload.actor)
+    // THE ACTOR IS THE LOGGED-IN USER. payload.actor (request text) is ignored.
+    const actor_user_id = operator && operator.authenticated === true ? clean(operator.id) : ''
     const reason = clean(payload.reason)
     if (clean(payload.confirm) !== OWNER_RELEASE_CONFIRM) return blockedResponse(action, 'owner_release_confirmation_missing', { queue_item_id: queueItemId, dry_run: dryRun })
     if (!ids.includes(queueItemId)) return blockedResponse(action, 'owner_release_id_not_listed', { queue_item_id: queueItemId, dry_run: dryRun })
-    if (!actor) return blockedResponse(action, 'owner_release_actor_missing', { queue_item_id: queueItemId, dry_run: dryRun })
+    if (!actor_user_id) return blockedResponse(action, 'owner_release_actor_missing', { queue_item_id: queueItemId, dry_run: dryRun })
     if (!reason) return blockedResponse(action, 'owner_release_reason_missing', { queue_item_id: queueItemId, dry_run: dryRun })
-    release_entry = { queue_item_id: queueItemId, release_ids: ids, actor, reason, previous_status: row.queue_status, at: new Date().toISOString() }
+    const at = new Date().toISOString()
+    // Signed with the server secret over row id, actor, time, reason,
+    // destination and body hash. No key = no release (fail closed).
+    const signed = signOwnerRelease({ row, actor_user_id, reason, at }, env)
+    if (!signed) return blockedResponse(action, 'owner_release_signing_key_unavailable', { queue_item_id: queueItemId, dry_run: dryRun })
+    release_entry = {
+      ...signed,
+      queue_item_id: queueItemId,
+      release_ids: ids,
+      // Kept for the existing audit readers; the same value as actor_user_id.
+      actor: actor_user_id,
+      actor_kind: clean(operator?.kind) || 'ops_dashboard_operator',
+      previous_status: row.queue_status,
+    }
   }
 
   if (RELEASING_ACTIONS.has(action)) {
@@ -440,11 +484,21 @@ export async function runQueueAction({
             // for a row with hold history (final-dispatch-gate.js
             // evaluateReauthorization): bound to this row id, named actor and
             // reason, and stale after 24 h or a later hold or seller reply.
+            // Unforgeable: the gate verifies the HMAC against the row as it is
+            // at dispatch AND reads the matching audit event. A bulk SQL write
+            // of this object cannot produce either.
             reauthorization: {
-              queue_row_id: queueItemId,
-              actor: release_entry.actor,
+              queue_row_id: release_entry.queue_row_id,
+              actor_user_id: release_entry.actor_user_id,
+              actor: release_entry.actor_user_id,
               reason: release_entry.reason,
               at: release_entry.at,
+              to_phone_number: release_entry.to_phone_number,
+              body_sha256: release_entry.body_sha256,
+              signature: release_entry.signature,
+              signature_version: release_entry.signature_version,
+              key_id: release_entry.key_id,
+              audit_key: release_entry.audit_key,
               via: 'cockpit_owner_release',
             },
           }

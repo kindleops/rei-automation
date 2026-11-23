@@ -124,26 +124,49 @@ export async function runLiveTextgridSendVerification({
     };
   }
 
-  // FOUNDER P0 2026-11-23: an allowlist entry is not a licence past suppression.
-  // The same live facts the final dispatch gate reads (suppression, fail closed;
-  // archived / terminal / quarantined / held thread) refuse a verification send
-  // to an allowlisted number that has since become a blocked contact.
+  // FOUNDER P0 2026-11-23 (round 2): the FULL final dispatch gate, the same one
+  // both seam bridges run, immediately before the provider call: brake state
+  // NOW (canonical send authority; an active emergency stop refuses a
+  // verification send too), contact identity (thread = destination), an
+  // operator action id (this run), live suppression and automation
+  // suppression (fail closed), archived / terminal / quarantined / legal /
+  // repair thread, and holds. An allowlist entry is not a licence past any of
+  // them. Path 'manual': an operator asked for this one message now.
   {
-    const { evaluateReleaseGate } = await import("@/lib/domain/queue/final-dispatch-gate.js");
+    const { evaluateFinalDispatchGate } = await import("@/lib/domain/queue/final-dispatch-gate.js");
     let supabase = deps.supabase || null;
     if (!supabase) {
       try { supabase = (await import("@/lib/supabase/client.js")).supabase; } catch { supabase = null; }
     }
-    const facts = await (deps.finalGate || evaluateReleaseGate)(
-      { id: null, to_phone_number: to_e164, thread_key: to_e164, metadata: {} },
-      { supabase }
+    const evaluateAuthority = typeof deps.evaluateAuthority === "function"
+      ? deps.evaluateAuthority
+      : async () => {
+          const { evaluateCanonicalSendAuthority } = await import("@/lib/domain/queue/canonical-send-authority.js");
+          return evaluateCanonicalSendAuthority({
+            getSystemValue: deps.getSystemValue || getSystemValue,
+            action: "verification_textgrid_send",
+            scopedCanary: false,
+          });
+        };
+    const verdict = await (deps.finalGate || evaluateFinalDispatchGate)(
+      {
+        path: "manual",
+        row: null,
+        to: to_e164,
+        from: clean(from) || null,
+        thread_key: to_e164,
+        operator_action_id: run_id,
+        now: deps.now,
+      },
+      { supabase, evaluateAuthority, ...(deps.finalGateReaders || {}) }
     );
-    if (facts?.blocked) {
+    if (!verdict?.ok) {
       return {
         ok: false,
         skipped: true,
         status: 423,
-        reason: `final_gate:${facts.reason || "blocked"}`,
+        reason: `final_gate:${verdict?.reason || "blocked"}`,
+        refusals: Array.isArray(verdict?.refusals) ? verdict.refusals : [],
         run_id,
         client_reference_id,
       };

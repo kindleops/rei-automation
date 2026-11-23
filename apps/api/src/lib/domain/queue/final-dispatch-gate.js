@@ -48,13 +48,55 @@
 // (NODE_ENV !== 'test') ALWAYS reads. The row-level checks (2-5) and the
 // authority (1) and sender continuity (12) run in every runtime.
 
-import { normalizePhone } from "@/lib/utils/phones.js";
+//
+// ROUND 2 (Sentry task_783e03da, CHANGES REQUESTED on ea46238b):
+//
+//   * HISTORY THAT DOES NOT DEPEND ON MARKERS. Production reads, at send time:
+//     the row itself FRESH from send_queue (never the caller's copy), its
+//     trigger-written status history (send_queue_status_history) and the
+//     latest freeze/brake event (send_authority_events). A row is historical,
+//     and needs a fresh signed owner release, when ANY of: created_at missing,
+//     older than 24 h, created before the P0 floor, created at or before the
+//     latest recorded freeze/brake event, no status history, ever in a status
+//     outside the fresh set (paused_global_lock, paused_invalid_queue_row,
+//     failed, held, any paused_* / blocked_* / review / terminal), or the
+//     seller replied after it was written. Unreadable history = historical.
+//     Metadata markers still count, but nothing depends on them any more.
+//   * UNFORGEABLE RELEASE. metadata.reauthorization is accepted only with a
+//     valid server-secret HMAC (owner-release-signature.js) over row id, actor,
+//     time, reason, destination and body hash, AND a matching
+//     QUEUE_OWNER_RELEASE audit event read live. A release is overtaken by any
+//     later non-fresh status, freeze/brake event, hold marker or seller reply.
+//   * CLAIM ACTUALLY HELD. The claim token must match the fresh row's
+//     lock_token and pass queue_verify_dispatch_authorization (the atomic
+//     claim's own verifier).
 
-export const FINAL_DISPATCH_GATE_VERSION = "final_dispatch_gate_v1";
+import { normalizePhone } from "@/lib/utils/phones.js";
+import { verifyOwnerReleaseRecord } from "@/lib/domain/queue/owner-release-signature.js";
+
+export const FINAL_DISPATCH_GATE_VERSION = "final_dispatch_gate_v2";
 
 // A reauthorization is a per-row operator decision. It expires: an approval is
 // not a standing licence, and a seller can reply, opt out or move on after it.
 export const REAUTHORIZATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// The founder freeze (2026-11-23). Every row created before it is historical,
+// whatever the database history says. The migration's floor event moves the
+// effective floor to the moment it is applied.
+export const P0_HISTORICAL_FLOOR_AT = "2026-11-23T00:00:00.000Z";
+
+// The only statuses a row may have passed through and still be "fresh".
+// Anything else in its history (paused_global_lock, paused_invalid_queue_row,
+// failed, held, paused_*, blocked_*, review, quarantine, expired, cancelled,
+// sent ...) makes it historical.
+export const FRESH_HISTORY_STATUSES = Object.freeze(new Set([
+  "draft", "pending", "pending_send", "queued", "scheduled", "ready", "approved",
+  "processing", "sending", "claimed", "in_flight", "dispatching",
+  // A newly written row awaiting its FIRST human approval (shell telemetry,
+  // workflow activity). The per-row Cockpit approve of a fresh row is that
+  // authorization; it is not a hold the row is being revived from.
+  "approval",
+]));
 
 export const GATE_REASONS = Object.freeze({
   AUTHORITY_UNAVAILABLE: "final_gate_authority_unavailable",
@@ -66,6 +108,11 @@ export const GATE_REASONS = Object.freeze({
   IDENTITY_MISMATCH: "final_gate_contact_identity_mismatch",
   IDENTITY_UNPROVEN: "final_gate_contact_identity_unproven",
   CLAIM_MISSING: "final_gate_dispatch_claim_missing",
+  CLAIM_NOT_HELD: "final_gate_dispatch_claim_not_held",
+  ROW_UNREADABLE: "final_gate_queue_row_unreadable",
+  HISTORY_UNREADABLE: "final_gate_row_history_unreadable",
+  RELEASE_INVALID: "final_gate_owner_release_invalid",
+  RELEASE_AUDIT_MISSING: "final_gate_owner_release_audit_missing",
   OPERATOR_ACTION_MISSING: "final_gate_operator_action_missing",
   SUPPRESSION_UNREADABLE: "final_gate_suppression_unreadable",
   SUPPRESSED: "final_gate_phone_suppressed",
@@ -193,28 +240,100 @@ export function rowHoldHistory(row = {}) {
 }
 
 /**
- * Is there an explicit, fresh, per-row authorization that post-dates every
- * hold marker and every seller inbound? Only an operator path writes
- * `metadata.reauthorization` (Cockpit owner-release); no release path does.
+ * MARKER-INDEPENDENT history verdict (pure). `status_history` is the row's
+ * send_queue_status_history entries ({ from_status, to_status, changed_at });
+ * `latest_authority_event_at` is the newest send_authority_events.changed_at.
+ * Both come from triggers, so a hand-written UPDATE cannot skip them.
  */
-export function evaluateReauthorization(row = {}, { now = Date.now(), last_inbound_at = null, max_age_ms = REAUTHORIZATION_MAX_AGE_MS } = {}) {
+export function historicalVerdict(row = {}, {
+  now = Date.now(),
+  last_inbound_at = null,
+  status_history = [],
+  latest_authority_event_at = null,
+  max_age_ms = REAUTHORIZATION_MAX_AGE_MS,
+} = {}) {
+  const reasons = [];
+  const created = ts(row?.created_at);
+  const nowMs = toMs(now);
+  if (!created) reasons.push("created_at_unknown");
+  else {
+    if (nowMs - created > max_age_ms) reasons.push("row_older_than_reauthorization_window");
+    if (created < ts(P0_HISTORICAL_FLOOR_AT)) reasons.push("created_before_p0_floor");
+    const freeze = ts(latest_authority_event_at);
+    if (freeze && created <= freeze) reasons.push("created_before_latest_freeze_or_brake_event");
+    const inbound = ts(last_inbound_at);
+    if (inbound && inbound > created) reasons.push("seller_replied_after_row_written");
+  }
+  const entries = Array.isArray(status_history) ? status_history : [];
+  if (!entries.length) reasons.push("status_history_absent");
+  const ever = new Set();
+  for (const e of entries) {
+    for (const s of [e?.from_status, e?.to_status]) {
+      const st = lower(s);
+      if (st && !FRESH_HISTORY_STATUSES.has(st)) ever.add(st);
+    }
+  }
+  for (const st of ever) reasons.push(`status_history:${st}`);
+  return { historical: reasons.length > 0, reasons };
+}
+
+/**
+ * Is there an explicit, fresh, per-row, SIGNED owner release that post-dates
+ * every hold marker, every non-fresh status, every freeze/brake event and every
+ * seller inbound, with its audit event on record?
+ *
+ * history_facts (production; absent in the legacy test runtime):
+ *   { loaded, status_history, history_error, latest_authority_event_at,
+ *     authority_error, release_audit: { found, error } }
+ */
+export function evaluateReauthorization(row = {}, { now = Date.now(), last_inbound_at = null, max_age_ms = REAUTHORIZATION_MAX_AGE_MS, history_facts = null, env = process.env } = {}) {
   const history = rowHoldHistory(row);
   // The owner-release record is the authorization itself, not a hold to outlive.
   const holds = history.filter((h) => h.marker !== "owner_release");
-  if (!holds.length) return { required: false, ok: true, history };
+  const hf = history_facts && history_facts.loaded === true ? history_facts : null;
 
-  const r = obj(obj(row?.metadata).reauthorization);
-  const at = ts(r.at);
-  if (!at || !clean(r.actor) || !clean(r.reason) || clean(r.queue_row_id) !== clean(row?.id)) {
-    return { required: true, ok: false, reason: GATE_REASONS.REAUTHORIZATION_REQUIRED, history };
+  // Unreadable history: nothing can prove the row fresh OR prove a release not
+  // overtaken. Refuse, release or not.
+  if (hf && (hf.history_error || hf.authority_error || !Array.isArray(hf.status_history))) {
+    return { required: true, ok: false, reason: GATE_REASONS.HISTORY_UNREADABLE, history, historical_reasons: ["history_unreadable"] };
   }
+  const hv = hf
+    ? historicalVerdict(row, { now, last_inbound_at, status_history: hf.status_history, latest_authority_event_at: hf.latest_authority_event_at, max_age_ms })
+    : { historical: false, reasons: [] };
+  if (!holds.length && !hv.historical) return { required: false, ok: true, history, historical_reasons: [] };
+
+  const base = { required: true, history, historical_reasons: hv.reasons };
+  const r = obj(obj(row?.metadata).reauthorization);
+  if (!Object.keys(r).length) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_REQUIRED };
+  // A bulk SQL UPDATE of metadata.reauthorization cannot carry a valid HMAC.
+  const sig = verifyOwnerReleaseRecord(r, row, env);
+  if (!sig.ok) return { ...base, ok: false, reason: GATE_REASONS.RELEASE_INVALID, detail: sig.reason };
+
+  const at = ts(r.at);
   const nowMs = toMs(now);
-  if (nowMs - at > max_age_ms) return { required: true, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, history, detail: "expired" };
+  if (at > nowMs + 5 * 60 * 1000) return { ...base, ok: false, reason: GATE_REASONS.RELEASE_INVALID, detail: "release_in_future" };
+  if (nowMs - at > max_age_ms) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, detail: "expired" };
   const newestHold = Math.max(0, ...holds.map((h) => ts(h.at) ?? 0));
-  if (newestHold > at) return { required: true, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, history, detail: "hold_after_authorization" };
+  if (newestHold > at) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, detail: "hold_after_authorization" };
   const inbound = ts(last_inbound_at);
-  if (inbound && inbound > at) return { required: true, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, history, detail: "seller_replied_after_authorization" };
-  return { required: true, ok: true, history };
+  if (inbound && inbound > at) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, detail: "seller_replied_after_authorization" };
+
+  if (hf) {
+    // Status flipped to a hold (or failed, or terminal) AFTER the release, even
+    // if someone then flipped it back by hand: the release is overtaken.
+    const heldAfter = hf.status_history.some((e) => {
+      const st = lower(e?.to_status);
+      const t = ts(e?.changed_at);
+      return st && !FRESH_HISTORY_STATUSES.has(st) && t && t > at;
+    });
+    if (heldAfter) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, detail: "status_hold_after_authorization" };
+    const freeze = ts(hf.latest_authority_event_at);
+    if (freeze && freeze > at) return { ...base, ok: false, reason: GATE_REASONS.REAUTHORIZATION_STALE, detail: "freeze_or_brake_event_after_authorization" };
+    const audit = obj(hf.release_audit);
+    if (audit.error) return { ...base, ok: false, reason: GATE_REASONS.HISTORY_UNREADABLE, detail: "release_audit_unreadable" };
+    if (audit.found !== true) return { ...base, ok: false, reason: GATE_REASONS.RELEASE_AUDIT_MISSING };
+  }
+  return { ...base, ok: true };
 }
 
 // ── identity ─────────────────────────────────────────────────────────────────
@@ -318,19 +437,34 @@ export function decideFinalDispatch(facts = {}) {
   if (!facts.authority || typeof facts.authority !== "object") push(GATE_REASONS.AUTHORITY_UNAVAILABLE);
   else if (facts.authority.ok !== true) push(clean(facts.authority.reason) || GATE_REASONS.AUTHORITY_UNAVAILABLE);
 
-  const row = obj(facts.row);
+  const loaded = facts.facts_loaded !== false;
+  // The row as it is NOW (read fresh from send_queue), never only the caller's
+  // copy: a status or metadata change after the caller read the row counts.
+  if (loaded && facts.row_error) push(GATE_REASONS.ROW_UNREADABLE);
+  const row = obj(loaded && facts.fresh_row ? facts.fresh_row : facts.row);
   // 2. queue row status
   push(rowStatusRefusal(row));
-  // 3. no automatic reactivation
-  const reauth = evaluateReauthorization(row, { now: facts.now, last_inbound_at: facts.thread?.last_inbound_at || null });
+  // 3. no automatic reactivation (markers AND, in production, the
+  //    trigger-written status / freeze history, plus a signed, audited release)
+  const reauth = evaluateReauthorization(row, {
+    now: facts.now,
+    last_inbound_at: facts.thread?.last_inbound_at || null,
+    history_facts: loaded && clean(row.id) ? { loaded: true, ...obj(facts.history) } : null,
+  });
   if (!reauth.ok) push(reauth.reason);
   // 4. contact identity
   push(contactIdentityRefusal({ to: facts.to, thread_key: facts.thread_key, automated }));
   // 5. duplicate-send identity (claim proof; the seam's allocation is atomic)
   if (automated && !clean(facts.claim_token)) push(GATE_REASONS.CLAIM_MISSING);
+  else if (automated && loaded) {
+    // The token must be the claim actually held: equal to the fresh row's
+    // lock_token, and accepted by the atomic claim's own verifier.
+    const c = facts.claim;
+    if (!c || c.ok !== true) push(`${GATE_REASONS.CLAIM_NOT_HELD}${c?.reason ? `:${c.reason}` : ""}`);
+  }
   if (!automated && !clean(facts.operator_action_id)) push(GATE_REASONS.OPERATOR_ACTION_MISSING);
 
-  if (facts.facts_loaded !== false) {
+  if (loaded) {
     // 6. opt-out + hard suppression (fail closed for BOTH automated and manual)
     const s = facts.suppression;
     if (!s || s.lookup_error) push(GATE_REASONS.SUPPRESSION_UNREADABLE);
@@ -367,7 +501,7 @@ export function decideFinalDispatch(facts = {}) {
     ok: refusals.length === 0,
     reason: refusals[0] || null,
     refusals,
-    reauthorization: { required: reauth.required, ok: reauth.ok, markers: reauth.history.map((h) => h.marker) },
+    reauthorization: { required: reauth.required, ok: reauth.ok, markers: reauth.history.map((h) => h.marker), historical_reasons: reauth.historical_reasons || [], detail: reauth.detail || null },
     gate_version: FINAL_DISPATCH_GATE_VERSION,
   };
 }
@@ -395,12 +529,93 @@ async function settle(fn) {
 }
 
 /**
+ * The marker-independent history of one row (production reads; reader
+ * overrides for tests). Never throws; every failure is reported, and the
+ * decision refuses on it.
+ *
+ * @returns {{ status_history, history_error, latest_authority_event_at,
+ *             authority_error, release_audit: { found, error } }}
+ */
+export async function loadRowHistoryFacts(row = {}, deps = {}) {
+  const supabase = deps.supabase || null;
+  const id = clean(row?.id);
+  const out = { status_history: null, history_error: null, latest_authority_event_at: null, authority_error: null, release_audit: { found: false, error: null } };
+  if (!id) return { ...out, history_error: "row_id_missing" };
+  if (!supabase?.from && !(typeof deps.readStatusHistory === "function" && typeof deps.readLatestAuthorityEvent === "function")) {
+    return { ...out, history_error: GATE_REASONS.NO_CLIENT, authority_error: GATE_REASONS.NO_CLIENT };
+  }
+  const reauth = obj(obj(row?.metadata).reauthorization);
+  const [history, authority, audit] = await Promise.all([
+    settle(async () => {
+      if (typeof deps.readStatusHistory === "function") return deps.readStatusHistory(id);
+      const r = await supabase
+        .from("send_queue_status_history")
+        .select("from_status,to_status,changed_at")
+        .eq("queue_row_id", id)
+        .order("changed_at", { ascending: true })
+        .limit(500);
+      if (r?.error) throw r.error;
+      return Array.isArray(r?.data) ? r.data : [];
+    }),
+    settle(async () => {
+      if (typeof deps.readLatestAuthorityEvent === "function") return deps.readLatestAuthorityEvent();
+      const r = await supabase
+        .from("send_authority_events")
+        .select("changed_at,key")
+        .order("changed_at", { ascending: false })
+        .limit(1);
+      if (r?.error) throw r.error;
+      const latest = (r?.data || [])[0];
+      // The migration always writes a floor event; none at all means the
+      // history is not installed, which is not evidence of freshness.
+      if (!latest?.changed_at) throw new Error("send_authority_events_empty");
+      return latest.changed_at;
+    }),
+    settle(async () => {
+      if (!clean(reauth.audit_key) || !clean(reauth.signature)) return { found: false };
+      if (typeof deps.readReleaseAudit === "function") return deps.readReleaseAudit(reauth);
+      const r = await supabase
+        .from("automation_events")
+        .select("id,queue_item_id,payload,created_at")
+        .eq("event_type", "QUEUE_OWNER_RELEASE")
+        .eq("dedupe_key", clean(reauth.audit_key))
+        .limit(5);
+      if (r?.error) throw r.error;
+      const found = (r?.data || []).some((e) =>
+        clean(e?.queue_item_id) === id &&
+        clean(obj(e?.payload).signature) === clean(reauth.signature) &&
+        clean(obj(e?.payload).actor_user_id) === clean(reauth.actor_user_id) &&
+        clean(obj(e?.payload).at) === clean(reauth.at));
+      return { found };
+    }),
+  ]);
+  return {
+    status_history: history.error ? null : history.value,
+    history_error: history.error ? clean(history.error?.message) || "status_history_read_failed" : null,
+    latest_authority_event_at: authority.error ? null : authority.value,
+    authority_error: authority.error ? clean(authority.error?.message) || "authority_events_read_failed" : null,
+    release_audit: audit.error ? { found: false, error: clean(audit.error?.message) || "release_audit_read_failed" } : { found: audit.value?.found === true, error: null },
+  };
+}
+
+/** The row as it is now. Throws on a read error (the caller fails closed). */
+async function readFreshRow(id, supabase, deps) {
+  if (typeof deps.readQueueRow === "function") return deps.readQueueRow(id);
+  const r = await supabase.from("send_queue").select("*").eq("id", id).limit(1);
+  if (r?.error) throw r.error;
+  const row = (r?.data || [])[0];
+  if (!row) throw new Error("queue_row_not_found");
+  return row;
+}
+
+/**
  * Read every live fact the decision needs. Each read is independent and fails
  * closed into the decision (an error becomes the refusal, never a pass).
  */
-export async function loadFinalDispatchFacts({ to = null, thread_key = null, row = null, path = "queue" } = {}, deps = {}) {
+export async function loadFinalDispatchFacts({ to = null, thread_key = null, row = null, path = "queue", claim_token = null } = {}, deps = {}) {
   const supabase = deps.supabase || null;
   if (!(await finalGateFactsApply(supabase))) return { facts_loaded: false };
+  const row_id = clean(row?.id);
   if (!supabase?.from) {
     return {
       facts_loaded: true,
@@ -409,10 +624,38 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
       thread_error: GATE_REASONS.NO_CLIENT,
       campaign_error: GATE_REASONS.NO_CLIENT,
       hold: { fail_closed: true, hold_type: "lookup_error" },
+      ...(row_id ? { row_error: GATE_REASONS.NO_CLIENT, history: { history_error: GATE_REASONS.NO_CLIENT, authority_error: GATE_REASONS.NO_CLIENT } } : {}),
+      claim: { ok: false, reason: GATE_REASONS.NO_CLIENT },
     };
   }
   const dest = normalizePhone(to) || normalizePhone(thread_key);
   const key = normalizePhone(thread_key) || dest;
+
+  // Fresh row first: its metadata names the release audit to look for, and its
+  // lock_token is what the claim token must equal.
+  let fresh_row = null;
+  let row_error = null;
+  if (row_id) {
+    const fr = await settle(() => readFreshRow(row_id, supabase, deps));
+    if (fr.error) row_error = clean(fr.error?.message) || "queue_row_read_failed";
+    else fresh_row = fr.value;
+  }
+  const subject = fresh_row || row;
+
+  const [history, claim] = await Promise.all([
+    row_id ? loadRowHistoryFacts(subject, deps) : Promise.resolve(null),
+    settle(async () => {
+      if (path === "manual" || !clean(claim_token)) return null;
+      if (!row_id) return { ok: false, reason: "claim_row_id_missing" };
+      if (!fresh_row) return { ok: false, reason: "claim_row_unreadable" };
+      if (clean(fresh_row.lock_token) !== clean(claim_token)) return { ok: false, reason: "lock_token_mismatch" };
+      const verify = typeof deps.verifyDispatchClaim === "function"
+        ? deps.verifyDispatchClaim
+        : (await import("@/lib/domain/queue/queue-atomic-claim.js")).verifyDispatchAuthorization;
+      const v = await verify(row_id, clean(claim_token), { supabase });
+      return { ok: v?.ok === true, reason: v?.ok === true ? null : clean(v?.reason) || "dispatch_claim_unverified" };
+    }),
+  ]);
 
   const [suppression, automationSuppression, thread, hold, campaign] = await Promise.all([
     settle(async () => {
@@ -438,19 +681,19 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
       return (r?.data || [])[0] || null;
     }),
     settle(async () => {
-      if (typeof deps.readAutomationHold === "function") return deps.readAutomationHold({ thread_key: key, row });
+      if (typeof deps.readAutomationHold === "function") return deps.readAutomationHold({ thread_key: key, row: subject });
       const { checkAutomationHold } = await import("@/lib/domain/holds/automation-hold.js");
       return checkAutomationHold({
         threadKey: key,
-        propertyId: clean(row?.property_id) || null,
-        masterOwnerId: clean(row?.master_owner_id) || null,
+        propertyId: clean(subject?.property_id) || null,
+        masterOwnerId: clean(subject?.master_owner_id) || null,
         // One capability for both paths; automationHoldRefusal decides which
         // hold types bind a manual send.
         capability: "outbound_send",
       }, { supabase });
     }),
     settle(async () => {
-      const campaign_id = clean(row?.campaign_id);
+      const campaign_id = clean(subject?.campaign_id);
       if (!campaign_id) return null;
       if (typeof deps.readCampaign === "function") return deps.readCampaign(campaign_id);
       const r = await supabase.from("campaigns").select("id,status").eq("id", campaign_id).limit(1);
@@ -461,6 +704,10 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
 
   return {
     facts_loaded: true,
+    fresh_row,
+    row_error,
+    history,
+    claim: claim.error ? { ok: false, reason: "dispatch_claim_verify_failed" } : claim.value,
     suppression: suppression.error ? { lookup_error: clean(suppression.error?.message) || "suppression_read_failed" } : suppression.value,
     automation_suppression: automationSuppression.error ? { error: clean(automationSuppression.error?.message) || "automation_suppression_read_failed" } : automationSuppression.value,
     thread: thread.error ? null : thread.value,
@@ -509,7 +756,7 @@ export async function evaluateFinalDispatchGate(input = {}, deps = {}) {
       sender_continuity = { ok: true, reason: null, delegated: "manual_send_sender_resolution" };
     }
 
-    const loaded = await loadFinalDispatchFacts({ to: input.to, thread_key: input.thread_key, row: input.row, path }, deps);
+    const loaded = await loadFinalDispatchFacts({ to: input.to, thread_key: input.thread_key, row: input.row, path, claim_token: input.claim_token }, deps);
     const verdict = decideFinalDispatch({
       ...loaded,
       path,
@@ -555,8 +802,18 @@ export async function evaluateReleaseGate(row = {}, deps = {}) {
       if (loaded.thread_error) refusals.push(GATE_REASONS.THREAD_STATE_UNREADABLE);
       else { const t = threadStateRefusal(loaded.thread, { automated: true }); if (t) refusals.push(t); }
       const h = automationHoldRefusal(loaded.hold, { automated: true }); if (h) refusals.push(h);
+      if (loaded.row_error) refusals.push(GATE_REASONS.ROW_UNREADABLE);
     }
-    return { ok: refusals.length === 0, blocked: refusals.length > 0, reason: refusals[0] || null, refusals, thread: loaded.thread || null, facts_loaded: loaded.facts_loaded !== false };
+    return {
+      ok: refusals.length === 0,
+      blocked: refusals.length > 0,
+      reason: refusals[0] || null,
+      refusals,
+      thread: loaded.thread || null,
+      facts_loaded: loaded.facts_loaded !== false,
+      // The marker-independent history, for the caller's historical check.
+      history: loaded.history || null,
+    };
   } catch (error) {
     return { ok: false, blocked: true, reason: GATE_REASONS.CHECK_THREW, refusals: [GATE_REASONS.CHECK_THREW], detail: clean(error?.message).slice(0, 200) };
   }
@@ -567,9 +824,18 @@ export async function evaluateReleaseGate(row = {}, deps = {}) {
  * approve / retry)? Hold history, or a seller inbound after the row was written,
  * or older than the reauthorization window.
  */
-export function isHistoricalRow(row = {}, { now = Date.now(), last_inbound_at = null, max_age_ms = REAUTHORIZATION_MAX_AGE_MS } = {}) {
+export function isHistoricalRow(row = {}, { now = Date.now(), last_inbound_at = null, max_age_ms = REAUTHORIZATION_MAX_AGE_MS, history = null } = {}) {
   const holds = rowHoldHistory(row).filter((h) => h.marker !== "owner_release");
   if (holds.length) return { historical: true, reason: "hold_history", markers: holds.map((h) => h.marker) };
+  // Round 2: the trigger-written history decides too (production). Unreadable
+  // history is historical (fail closed).
+  if (history && typeof history === "object") {
+    if (history.history_error || history.authority_error || !Array.isArray(history.status_history)) {
+      return { historical: true, reason: "history_unreadable", markers: [] };
+    }
+    const hv = historicalVerdict(row, { now, last_inbound_at, status_history: history.status_history, latest_authority_event_at: history.latest_authority_event_at, max_age_ms });
+    if (hv.historical) return { historical: true, reason: hv.reasons[0], reasons: hv.reasons, markers: [] };
+  }
   const created = ts(row?.created_at);
   const inbound = ts(last_inbound_at);
   if (created && inbound && inbound > created) return { historical: true, reason: "seller_replied_after_row_written", markers: [] };

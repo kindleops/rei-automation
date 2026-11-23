@@ -171,13 +171,14 @@ test("the dashboard queue runner cannot assert provider-sent state", async () =>
   );
 });
 
-test("the unauthenticated dashboard run endpoint refuses by default", async () => {
+test("the dashboard run endpoint is fenced: it never reaches the runner (founder P0 2026-11-23 round 2)", async () => {
+  // Stronger than the old NEXUS_ALLOW_BACKEND_MUTATION guard: run.ts no longer
+  // imports or calls the runner at all; it authenticates and answers 410.
   const run = await readFile(DASH("api/internal/queue/run.ts"), "utf8");
-  assert.match(run, /NEXUS_ALLOW_BACKEND_MUTATION\s*!==\s*'true'/, "run.ts had no guard and no auth");
-  assert.match(run, /BOUNDARY_VIOLATION/);
-
-  // The guard must precede any call into the runner.
-  const guardAt = run.indexOf("NEXUS_ALLOW_BACKEND_MUTATION");
-  const callAt = run.indexOf("runQueueBatch(");
-  assert.ok(guardAt > -1 && callAt > guardAt, "the boundary check must run before the batch");
+  assert.match(run, /fencedQueueHandler\('run'\)/);
+  assert.doesNotMatch(run, /runQueueBatch\(/);
+  const runner = await readFile(DASH("api/internal/queue/runner.ts"), "utf8");
+  const fenceAt = runner.indexOf("if (QUEUE_RUNNER_FENCED)");
+  const guardAt = runner.indexOf("assertBackendMutationAllowed()", runner.indexOf("export const runQueueBatch"));
+  assert.ok(fenceAt > -1 && guardAt > fenceAt, "the library fence runs before anything else in runQueueBatch");
 });

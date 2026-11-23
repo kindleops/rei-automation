@@ -80,7 +80,18 @@ const assertBackendMutationAllowed = (): void => {
   }
 }
 
+// FENCED (founder P0 2026-11-23, round 2). This library wrote send_queue,
+// message_events and inbox_thread_state with the service role, outside the
+// final dispatch gate. Every caller is refused before any client is created,
+// whatever NEXUS_ALLOW_BACKEND_MUTATION says. The only queue runner is
+// POST /api/internal/queue/run (apps/api). The body below is unreachable and
+// kept only so the proof scripts that import the types still compile.
+export const QUEUE_RUNNER_FENCED = true
+
 export const runQueueBatch = async (caps: Partial<QueueRunCaps> = {}): Promise<any> => {
+  if (QUEUE_RUNNER_FENCED) {
+    return { ok: false, error: 'QUEUE_ROUTE_FENCED', fenced: true, writes: 0, use_instead: 'POST /api/internal/queue/run (apps/api)', requested_caps: caps }
+  }
   assertBackendMutationAllowed()
   const now = new Date().toISOString()
   const resolvedCaps: QueueRunCaps = {

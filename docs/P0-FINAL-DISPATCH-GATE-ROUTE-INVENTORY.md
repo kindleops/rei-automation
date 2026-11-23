@@ -4,6 +4,80 @@ Base: `c6bc61d0` (the production build on `release/cloudflare-production`).
 Scope: founder P0 items 1, 2, 5, 6 and 9 on the LeadCommand production line.
 Nothing in this change sends a message. Nothing has been deployed.
 
+## Round 2 (gate `final_dispatch_gate_v2`): what changed
+
+Sentry review task_783e03da (CHANGES REQUESTED on `ea46238b`) had three blocking items. Here is how each is handled.
+
+1. **The historical check no longer depends on markers.** The migration `apps/api/supabase/migrations/PROPOSED_20261123190000_p0_send_queue_status_history_and_authority_events.sql` adds two append-only tables. Database triggers write them, so no application path, reconcile pass or hand-written `UPDATE` can skip them:
+   - `send_queue_status_history` records every insert and every `queue_status` change on `send_queue`.
+   - `send_authority_events` records every change to a freeze or brake key in `system_control`: `queue_emergency_stop_at`, `queue_emergency_stop_active`, `global_send_shutdown_at`, `queue_processor_mode`, `queue_execution_mode`, `campaign_mode`, `outbound_sms_enabled` and `queue_runner_enabled`. It also holds one **floor event**, written when the migration is applied.
+
+   At send time, the gate reads the row **fresh** from `send_queue`, plus its status history and the latest authority event. It never uses the caller's copy of the row. The row is **historical** if any of these is true:
+   - `created_at` is missing.
+   - The row is older than 24 hours.
+   - It was created before the P0 floor (`2026-11-23T00:00Z`).
+   - It was created at or before the latest freeze or brake event.
+   - It has no status history.
+   - Its history contains any status outside the fresh set (`draft`, `pending`, `pending_send`, `queued`, `scheduled`, `ready`, `approved`, `approval`, `processing`, `sending`, `claimed`, `in_flight`, `dispatching`). That covers `paused_global_lock`, `paused_invalid_queue_row`, `failed`, `held`, `expired`, `cancelled`, every `paused_*` and `blocked_*`, review and quarantine.
+   - The seller replied after the row was written.
+
+   Metadata markers still count, but nothing depends on them. A historical row needs a valid owner release. If any history read fails, the row is refused. Cockpit approve, retry, retry-routing and reschedule use the same trigger history.
+2. **The dashboard app's queue routes are fenced.** See "Dashboard app routes" below.
+3. **The owner release can be reached and cannot be forged.**
+   - **The route:** `POST /api/cockpit/queue/owner-release` (`apps/api/src/app/api/cockpit/queue/owner-release/route.js`). Before this change, no HTTP route reached the owner-release action at all.
+   - **Authentication:** the request must carry the Worker-attached `x-ops-dashboard-secret` header (header path only, no cookie). It must also carry the Worker-stamped, session-verified `x-ops-user-id`, and that user must be in `OPS_ALLOWED_USER_IDS`, which the route re-checks itself. An empty allowlist authorizes nobody.
+   - **The actor is the logged-in user.** Body fields that name a person are ignored.
+   - **The signature:** the release is an HMAC-SHA256, made with a server secret, over the row id, actor user id, time, reason, destination and a SHA-256 hash of the message body (`owner-release-signature.js`).
+   - **The audit event:** the same signed record is written first as a `QUEUE_OWNER_RELEASE` audit event in `automation_events`.
+   - **What the gate checks:** the signature against the row as it is now, and that the matching audit event exists (same dedupe key, row, actor, time and signature). A bulk SQL write of `metadata.reauthorization` cannot produce either. A signature copied from another row, another recipient or an edited message fails.
+   - **When a release stops counting:** after 24 hours, or when any of these comes after it: a non-fresh status (even one flipped back by hand), a freeze or brake event, a hold marker, or a seller reply.
+   - **The key:** `QUEUE_OWNER_RELEASE_SECRET` if it is set. Otherwise a key derived from `CRON_SECRET`, which the production Worker already forwards to the container. No key means no release can be signed and none verifies.
+
+Also fixed:
+- `live-textgrid.js` now runs the full `evaluateFinalDispatchGate` (path `manual`, operator action id = run id): brake state now, identity, suppression, thread and holds. Before, it ran only the release preview.
+- The manual bridge's row is re-read fresh by the gate. The code was fixed, and the comment now says so.
+- The campaign-resume hold pages through every row (keyset by id, 500 per page). The 10,000 cap is gone, and a page that cannot be read refuses the resume.
+- The claim token must equal the fresh row's `lock_token`. It must also pass `queue_verify_dispatch_authorization`, the atomic claim's own verifier.
+
+## Deploy order (required)
+
+The brake (`queue_emergency_stop_at`) stays set throughout.
+
+1. **Apply the migration** `PROPOSED_20261123190000_p0_send_queue_status_history_and_authority_events.sql`. This needs operator approval. It installs the triggers and writes the floor event. From then on, every row that already exists is historical.
+2. **Deploy the API build** that contains `final_dispatch_gate_v2`.
+3. **Set the signing key.** Set `QUEUE_OWNER_RELEASE_SECRET` as a Worker secret and add it to the container allowlist in `infra/cloudflare/worker/index.ts`. That is an infra edit outside this change. Until then, the key derived from `CRON_SECRET` is used.
+4. **Verify live** before anyone touches the brake:
+   - `SELECT count(*) FROM send_queue_status_history` grows as rows change.
+   - `send_authority_events` has the floor row.
+   - A dry-run owner release returns `ok`.
+5. Only then may anyone touch the brake.
+
+**What happens if the order is wrong:**
+- **Code before migration:** the gate cannot read the tables and refuses every automated send (`final_gate_row_history_unreadable`). This is safe.
+- **Migration before code:** the old code ignores the tables, and the brake is still set, so nothing sends.
+- **Brake lifted immediately after deploy:** the lift writes a newer authority event. Every row created before it, including every row from before the deploy (the floor), is historical and needs a signed, audited, per-row owner release. Lifting the brake releases nothing.
+- **Trigger rollback:** new rows have no insert history and are refused. A rollback stops sending; it never widens it.
+
+## Dashboard app routes (`apps/dashboard/api/internal/queue/*`)
+
+| Route | What it did | Now |
+|---|---|---|
+| `retry-failed.ts` | `failed` → `queued` with the service role; only the `NEXUS_ALLOW_BACKEND_MUTATION` guard | **fenced**: `INTERNAL_API_SECRET` auth, then 410, no client created |
+| `reprocess-paused.ts` | `paused_invalid_queue_row` → `queued`; **no authentication** | **fenced** (same) |
+| `reconcile.ts` | rewrote statuses with the service role | **fenced** |
+| `run.ts`, `run-safe-batch.ts` → `runner.ts` | dashboard runner wrote `sent` state, `message_events`, `inbox_thread_state` | **fenced**; `runQueueBatch` also refuses before creating a client |
+| `build-outbound.ts`, `build-followups.ts`, `build-replies.ts` | inserted `send_queue` rows outside the backend enqueue restrictions | **fenced** |
+| `cancel-stale-followups.ts` | wrote `send_queue` with the browser client and no auth | **fenced** |
+
+The shared fence is `apps/dashboard/api/_lib/queueRouteFence.ts`. Its `_` prefix means Vercel never deploys it as a function. `utils.ts` and `templateSelection.ts` are helper modules with no handler, so they are not routes.
+
+**Are they deployed?**
+- **Production, `ops.leadcommand.ai`:** no. `infra/cloudflare/wrangler.production.jsonc` serves `apps/dashboard/dist` as static assets only. The Worker sends every `/api/*` request to the `apps/api` container (`infra/cloudflare/worker/index.ts`, `fetch`), so these files are never served there.
+- **Vercel:** a Vercel project rooted at `apps/dashboard` (`apps/dashboard/vercel.json`, framework `vite`) builds the `api/` folder as serverless functions. Its rewrites do not cover `/api/internal/queue/*`, so these handlers **would be live on any such deployment**. CORS still lists `nexus-dashboard.vercel.app`. Whether that Vercel project is still deployed cannot be determined from the repository. The fence makes the answer irrelevant.
+- **None of them is needed.** Each has a gated apps/api equivalent: `/api/internal/queue/run`, `/api/internal/queue/reconcile`, `/api/internal/campaigns/feed`, `/api/cockpit/queue/cancel-stale-followups` and `/api/cockpit/queue/owner-release`. This project's boundary rule already says queue mutations run from the backend.
+
+**apps/api routes that re-arm rows:** `/api/cockpit/queue/retry-failed` (`runRetryRunner`) and `/api/internal/queue/retry` can still change a failed row's status. They cannot make it sendable, because `failed` in the status history makes the row historical and the gate refuses it without a signed owner release. `/api/cockpit/queue/reprocess-paused` already answers 501 and writes nothing.
+
 ## The one gate
 
 `apps/api/src/lib/domain/queue/final-dispatch-gate.js#evaluateFinalDispatchGate`
@@ -48,7 +122,7 @@ Checks, in precedence order. The first refusal is the verdict, and all refusals 
 | 8 | Campaign resume (`applyCampaignLifecycleAction` resume) | no send; pre-pause rows are held before the status changes | `no-automatic-reactivation.js#holdCampaignRowsForReauthorization` | P0 suite: campaign resume (hold, fail-closed, ordering) |
 | 9 | Sender-continuity release (runner pre-pass), stale-expiration recovery (`internal/campaigns/recover-stale-expired`), lease redispatch | queue row → runner (1) | queue bridge: their markers are hold history, so a fresh owner release is required (lease redispatch of a provably unsent in-flight row is not a hold; it is re-checked in full) | P0 suite: hold-history refusals |
 | 10 | Cockpit approve / retry / retry-routing / reschedule (`cockpit/queue/*`) | status change → runner (1) | `cockpit-service.js#runQueueAction`: review holds are releasable only by owner release, historical rows are refused, then the shared `evaluateReleaseGate`; at dispatch, the queue bridge | P0 suite: stale approval (old row, hold history, seller replied past, `paused_operator_review`, retry-failed) |
-| 11 | Cockpit owner release (`cockpit/queue` owner-release) | status change → runner (1) | writes `metadata.reauthorization`; the gate expires it | P0 suite: stale approval (fresh, expired, overtaken, forged) |
+| 11 | Cockpit owner release: `POST /api/cockpit/queue/owner-release` (new in round 2; before it, nothing reached this action) | status change → runner (1) | session user as actor; signed `metadata.reauthorization` plus a `QUEUE_OWNER_RELEASE` audit event; the gate verifies both and expires it | P0 suite: stale approval; round-2 suite: forged release (unsigned, random or copied signature, edited body, no audit), overtaken release, route actor |
 | 12 | Cockpit `send_one_queue_row` (`cockpit/queue/control`) | `processSendQueue` → runner (1) | queue bridge; the `clear_one_send_window` brake bypass and the fake control plane are removed | P0 suite: route inventory (`send_one_queue_row`) |
 | 13 | Internal send-now: `POST /api/internal/outbound/send-now` | `buildAndSendNow` → queue row → runner (1) | queue bridge; GET removed (405); phone and text never logged | `send-now-route.test.mjs`; P0 suite: raw-number dispatch (GET 405) |
 | 14 | Inbox manual send: `POST /api/internal/inbox/send-now` | `createInboxSendNowQueueRow` (fail-closed compliance, legal/repair holds) → runner (1) | queue bridge (`operator_attended` for a fresh row) | P0 suite: legal/repair, suppression (contactability); `risk-002-send-now-routes.test.mjs` |
@@ -56,7 +130,7 @@ Checks, in precedence order. The first refusal is the verdict, and all refusals 
 | 15b | Cockpit inbox `queue-reply`, `schedule-reply`, `auto-reply`, `bulk-follow-up` (`runInboxAction`) | queue row → runner (1) | queue bridge | P0 suite (queue bridge cases) |
 | 16 | Discord operator reply: `POST /api/internal/discord/reply-sms` | queue row (operator action) → runner (1) | queue bridge | `s11-crash-race-matrix.test.mjs` (Discord row identity) |
 | 17 | Agent text / negotiation offer (`action-gateway-execution.js`, `negotiation-send.js`; built off) | queue row → runner (1) | queue bridge | P0 suite (queue bridge cases) |
-| 18 | Live TextGrid verification: `POST /api/internal/verification/live/textgrid` (fenced: env flag + system flag + operator allowlist) | `live-textgrid.js` → `sendTextgridSMS` directly | `evaluateReleaseGate` before the provider (suppression fail-closed, archived/terminal/quarantine/hold), plus the adapter's own shutdown and brake | P0 suite: verification send refuses on an unreadable suppression list |
+| 18 | Live TextGrid verification: `POST /api/internal/verification/live/textgrid` (fenced: env flag + system flag + operator allowlist) | `live-textgrid.js` → `sendTextgridSMS` directly | the full `evaluateFinalDispatchGate` (path `manual`; brake now, identity, operator action id, suppression fail-closed, thread, holds) before the provider, plus the adapter's own shutdown and brake | P0 suite: unreadable suppression; round-2 suite: active brake refuses |
 | 19 | `GET /api/dev/force-send` | `sendTextgridSMS` directly | none; returns 404 in production (`NODE_ENV`/`VERCEL_ENV`), unchanged | `seller-send-source-inventory.test.mjs` (TEST_ONLY) |
 
 `seller-send-source-inventory.test.mjs` still pins the provider call sites (`process-send-queue.js`, `send-now-service.js`, `live-textgrid.js`, `dev/force-send`) and the set of queue-row creators. A new direct provider call fails that ratchet.
@@ -73,7 +147,16 @@ Checks, in precedence order. The first refusal is the verdict, and all refusals 
 - **A manual send fails closed** when suppression, thread state, message history or holds cannot be read, and when the thread is quarantined or under a legal or repair hold.
 - **Automated in-session replies hold on an unknown recipient zone.** Previously they were exempt.
 
+## Round 2 behaviour changes an operator will notice
+
+- **Any row older than 24 hours needs an owner release at send time.** This includes follow-ups and nurture written days ahead, which now stop at the gate (`final_gate_reauthorization_required`) until an owner releases them one at a time. This is what the founder order requires. A follow-up design that writes the row close to its send time would avoid it.
+- **Every row that exists when the migration is applied needs an owner release**, and so does every row written before any later brake or freeze change.
+- **An in-session auto-reply is refused if the seller sends another message before it goes out.** The seller replied after the row was written.
+- **Owner release is a Cockpit route.** It needs a signed-in, allowlisted operator, `confirm: "OWNER_RELEASE"`, `release_ids` naming the row, a reason and `dry_run: false`.
+
 ## Known limits
 
-- The brake-history stamp is written by the reconcile pass while the brake is set. A brake set and cleared between two reconcile runs leaves no stamp. Those rows are then judged only by the other checks (row age is not one of them at dispatch). The runner and the cron both run reconcile.
+- **Fixed in round 2:** the brake-history stamp no longer matters. A brake set and cleared between reconcile runs is caught by `send_authority_events` and the 24-hour rule.
+- The live-fact and history reads follow the existing test-runtime precedent. They always run in production. Under `NODE_ENV=test` with a fake client they are skipped unless a suite enforces them, as both P0 suites do. The signature check runs in every runtime.
+- **Not run here:** the round-2 suite (`tests/critical/p0-final-dispatch-gate-round2.test.mjs`) and the updated suites were checked with `node --check` only. The operator runs `test:p0-dispatch-gate` (which now includes the round-2 file and `send-reentry-authority-guards.test.mjs`), `test:send-authority` and the critical suite.
 - The PG-only recovery case in `sender-continuity-8521-pg.test.mjs` ("health recovers ⇒ the release re-queues ⇒ exactly ONE send") asserts an automatic re-queue send. The gate now refuses that send, because sender-continuity release is hold history. That case is skipped without `AGENT_PG_TEST_DB_URL` and needs its expectation changed once a PG run is available.

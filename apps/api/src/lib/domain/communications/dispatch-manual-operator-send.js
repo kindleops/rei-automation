@@ -98,6 +98,9 @@ export async function dispatchManualOperatorSend(input = {}) {
         const verdict = await gate(
           {
             path: 'manual',
+            // Identifies the row only. When it carries an id the gate RE-READS
+            // the row from send_queue (status, metadata, history) and judges
+            // that fresh copy, never this caller-held one (round 2).
             row: input.queue_row || null,
             to: input.message?.to || input.to_phone_number || null,
             from: input.message?.from || null,

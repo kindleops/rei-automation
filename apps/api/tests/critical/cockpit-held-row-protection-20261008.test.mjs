@@ -65,29 +65,40 @@ test("cancel on a held row is allowed", async () => {
   assert.equal(supabase.calls.updates[0].queue_status, "cancelled");
 });
 
-test("owner release needs confirm + id list naming the row + actor + reason, and the audit row first", async () => {
-  const good = { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["q1", "q2"], actor: "owner@leadcommand", reason: "nurture staging approved" };
-  for (const [patch, reason] of [
-    [{ confirm: "yes" }, "owner_release_confirmation_missing"],
-    [{ release_ids: ["q2"] }, "owner_release_id_not_listed"],
-    [{ actor: "" }, "owner_release_actor_missing"],
-    [{ reason: "" }, "owner_release_reason_missing"],
+// Round 2 (founder P0 2026-11-23): the actor is the LOGGED-IN operator passed
+// by the route (never payload text), and the release is signed with a server key.
+const OPERATOR = Object.freeze({ kind: "ops_dashboard_operator", authenticated: true, via: "header:x-ops-dashboard-secret", id: "user-owner-1" });
+const SIGNING_ENV = { QUEUE_OWNER_RELEASE_SECRET: "test-owner-release-secret" };
+const signed = { operator: OPERATOR, env: SIGNING_ENV };
+
+test("owner release needs confirm + id list naming the row + a logged-in actor + reason, and the audit row first", async () => {
+  const good = { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["q1", "q2"], actor: "text-in-the-request", reason: "nurture staging approved" };
+  for (const [patch, deps, reason] of [
+    [{ confirm: "yes" }, signed, "owner_release_confirmation_missing"],
+    [{ release_ids: ["q2"] }, signed, "owner_release_id_not_listed"],
+    [{}, { env: SIGNING_ENV }, "owner_release_actor_missing"],
+    [{}, { operator: { ...OPERATOR, authenticated: false }, env: SIGNING_ENV }, "owner_release_actor_missing"],
+    [{ reason: "" }, signed, "owner_release_reason_missing"],
+    [{}, { operator: OPERATOR, env: {} }, "owner_release_signing_key_unavailable"],
   ]) {
-    const { r, supabase } = await run("owner-release", held(), { ...good, ...patch });
+    const { r, supabase } = await run("owner-release", held(), { ...good, ...patch }, deps);
     assert.equal(r.reason, reason);
     assert.equal(supabase.calls.updates.length, 0);
   }
-  const failedAudit = await run("owner-release", held(), good, { releaseAudit: async () => ({ ok: false }) });
+  const failedAudit = await run("owner-release", held(), good, { ...signed, releaseAudit: async () => ({ ok: false }) });
   assert.equal(failedAudit.r.reason, "owner_release_audit_write_failed");
   assert.equal(failedAudit.supabase.calls.updates.length, 0, "no unaudited release");
   const audits = [];
-  const ok = await run("owner-release", held(), good, { releaseAudit: async (e) => (audits.push(e), { ok: true }) });
+  const ok = await run("owner-release", held(), good, { ...signed, releaseAudit: async (e) => (audits.push(e), { ok: true }) });
   assert.equal(ok.r.ok, true);
   assert.equal(ok.supabase.calls.updates[0].queue_status, "scheduled");
-  assert.equal(ok.supabase.calls.updates[0].metadata.owner_release.actor, "owner@leadcommand");
+  assert.equal(ok.supabase.calls.updates[0].metadata.owner_release.actor, "user-owner-1", "the session user, not request text");
+  assert.equal(ok.supabase.calls.updates[0].metadata.reauthorization.actor_user_id, "user-owner-1");
+  assert.match(ok.supabase.calls.updates[0].metadata.reauthorization.signature, /^[0-9a-f]{64}$/);
   assert.deepEqual(ok.supabase.calls.cas, ["held"], "CAS on the status that was read");
   assert.equal(audits[0].previous_status, "held");
-  const notHeld = await run("owner-release", held({ queue_status: "scheduled" }), good);
+  assert.equal(audits[0].signature, ok.supabase.calls.updates[0].metadata.reauthorization.signature, "the audit event carries the same signature");
+  const notHeld = await run("owner-release", held({ queue_status: "scheduled" }), good, signed);
   assert.equal(notHeld.r.reason, "owner_release_row_not_held");
 });
 
@@ -117,6 +128,6 @@ test("the final-dispatch gate binds approve / retry / reschedule / owner release
   assert.equal(suppressed.supabase.calls.updates.length, 0);
   const err = await run("retry", row, {}, { dispatchGate: async () => { throw new Error("timeout"); } });
   assert.equal(err.r.reason, "final_dispatch_gate:final_dispatch_gate_read_failed");
-  const release = await run("owner-release", held(), { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["q1"], actor: "owner", reason: "r" }, { dispatchGate: async () => ({ blocked: true, reason: "wrong_number" }) });
+  const release = await run("owner-release", held(), { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["q1"], reason: "r" }, { ...signed, dispatchGate: async () => ({ blocked: true, reason: "wrong_number" }) });
   assert.equal(release.r.reason, "final_dispatch_gate:wrong_number");
 });

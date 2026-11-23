@@ -219,6 +219,9 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
         const verdict = await gate(
           {
             path: 'queue',
+            // The gate re-reads this row fresh by id (round 2) and checks the
+            // claim token against the fresh lock_token AND the atomic claim's
+            // verifier (queue_verify_dispatch_authorization).
             row: queue_row,
             to: message_fields.to,
             from: message_fields.from,

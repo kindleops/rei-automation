@@ -79,6 +79,15 @@ const healthyReaders = (over = {}) => ({
   readThreadState: async () => ({ thread_key: PHONE, status: "active", is_archived: false, last_inbound_at: null, metadata: {} }),
   readAutomationHold: async () => ({ held: false, fail_closed: false }),
   readCampaign: async () => ({ id: "camp-1", status: "active" }),
+  // Round 2 history reads: a row inserted queued, claimed to processing, the
+  // latest freeze/brake event an hour before NOW, the atomic claim held.
+  readStatusHistory: async () => [
+    { from_status: null, to_status: "queued", changed_at: iso(nowMs - 60_000) },
+    { from_status: "queued", to_status: "processing", changed_at: iso(nowMs - 1_000) },
+  ],
+  readLatestAuthorityEvent: async () => iso(nowMs - 3600_000),
+  readReleaseAudit: async () => ({ found: false }),
+  verifyDispatchClaim: async () => ({ ok: true }),
   ...over,
 });
 
@@ -115,7 +124,8 @@ async function dispatchQueue(row, { readers = healthyReaders(), getSystemValue =
     getSystemValue,
     now: NOW,
     contact_window: { allowed: true, hold: false, timezone: "America/Chicago" },
-    finalGateReaders: readers,
+    // The gate re-reads the row fresh; by default the stored row IS this row.
+    finalGateReaders: { readQueueRow: async () => row, ...readers },
     finalSenderContinuityCheck: async () => ({ ok: true, reason: null, verdict: null }),
     finalContactRestrictionCheck: async () => ({ refused: false, reason: null }),
     ...extra,
@@ -234,7 +244,21 @@ function resumeDb(rows, { readError = null, writeError = null } = {}) {
     writes,
     from() {
       return {
-        select: () => ({ eq: () => ({ in: () => ({ limit: async () => ({ data: readError ? null : rows, error: readError }) }) }) }),
+        // Keyset pages (round 2): .eq().in()[.gt('id', after)].order('id').limit(n)
+        select: () => {
+          let after = null;
+          const q = {
+            eq: () => q, in: () => q,
+            gt: (_col, v) => { after = v; return q; },
+            order: () => q,
+            limit: async (n) => {
+              if (readError) return { data: null, error: readError };
+              const page = rows.filter((r) => after === null || String(r.id) > String(after)).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, n);
+              return { data: page, error: null };
+            },
+          };
+          return q;
+        },
         update: (patch) => {
           const filters = {};
           const q = {
@@ -293,15 +317,24 @@ test("CAMPAIGN RESUME: a row whose campaign is still paused is refused at the fi
 
 // ── 3. STALE APPROVAL (Cockpit approve of an old row) ───────────────────────
 
-function cockpitDb(row, { thread = null } = {}) {
+function cockpitDb(row, { thread = null, statusHistory = null, authorityEventAt = "2026-01-01T00:00:00.000Z" } = {}) {
   const calls = { updates: [] };
+  // Round 2: the release path reads the trigger-written history. Default: the
+  // row was inserted 'queued' and has never been anywhere else.
+  const history = statusHistory || [{ from_status: null, to_status: "queued", changed_at: row.created_at || "2026-01-01T00:00:00.000Z" }];
+  const dataFor = (table) => {
+    if (table === "inbox_thread_state") return thread ? [thread] : [];
+    if (table === "send_queue_status_history") return history;
+    if (table === "send_authority_events") return authorityEventAt ? [{ changed_at: authorityEventAt, key: "p0_history_floor" }] : [];
+    return [];
+  };
   return {
     calls,
     from(table) {
       const chain = {
-        select: () => chain, eq: () => chain, neq: () => chain, in: () => chain, limit: () => chain,
+        select: () => chain, eq: () => chain, neq: () => chain, in: () => chain, limit: () => chain, order: () => chain,
         maybeSingle: async () => ({ data: table === "send_queue" ? row : null, error: null }),
-        then: (res, rej) => Promise.resolve({ data: table === "inbox_thread_state" && thread ? [thread] : [], count: 0, error: null }).then(res, rej),
+        then: (res, rej) => Promise.resolve({ data: dataFor(table), count: 0, error: null }).then(res, rej),
         update(patch) {
           calls.updates.push(patch);
           const u = { eq: () => u, select: () => ({ maybeSingle: async () => ({ data: { id: row.id, queue_status: patch.queue_status }, error: null }) }) };
@@ -312,8 +345,10 @@ function cockpitDb(row, { thread = null } = {}) {
     },
   };
 }
-const cockpit = (action, row, payload = {}, { thread = null } = {}) => {
-  const supabase = cockpitDb(row, { thread });
+const OPERATOR = Object.freeze({ kind: "ops_dashboard_operator", authenticated: true, via: "header:x-ops-dashboard-secret", id: "founder-user-id" });
+const SIGNING_ENV = { QUEUE_OWNER_RELEASE_SECRET: "p0-test-owner-release-secret" };
+const cockpit = (action, row, payload = {}, { thread = null, operator = OPERATOR, env = SIGNING_ENV, statusHistory = null, authorityEventAt } = {}) => {
+  const supabase = cockpitDb(row, { thread, statusHistory, ...(authorityEventAt !== undefined ? { authorityEventAt } : {}) });
   return runQueueAction({
     action,
     payload: { queue_item_id: row.id, dry_run: false, ...payload },
@@ -322,6 +357,8 @@ const cockpit = (action, row, payload = {}, { thread = null } = {}) => {
     getValue: async () => "live",
     dispatchGate: async () => ({ blocked: false }),
     releaseAudit: async () => ({ ok: true }),
+    operator,
+    env,
   }).then((r) => ({ r, supabase }));
 };
 
@@ -361,21 +398,25 @@ test("STALE APPROVAL: paused_operator_review cannot be approved (isPausedReview 
 
 test("STALE APPROVAL: the owner release is the ONLY per-row authorization, and the gate expires it", async () => {
   const old = { id: "own-1", queue_status: "paused_operator_review", thread_key: PHONE, to_phone_number: PHONE, created_at: "2026-10-01T00:00:00.000Z", metadata: { reauthorization_required: { trigger: "campaign_resume", at: "2026-11-01T00:00:00.000Z" } } };
-  const { r, supabase } = await cockpit("owner-release", old, { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["own-1"], actor: "founder", reason: "reviewed the full thread" });
+  // `actor` in the body is request text: ignored. The session user is the actor.
+  const { r, supabase } = await cockpit("owner-release", old, { confirm: OWNER_RELEASE_CONFIRM, release_ids: ["own-1"], actor: "someone-typed-this", reason: "reviewed the full thread" });
   assert.equal(r.ok, true, JSON.stringify(r));
   const patch = supabase.calls.updates[0];
   assert.equal(patch.queue_status, "scheduled");
   const reauth = patch.metadata.reauthorization;
-  assert.deepEqual([reauth.queue_row_id, reauth.actor, reauth.reason, reauth.via], ["own-1", "founder", "reviewed the full thread", "cockpit_owner_release"]);
+  assert.deepEqual([reauth.queue_row_id, reauth.actor_user_id, reauth.reason, reauth.via], ["own-1", "founder-user-id", "reviewed the full thread", "cockpit_owner_release"]);
 
   const released = { ...old, ...patch, metadata: patch.metadata };
   const at = Date.parse(reauth.at);
-  assert.equal(evaluateReauthorization(released, { now: at + 60_000 }).ok, true, "fresh release passes");
-  assert.equal(evaluateReauthorization(released, { now: at + REAUTHORIZATION_MAX_AGE_MS + 1 }).reason, GATE_REASONS.REAUTHORIZATION_STALE, "an old release has expired");
-  assert.equal(evaluateReauthorization(released, { now: at + 60_000, last_inbound_at: iso(at + 1000) }).reason, GATE_REASONS.REAUTHORIZATION_STALE, "the seller replied after the release");
+  const env = SIGNING_ENV;
+  assert.equal(evaluateReauthorization(released, { now: at + 60_000, env }).ok, true, "fresh signed release passes");
+  assert.equal(evaluateReauthorization(released, { now: at + REAUTHORIZATION_MAX_AGE_MS + 1, env }).reason, GATE_REASONS.REAUTHORIZATION_STALE, "an old release has expired");
+  assert.equal(evaluateReauthorization(released, { now: at + 60_000, last_inbound_at: iso(at + 1000), env }).reason, GATE_REASONS.REAUTHORIZATION_STALE, "the seller replied after the release");
   // A release bound to another row is no release at all.
   const forged = { ...released, id: "someone-else" };
-  assert.equal(evaluateReauthorization(forged, { now: at + 60_000 }).reason, GATE_REASONS.REAUTHORIZATION_REQUIRED);
+  assert.equal(evaluateReauthorization(forged, { now: at + 60_000, env }).reason, GATE_REASONS.RELEASE_INVALID);
+  // Without the server key nothing verifies (fail closed).
+  assert.equal(evaluateReauthorization(released, { now: at + 60_000, env: {} }).reason, GATE_REASONS.RELEASE_INVALID);
 });
 
 test("STALE APPROVAL: an old Cockpit 'approve' marker is not an authorization at dispatch", async () => {
@@ -464,6 +505,8 @@ test("SUPPRESSION-READER FAILURE: the fenced verification send refuses an allowl
       env: { ALLOW_LIVE_TEXTGRID_VERIFICATION_SENDS: "true" },
       getSystemFlag: async () => true,
       getSystemValue: async () => PHONE,
+      // Authority open, so the refusal below is the suppression read, not the brake.
+      evaluateAuthority: async () => ({ ok: true }),
       supabase: NO_DIRECT_READS, // every live read throws: suppression is unreadable
       sendTextgridSMS: async () => { sent += 1; return { sid: "SMx" }; },
     }
@@ -471,6 +514,29 @@ test("SUPPRESSION-READER FAILURE: the fenced verification send refuses an allowl
   assert.equal(out.ok, false);
   assert.equal(out.reason, `final_gate:${GATE_REASONS.SUPPRESSION_UNREADABLE}`);
   assert.equal(sent, 0);
+});
+
+test("ROUND 2: the verification send runs the FULL gate: an active emergency stop refuses it before any read", async () => {
+  const { runLiveTextgridSendVerification } = await import("@/lib/verification/live-textgrid.js");
+  let sent = 0;
+  const out = await runLiveTextgridSendVerification(
+    { to: PHONE, from: FROM, body: "verification", confirm_live: true },
+    {
+      env: { ALLOW_LIVE_TEXTGRID_VERIFICATION_SENDS: "true" },
+      getSystemFlag: async () => true,
+      getSystemValue: async () => PHONE,
+      evaluateAuthority: async () => ({ ok: false, reason: "queue_emergency_stop_active" }),
+      supabase: NO_DIRECT_READS,
+      finalGateReaders: healthyReaders(),
+      sendTextgridSMS: async () => { sent += 1; return { sid: "SMx" }; },
+    }
+  );
+  assert.equal(out.ok, false);
+  assert.equal(out.reason, "final_gate:queue_emergency_stop_active");
+  assert.equal(sent, 0);
+  const src = read("lib/verification/live-textgrid.js");
+  assert.match(src, /evaluateFinalDispatchGate/);
+  assert.doesNotMatch(src, /evaluateReleaseGate/, "the release preview is not a dispatch gate");
 });
 
 // ── 6. RAW-NUMBER DISPATCH ─────────────────────────────────────────────────
@@ -522,7 +588,7 @@ test("PROVIDER RETRY: after an ambiguous provider outcome, a second attempt for 
   const timeout = async () => { calls += 1; const e = new Error("socket hang up after write"); e.name = "TextGridError"; e.network_phase = "response"; e.may_have_transmitted = true; throw e; };
   const first = await dispatchSellerQueueRow(row, { to: PHONE, from: FROM, body: "hello" }, {
     store, supabase: NO_DIRECT_READS, sendProvider: timeout, getSystemValue: ALLOW, now: NOW,
-    contact_window: { allowed: true, timezone: "America/Chicago" }, finalGateReaders: healthyReaders(),
+    contact_window: { allowed: true, timezone: "America/Chicago" }, finalGateReaders: { readQueueRow: async () => row, ...healthyReaders() },
     finalSenderContinuityCheck: async () => ({ ok: true }), finalContactRestrictionCheck: async () => ({ refused: false }),
   });
   assert.equal(first.provider_invoked, true);
