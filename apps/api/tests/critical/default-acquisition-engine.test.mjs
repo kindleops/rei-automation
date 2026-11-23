@@ -506,6 +506,12 @@ test("duplicate failed delivery receipt creates only one retry row", async () =>
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.reason, "duplicate_delivery_receipt");
   assert.equal(supabase.tables.send_queue.length, 2);
+  // FOUNDER P0 2026-11-23 (provider retry): the clone is born in the review
+  // hold with reauthorization required; a delivery retry never re-authorizes.
+  const clone = supabase.tables.send_queue.find((row) => row.metadata?.retry_of_queue_row_id === failed.id);
+  assert.equal(clone.queue_status, "paused_operator_review");
+  assert.equal(clone.metadata.reauthorization_required.trigger, "delivery_retry_clone");
+  assert.equal(clone.metadata.reauthorization, null);
   assert.equal(
     supabase.tables.acquisition_events.filter(
       (event) => event.event_type === "sms.delivery_retry_scheduled"

@@ -10010,6 +10010,7 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
     }
   }
 
+  let resumeRowsHeld = null
   if (action === 'resume' && fromStatus === 'paused') {
     const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
     const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
@@ -10066,6 +10067,28 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
         message: 'Resume blocked — resolve readiness gates before going live.',
       }
     }
+
+    // FOUNDER P0 2026-11-23 item 1: resuming a campaign never re-authorizes the
+    // messages written before the pause. Hold them (revalidated, review status,
+    // evidence kept) BEFORE the campaign goes live, while the final gate still
+    // sees the campaign as paused. A hold that cannot be written refuses the resume.
+    const holdRows = deps.holdCampaignRowsForReauthorization
+      || (await import('@/lib/domain/queue/no-automatic-reactivation.js')).holdCampaignRowsForReauthorization
+    const resumeHold = await holdRows(campaignId, { supabase, trigger: 'campaign_resume' })
+    if (!resumeHold?.ok) {
+      return {
+        ok: false,
+        error: 'CAMPAIGN_RESUME_HOLD_FAILED',
+        code: 'CAMPAIGN_RESUME_HOLD_FAILED',
+        campaign_id: campaignId,
+        action,
+        from: fromStatus,
+        to: 'paused',
+        reason: resumeHold?.reason || 'campaign_row_hold_failed',
+        message: 'Resume refused — the rows written before the pause could not be held for reauthorization.',
+      }
+    }
+    resumeRowsHeld = resumeHold
   }
 
   if (action === 'archive' && fromStatus === 'archived') {
@@ -10120,6 +10143,7 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
     idempotent: Boolean(result.idempotent),
     degraded: Boolean(result.degraded),
     queue_rows_cancelled: queueRowsCancelled || undefined,
+    ...(resumeRowsHeld ? { resume_rows_held_for_reauthorization: resumeRowsHeld.held, resume_rows_examined: resumeRowsHeld.examined } : {}),
   }
 }
 

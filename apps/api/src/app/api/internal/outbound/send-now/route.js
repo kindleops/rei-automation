@@ -10,16 +10,15 @@ const logger = child({
   module: "api.internal.outbound.send_now",
 });
 
-export async function GET(request) {
-  const { status, payload } = await handleSendNowRequestData(request, "GET", {
-    logger,
-  });
-  return NextResponse.json(payload, { status });
-}
+// FOUNDER P0 2026-11-23 item 6: there is no GET handler. Sending via URL
+// parameters put the destination phone and the message text into the query
+// string (access logs, proxies, browser history). Only an authenticated POST
+// with the message in the request body can send; Next.js answers any other
+// method on this route with 405 Method Not Allowed.
 
 export async function POST(request) {
-  const { status, payload } = await handleSendNowRequestData(request, "POST", {
+  const { status, payload, headers } = await handleSendNowRequestData(request, "POST", {
     logger,
   });
-  return NextResponse.json(payload, { status });
+  return NextResponse.json(payload, { status, ...(headers ? { headers } : {}) });
 }

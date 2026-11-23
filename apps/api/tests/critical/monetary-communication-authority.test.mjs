@@ -31,6 +31,8 @@ function monetaryRow(overrides = {}, metadata = {}) {
     id: "q-monetary-1",
     thread_key: "+13125550100",
     to_phone_number: "+13125550100",
+    // The atomic claim's token: the final dispatch gate refuses an unclaimed row.
+    lock_token: "claim-monetary-1",
     metadata: {
       use_case: "initial_offer",
       offer_id: "offer:opp-1:v1",

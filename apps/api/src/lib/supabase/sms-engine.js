@@ -65,6 +65,8 @@ import {
   shouldHoldRowFromStaleExpiration,
 } from "@/lib/domain/queue/queue-send-brake-state.js";
 import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-machine.js";
+import { revalidateBeforeDispatch } from "@/lib/domain/queue/queue-authority.js";
+import { buildReauthorizationHoldPatch } from "@/lib/domain/queue/final-dispatch-gate.js";
 import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
 import { observeSendQueueInsert } from "@/lib/domain/intelligence/runtime/observation.js";
 import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
@@ -3247,7 +3249,65 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     }
   }
 
-  if (!brakeState.send_blocked) {
+  // ── NO AUTOMATIC REACTIVATION (founder P0 2026-11-23, item 1) ─────────────
+  //
+  // This used to be the brake-RECOVERY path: once the brake cleared, every
+  // expired row carrying a brake marker went back to `scheduled`, and every
+  // active row lost its `send_brake_hold` marker. Lifting the global brake
+  // therefore re-authorized every message that had waited behind it. Neither
+  // happens now:
+  //   * while the brake is active, every waiting row is stamped
+  //     held_through_send_brake (evidence that it sat through a stop);
+  //   * when the brake clears, waiting rows that carry that evidence move to
+  //     the canonical review hold (paused_operator_review) with the
+  //     revalidateBeforeDispatch verdict recorded; expired brake rows stay
+  //     expired and are only annotated.
+  // A row comes back only through an explicit, per-row owner release, and the
+  // final dispatch gate refuses any row with hold history and no fresh
+  // reauthorization even if some other path flips its status.
+  let brake_rows_held_for_reauthorization = 0;
+  let brake_expired_rows_not_revived = 0;
+  const WAITING_STATUSES = new Set(["queued", "scheduled", "pending", "ready", "approved", "retry"]);
+  if (brakeState.send_blocked) {
+    for (const row of rows) {
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+      if (!WAITING_STATUSES.has(lower(row.queue_status))) continue;
+      if (metadata.held_through_send_brake) continue;
+      updates.push({
+        id: row.id,
+        patch: {
+          metadata: {
+            ...metadata,
+            held_through_send_brake: { at: now, reasons: brakeState.reasons || [] },
+          },
+          updated_at: now,
+        },
+      });
+    }
+  } else {
+    for (const row of rows) {
+      const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+      const sat_through_brake = metadata.send_brake_hold === true || Boolean(metadata.held_through_send_brake);
+      if (!sat_through_brake) continue;
+      if (!WAITING_STATUSES.has(lower(row.queue_status)) && lower(row.queue_status) !== "processing") continue;
+      if (lower(row.queue_status) === "processing") continue; // an in-flight lease is the lease recovery's, below
+      const revalidation = revalidateBeforeDispatch({
+        row,
+        // No per-row authorization exists for a row the brake held; lifting the
+        // brake is not one.
+        authorization_scope_valid: false,
+      });
+      brake_rows_held_for_reauthorization += 1;
+      updates.push({
+        id: row.id,
+        patch: buildReauthorizationHoldPatch(row, {
+          trigger: "send_brake_cleared",
+          now,
+          blockers: revalidation.blockers,
+        }),
+      });
+    }
+
     const { data: expired_brake_rows } = await supabase
       .from(SEND_QUEUE_TABLE)
       .select("id,queue_status,scheduled_for,scheduled_for_utc,metadata,failed_reason")
@@ -3258,39 +3318,27 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     for (const row of expired_brake_rows || []) {
       const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
       if (metadata.expired_due_to_send_brake !== true && metadata.send_brake_hold !== true) continue;
-      const schedule_at = row.scheduled_for_utc || row.scheduled_for;
-      if (!schedule_at) continue;
+      if (metadata.reauthorization_required) continue;
+      brake_expired_rows_not_revived += 1;
+      const revalidation = revalidateBeforeDispatch({ row, authorization_scope_valid: false });
+      // Annotate only. The row stays expired; its evidence is preserved.
       updates.push({
         id: row.id,
         patch: {
-          queue_status: "scheduled",
-          failed_reason: null,
           metadata: {
             ...metadata,
-            send_brake_hold: false,
-            expired_due_to_send_brake: false,
-            send_brake_recovered_at: now,
+            reauthorization_required: {
+              trigger: "send_brake_cleared",
+              at: now,
+              previous_status: "expired",
+              revalidation_blockers: revalidation.blockers,
+              policy: "founder_p0_2026-11-23_no_automatic_reactivation",
+            },
           },
           updated_at: now,
         },
       });
     }
-  }
-
-  for (const row of rows) {
-    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
-    if (!metadata.send_brake_hold || brakeState.send_blocked) continue;
-    updates.push({
-      id: row.id,
-      patch: {
-        metadata: {
-          ...metadata,
-          send_brake_hold: false,
-          send_brake_cleared_at: now,
-        },
-        updated_at: now,
-      },
-    });
   }
 
   for (const row of past_due_scheduled) {
@@ -3427,6 +3475,8 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     lock_conflicts: 0,
     send_brake_state: brakeState,
     brake_held_rows,
+    brake_rows_held_for_reauthorization,
+    brake_expired_rows_not_revived,
   };
 }
 

@@ -353,7 +353,12 @@ test("emergency-stop recovery does not expire held runnable rows", async () => {
   // which is stronger than the old "held" expectation.
   assert.equal(result.brake_held_rows, 0);
   assert.equal(updates.some((entry) => entry.patch?.queue_status === "expired"), false);
-  assert.equal(updates.length, 0, "scheduled rows are never touched by stale expiration");
+  // Founder P0 2026-11-23: while the brake is set, a waiting row is STAMPED as
+  // having sat through it (metadata only, no status change) so that lifting the
+  // brake can never re-authorize it. Nothing else touches it.
+  assert.equal(updates.some((entry) => entry.patch?.queue_status !== undefined), false, "no status is changed");
+  assert.deepEqual(updates.map((entry) => Object.keys(entry.patch).sort()), [["metadata", "updated_at"]]);
+  assert.ok(updates[0].patch.metadata.held_through_send_brake, "the brake-hold evidence is recorded");
 });
 
 // ── P1 regression (closure pass 2026-08-26): a PROCESSING row the runtime

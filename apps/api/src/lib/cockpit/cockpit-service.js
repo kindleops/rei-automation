@@ -5,6 +5,11 @@ import { runSendTimeContactGuard } from '@/lib/domain/queue/send-time-contact-gu
 import { createInboxSendNowQueueRow, executeManualInboxSendNow } from '@/lib/domain/inbox/send-now-service.js'
 import { child } from '@/lib/logging/logger.js'
 import { resolveInboxSchedule } from '@/lib/domain/inbox/resolve-inbox-schedule.js'
+import {
+  evaluateReleaseGate,
+  isHistoricalRow,
+  isPausedReviewRow,
+} from '@/lib/domain/queue/final-dispatch-gate.js'
 
 const logger = child({ module: 'cockpit.cockpit_service' })
 
@@ -48,10 +53,14 @@ export function isNegativeOrWrongNumberIntent(intentValue) {
   ]).has(intent)
 }
 
+// Recognises the canonical containment status paused_operator_review (and the
+// other review spellings) through the shared final-gate predicate. It used to
+// match only 'paused_review', so Cockpit approve / retry could release a
+// paused_operator_review row straight back to 'queued'.
 function isPausedReview(row) {
   const status = toStatus(row?.queue_status)
   const pausedReason = toStatus(row?.paused_reason)
-  return status === 'paused_review' || pausedReason === 'paused_review'
+  return status === 'paused_review' || pausedReason === 'paused_review' || isPausedReviewRow(row)
 }
 
 function isIncidentQuarantine(row) {
@@ -210,6 +219,25 @@ export function isDispatchHeld(row = {}) {
   return toStatus(row?.queue_status) === 'held' || (meta.dispatch_hold !== undefined && meta.dispatch_hold !== null && meta.dispatch_hold !== false)
 }
 
+/** The thread's latest seller inbound, or a sentinel that marks the row historical when unreadable. */
+async function loadThreadLastInboundAt(row, supabase) {
+  const key = clean(row?.thread_key || row?.to_phone_number)
+  if (!key) return null
+  try {
+    const { data, error } = await supabase
+      .from('inbox_thread_state')
+      .select('*')
+      .eq('thread_key', key)
+      .limit(1)
+    if (error) return new Date().toISOString()
+    const thread = Array.isArray(data) ? data[0] : data
+    return thread?.last_inbound_at || null
+  } catch {
+    // Unreadable: treat as "the seller may have replied" (fail closed).
+    return new Date().toISOString()
+  }
+}
+
 async function defaultReleaseAudit(entry, { supabase }) {
   const { error } = await supabase.from('automation_events').insert({
     event_type: 'QUEUE_OWNER_RELEASE',
@@ -221,6 +249,11 @@ async function defaultReleaseAudit(entry, { supabase }) {
 }
 
 async function defaultDispatchGate(row, { supabase }) {
+  // The SHARED final-gate facts first (archive, suppression fail-closed,
+  // terminal / legal / repair / review / quarantine, automation holds), then the
+  // existing contactability and send-time guard. Same rules as dispatch.
+  const shared = await evaluateReleaseGate(row, { supabase })
+  if (shared?.blocked) return { blocked: true, reason: shared.reason || 'final_gate_blocked', thread: shared.thread || null }
   const canonical = await evaluateCanonicalContactability(
     {
       thread_key: row.thread_key,
@@ -239,7 +272,7 @@ async function defaultDispatchGate(row, { supabase }) {
   if (canonical?.blocked) return { blocked: true, reason: canonical.reason || 'canonical_contactability_blocked' }
   const guard = await runSendTimeContactGuard(row, { supabase })
   if (guard?.blocked) return { blocked: true, reason: guard.reason }
-  return { blocked: false }
+  return { blocked: false, thread: shared?.thread || null }
 }
 
 export async function runQueueAction({
@@ -270,16 +303,37 @@ export async function runQueueAction({
   if (error) throw error
   if (!row) return blockedResponse(action, 'queue_item_not_found', { queue_item_id: queueItemId, dry_run: dryRun })
 
-  if (isPausedReview(row)) return blockedResponse(action, 'paused_review', { queue_item_id: queueItemId, dry_run: dryRun })
   if (isIncidentQuarantine(row)) return blockedResponse(action, 'incident_quarantine', { queue_item_id: queueItemId, dry_run: dryRun })
+  // A review hold (paused_review / paused_operator_review) is released ONLY by
+  // the explicit, audited, per-row owner release below; approve / retry /
+  // retry-routing / reschedule can never move it back to sendable.
+  const paused_review = isPausedReview(row)
+  if (paused_review && action !== 'owner-release') return blockedResponse(action, 'paused_review', { queue_item_id: queueItemId, dry_run: dryRun })
 
-  const held = isDispatchHeld(row)
+  const held = isDispatchHeld(row) || paused_review
   if (held && action !== 'cancel' && action !== 'owner-release') {
     return blockedResponse(action, 'held_row_requires_owner_release', { queue_item_id: queueItemId, dry_run: dryRun })
   }
+  // FOUNDER P0 2026-11-23 (stale approval): an approve / retry / reschedule is
+  // not a fresh authorization for a HISTORICAL row: one with hold history, one
+  // the seller has replied past, or one older than the reauthorization window.
+  // Such a row needs the explicit owner release (actor + reason + confirm),
+  // which is what the final dispatch gate accepts as a per-row reauthorization.
+  const historical = RELEASING_ACTIONS.has(action) && action !== 'owner-release'
+    ? isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase) })
+    : { historical: false }
+  if (historical.historical) {
+    return blockedResponse(action, 'historical_row_requires_owner_release', {
+      queue_item_id: queueItemId,
+      dry_run: dryRun,
+      historical_reason: historical.reason,
+      hold_markers: historical.markers,
+    })
+  }
   let release_entry = null
   if (action === 'owner-release') {
-    if (!held) return blockedResponse(action, 'owner_release_row_not_held', { queue_item_id: queueItemId, dry_run: dryRun })
+    const releasable = held || isHistoricalRow(row, { now: Date.now(), last_inbound_at: await loadThreadLastInboundAt(row, supabase) }).historical
+    if (!releasable) return blockedResponse(action, 'owner_release_row_not_held', { queue_item_id: queueItemId, dry_run: dryRun })
     const ids = Array.isArray(payload.release_ids) ? payload.release_ids.map(clean) : []
     const actor = clean(payload.actor)
     const reason = clean(payload.reason)
@@ -378,8 +432,27 @@ export async function runQueueAction({
       ...(row.metadata || {}),
       cockpit_action: action,
       cockpit_action_at: new Date().toISOString(),
-      ...(release_entry ? { owner_release: release_entry, dispatch_hold: null } : {}),
+      ...(release_entry
+        ? {
+            owner_release: release_entry,
+            dispatch_hold: null,
+            // THE per-row fresh authorization the final dispatch gate accepts
+            // for a row with hold history (final-dispatch-gate.js
+            // evaluateReauthorization): bound to this row id, named actor and
+            // reason, and stale after 24 h or a later hold or seller reply.
+            reauthorization: {
+              queue_row_id: queueItemId,
+              actor: release_entry.actor,
+              reason: release_entry.reason,
+              at: release_entry.at,
+              via: 'cockpit_owner_release',
+            },
+          }
+        : {}),
     },
+    // An owner release ends the review / guard hold it releases; the evidence
+    // of the hold stays in metadata (reauthorization_required, owner_release).
+    ...(release_entry ? { paused_reason: null, guard_status: null, guard_reason: null } : {}),
   }
 
   if (action === 'reschedule') {

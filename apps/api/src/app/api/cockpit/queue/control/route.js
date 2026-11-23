@@ -1174,22 +1174,34 @@ export async function POST(request) {
       }, 423)
     }
 
-    if (isEmergencyStopActive(values.queue_emergency_stop_at) && !asBoolean(body.clear_one_send_window, false)) {
+    // FOUNDER P0 2026-11-23 (execution authorization = brake state NOW): the
+    // `clear_one_send_window` bypass is removed. It sent one row past an active
+    // emergency stop by handing the runner a fake control plane
+    // (queue_processor_mode 'live', no stop). The only thing that may cross an
+    // active brake is the scoped-canary authorization, which carries its own
+    // durable, single-use, verified authority. The flag is now refused outright.
+    if (asBoolean(body.clear_one_send_window, false)) {
+      return corsJson(request,{
+        ok: false,
+        action,
+        error: 'clear_one_send_window_removed',
+        reason: 'clear_one_send_window_removed',
+        message: 'Sending past the emergency stop is no longer possible from this action; use the scoped-canary authorization.',
+        queue_row_id,
+      }, 423)
+    }
+    if (isEmergencyStopActive(values.queue_emergency_stop_at)) {
       return corsJson(request,{
         ok: false,
         action,
         error: 'queue_emergency_stop_active',
         reason: 'queue_emergency_stop_active',
-        message: 'Emergency stop is active; pass clear_one_send_window=true only after explicit approval for this one row.',
+        message: 'Emergency stop is active; no row is sent while it is set.',
         queue_row_id,
       }, 423)
     }
 
     if (queueRowIsNoSend(row)) {
-      const stoppedAt = asBoolean(body.clear_one_send_window, false)
-        ? await rearmEmergencyStopAfterOneSend(action, 'send_one_no_send_refused', { queue_row_id })
-        : null
-      const updated = stoppedAt ? await loadSettings() : values
       return responseWithDiagnostics(request, {
         ok: false,
         action,
@@ -1199,8 +1211,8 @@ export async function POST(request) {
         queue_status: row.queue_status || null,
         provider_message_id: null,
         message_event_id: null,
-        emergency_stop_rearmed_at: stoppedAt,
-      }, updated, 423)
+        emergency_stop_rearmed_at: null,
+      }, values, 423)
     }
 
     if (rowScheduledInFuture(row)) {
@@ -1231,11 +1243,8 @@ export async function POST(request) {
         // COALESCE(p_processing_run_id, gen_random_uuid()) -- but then the
         // caller never learns the id and cannot verify it owns the claim.)
         processing_run_id: crypto.randomUUID(),
-        getSystemValue: async (key) => {
-          if (key === 'queue_processor_mode') return 'live'
-          if (key === 'queue_emergency_stop_at') return ''
-          return values[key] ?? null
-        },
+        // The REAL control plane. No override: the canonical authority and the
+        // final dispatch gate read the brake state as it is right now.
       })
     } finally {
       stoppedAt = await rearmEmergencyStopAfterOneSend(action, result?.sent ? 'send_one_complete' : 'send_one_window_closed', {

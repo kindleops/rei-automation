@@ -63,7 +63,7 @@ for (const source of SOURCE_CLASSES) {
     const provider = spy();
     const result = await dispatchSellerQueueRow(
       { id: `q-${source.name}`, thread_key: "+13125550100", to_phone_number: "+13125550100",
-        metadata: {}, ...source.row },
+        lock_token: "claim-s11", metadata: {}, ...source.row },
       { to: "+13125550100", from: "+18885551212", body: "Cash offer — closing in 14 days." },
       { store, sendProvider: provider.fn, getSystemValue: ALLOW }
     );
@@ -78,6 +78,7 @@ test("zero em dash: manual operator send is not exempt", async () => {
   const provider = spy();
   const result = await dispatchManualOperatorSend({
     operator_action_id: "op-manual-1",
+    thread_key: "+13125550100",
     store: createMemoryS11Store(),
     getSystemValue: ALLOW,
     sendProvider: provider.fn,
@@ -94,7 +95,7 @@ test("zero em dash: a clean body on every class DOES reach the provider", async 
     const provider = spy();
     await dispatchSellerQueueRow(
       { id: `q-ok-${source.name}`, thread_key: "+13125550100", to_phone_number: "+13125550100",
-        metadata: {}, ...source.row },
+        lock_token: "claim-s11", metadata: {}, ...source.row },
       { to: "+13125550100", from: "+18885551212", body: "Cash offer, closing in 14 days." },
       { store, sendProvider: provider.fn, getSystemValue: ALLOW }
     );
@@ -112,7 +113,7 @@ test("a send is only reported sent when the provider returned a SID", async () =
 
   const result = await dispatchSellerQueueRow(
     { id: "q-nosid", thread_key: "+13125550100", to_phone_number: "+13125550100",
-      campaign_target_id: "55555555-5555-4555-8555-555555555555", touch_number: 1, metadata: {} },
+      campaign_target_id: "55555555-5555-4555-8555-555555555555", touch_number: 1, lock_token: "claim-s11", metadata: {} },
     { to: "+13125550100", from: "+18885551212", body: "hello" },
     { store, sendProvider: provider.fn, getSystemValue: ALLOW }
   );
@@ -130,7 +131,7 @@ test("provider acceptance is recorded with its SID and forbids retry", async () 
   const provider = spy();
   const result = await dispatchSellerQueueRow(
     { id: "q-sid", thread_key: "+13125550100", to_phone_number: "+13125550100",
-      campaign_target_id: "66666666-6666-4666-8666-666666666666", touch_number: 1, metadata: {} },
+      campaign_target_id: "66666666-6666-4666-8666-666666666666", touch_number: 1, lock_token: "claim-s11", metadata: {} },
     { to: "+13125550100", from: "+18885551212", body: "hello" },
     { store, sendProvider: provider.fn, getSystemValue: ALLOW }
   );

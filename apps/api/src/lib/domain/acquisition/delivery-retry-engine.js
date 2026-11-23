@@ -265,7 +265,13 @@ export async function scheduleDeliveryRetry(context = {}, metadata = {}, deps = 
       queue_key: queueKey,
       queue_id: queueKey,
       dedupe_key: queueKey,
-      queue_status: "scheduled",
+      // FOUNDER P0 2026-11-23 item 1: retrying a delivery never independently
+      // authorizes an old message. The clone is born in the canonical review
+      // hold; only an explicit per-row owner release can make it sendable, and
+      // the final dispatch gate refuses it (retry_of_queue_row_id is hold
+      // history) until that release is fresh.
+      queue_status: "paused_operator_review",
+      paused_reason: "delivery_retry_requires_reauthorization",
       scheduled_for: timing.scheduled_for,
       scheduled_for_utc: timing.scheduled_for,
       scheduled_for_local: timing.scheduled_for,
@@ -287,6 +293,19 @@ export async function scheduleDeliveryRetry(context = {}, metadata = {}, deps = 
         retry_of_queue_row_id: queueRow.id,
         tried_template_ids: unique([...triedTemplateIds, template.template_id]),
         failure_reason: metadata.failure_reason || queueRow.failed_reason || "delivery_failed",
+        // An authorization copied from the failed row never carries over.
+        reauthorization: null,
+        reauthorization_required: {
+          trigger: "delivery_retry_clone",
+          at: (() => {
+            const d = new Date(metadata.now || deps.now || Date.now());
+            return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+          })(),
+          previous_status: clean(queueRow.queue_status) || null,
+          previous_reason: clean(queueRow.failed_reason) || null,
+          revalidation_blockers: ["authorization_scope_invalid"],
+          policy: "founder_p0_2026-11-23_no_automatic_reactivation",
+        },
       },
     },
     deps

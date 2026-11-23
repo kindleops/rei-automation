@@ -2737,6 +2737,18 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         getSystemValue: deps.getSystemValue || getSystemValue,
         scoped_canary: deps.scoped_canary === true,
         now,
+        // FINAL DISPATCH GATE inputs (final-dispatch-gate.js): the atomic claim's
+        // token (duplicate-send identity), and this run's contact-window verdict
+        // for the recipient's own zone (unknown zone = hold, automation included).
+        // An in-session reply may answer outside the window but never on an
+        // unknown zone; a fresh operator-attended inbox send is judged like the
+        // manual path (the operator chose the moment).
+        claim_token: lock_token,
+        contact_window,
+        in_session_reply: inbound_auto_reply === true,
+        operator_attended: fresh_manual_inbox_send === true,
+        ...(deps.finalGateReaders ? { finalGateReaders: deps.finalGateReaders } : {}),
+        ...(typeof deps.finalDispatchGate === "function" ? { finalDispatchGate: deps.finalDispatchGate } : {}),
         // the final sender-continuity check reads the same fleet / blocklist seams the selection used
         ...(typeof deps.loadOutboundNumberByPhone === "function" ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
         ...(typeof deps.loadDispatchBlockedSenders === "function" ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),

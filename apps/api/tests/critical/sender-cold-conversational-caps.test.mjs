@@ -222,7 +222,10 @@ test("cap-parked replies: fresh -> release; stale / overtaken -> review; cold ->
   assert.equal(decideCapHoldRelease(parked({ guard_reason: "outbound_number_health_cooling" }), { thread, now: NOW }).action, "skip");
 });
 
-test("release writes compare-and-set to 'queued' (never sends); review re-labels and alerts; dry run writes nothing", async () => {
+// FOUNDER P0 2026-11-23 (no automatic reactivation): a qualifying cap-parked row
+// is no longer re-queued. It is revalidated and held in the canonical review
+// status for an explicit operator release; both outcomes alert the operator.
+test("cap release never re-queues: a qualifying row is held for reauthorization; review re-labels; both alert; dry run writes nothing", async () => {
   const writes = [];
   const alerts = [];
   const deps = {
@@ -235,24 +238,50 @@ test("release writes compare-and-set to 'queued' (never sends); review re-labels
   };
   const dry = await releaseConversationalCapHolds({ dry_run: true }, deps);
   assert.equal(writes.length, 0);
-  assert.equal(dry.released, 1);
+  assert.equal(dry.released, 0);
+  assert.equal(dry.held_for_reauthorization, 1);
   assert.equal(dry.review, 1);
 
   const out = await releaseConversationalCapHolds({}, deps);
-  assert.equal(out.released, 1);
+  assert.equal(out.released, 0, "nothing is ever returned to the queue");
+  assert.equal(out.held_for_reauthorization, 1);
   assert.equal(out.review, 1);
   const release = writes.find((w) => w.id === "237d05da").payload;
-  assert.equal(release.queue_status, "queued");
-  assert.equal(release.guard_reason, null);
+  assert.equal(release.queue_status, "paused_operator_review");
+  assert.notEqual(release.queue_status, "queued");
   assert.equal(release.metadata.conversational_cap_release.previous_reason, CAP_HOLD_REASON);
+  assert.equal(release.metadata.conversational_cap_release.released, false);
+  assert.equal(release.metadata.reauthorization_required.trigger, "conversational_cap_release");
+  assert.ok(release.metadata.reauthorization_required.revalidation_blockers.includes("authorization_scope_invalid"),
+    "revalidateBeforeDispatch ran and recorded that no per-row authorization exists");
   const review = writes.find((w) => w.id === "960cca0e").payload;
   assert.equal(review.queue_status, undefined, "stays parked");
   assert.equal(review.guard_reason, STALE_REPLY_REVIEW_REASON);
-  assert.equal(alerts.length, 1);
-  assert.equal(alerts[0].deduplicationKey, "conversational_cap_review:960cca0e");
+  assert.equal(alerts.length, 2);
+  assert.deepEqual(alerts.map((a) => a.deduplicationKey).sort(), ["conversational_cap_review:237d05da", "conversational_cap_review:960cca0e"]);
 
   assert.equal((await releaseConversationalCapHolds({}, { ...deps, env: { CONVERSATIONAL_CAP_RELEASE: "off" } })).skipped, true);
   const blind = await releaseConversationalCapHolds({}, { ...deps, loadThreads: async () => { throw new Error("down"); } });
   assert.equal(blind.ok, false);
   assert.equal(blind.released, 0);
+});
+
+test("cap release payload: the final dispatch gate refuses the held row even if its status were flipped back to queued", async () => {
+  const { decideFinalDispatch, GATE_REASONS } = await import("../../src/lib/domain/queue/final-dispatch-gate.js");
+  const writes = [];
+  await releaseConversationalCapHolds({}, {
+    now: NOW, env: {},
+    loadParkedRows: async () => [parked()],
+    loadThreads: async () => new Map([[SELLER, thread]]),
+    applyDecision: async (id, payload) => (writes.push({ id, payload }), true),
+    notify: async () => ({ ok: true }),
+  });
+  const held = { ...parked(), ...writes[0].payload };
+  const flipped = { ...held, queue_status: "queued", lock_token: "claim-1" };
+  const verdict = decideFinalDispatch({
+    path: "queue", authority: { ok: true }, row: flipped, to: flipped.to_phone_number, thread_key: flipped.thread_key,
+    claim_token: "claim-1", facts_loaded: false, sender_continuity: { ok: true }, now: NOW,
+  });
+  assert.equal(verdict.ok, false);
+  assert.ok(verdict.refusals.includes(GATE_REASONS.REAUTHORIZATION_REQUIRED), JSON.stringify(verdict.refusals));
 });

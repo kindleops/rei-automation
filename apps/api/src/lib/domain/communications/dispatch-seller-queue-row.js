@@ -31,6 +31,7 @@ import { bindScopedCanaryTransportAuthority } from '@/lib/domain/queue/scoped-ca
 import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
 import { finalSenderContinuityCheck } from '@/lib/domain/delivery/sender-continuity.js';
+import { evaluateFinalDispatchGate } from '@/lib/domain/queue/final-dispatch-gate.js';
 
 const logger = child({ module: 'domain.communications.queue_dispatch' });
 
@@ -158,6 +159,8 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
   // The FINAL sender-continuity verdict of the attempt (owner P0, rc-8.5.21), returned to the caller
   // so a refusal becomes a visible hold bound to the thread's sender.
   let sender_continuity = null;
+  // The final dispatch gate's verdict for the attempt, returned for audit.
+  let final_gate = null;
   const sendProviderImpl = deps.sendProvider;
   const sendProvider = async (args) => {
     // Bind the scoped-canary transport authority to the communication the seam
@@ -204,40 +207,81 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
       now: deps.now || new Date().toISOString(),
       logger,
       // Re-evaluated per attempt: see the header note on STOP between retries.
+      //
+      // THE FINAL DISPATCH GATE (founder P0 2026-11-23). One shared gate, the
+      // same one the manual bridge uses, immediately before attempt allocation
+      // and the provider call: brake state now, row status, no automatic
+      // reactivation, contact identity, claim proof, live suppression (fail
+      // closed), archive / terminal / legal / repair / review / quarantine,
+      // automation holds, campaign state, quiet hours, sender continuity.
       evaluateRuntimeAuthority: async () => {
-        const authority = await evaluateCanonicalSendAuthority({
-          getSystemValue: deps.getSystemValue,
-          action: 'queue_send',
-          scopedCanary: deps.scoped_canary === true,
-        });
-        // Recorded, not re-derived. A denial leaves the previous value in place
-        // only because the seam refuses the attempt outright on !ok, so no
-        // provider call can follow a denial.
-        canonical_authority_verdict = authority.ok ? authority : null;
-        if (!authority.ok) return { ok: false, reason: authority.reason };
-        // SENDER CONTINUITY — the FINAL authoritative check (owner P0, rc-8.5.21), on EVERY attempt
-        // (a retry after a crash included), immediately before the attempt is allocated and the
-        // provider is called: the number about to be used must be the thread's established sender,
-        // read fresh, and that sender must still be able to send. Refused ⇒ no attempt, no provider
-        // call; the runner holds the row visibly (never another number).
-        const check = deps.finalSenderContinuityCheck || finalSenderContinuityCheck;
-        let continuity;
-        try {
-          continuity = await check(queue_row, { from: message_fields.from }, {
-            supabase: deps.supabase,
-            getSystemValue: deps.getSystemValue,
+        const gate = deps.finalDispatchGate || evaluateFinalDispatchGate;
+        const verdict = await gate(
+          {
+            path: 'queue',
+            row: queue_row,
+            to: message_fields.to,
+            from: message_fields.from,
+            thread_key: clean(queue_row.thread_key) || null,
+            // The atomic claim's lock token: proof THIS worker owns the row.
+            claim_token: clean(deps.claim_token || queue_row.lock_token) || null,
+            contact_window: deps.contact_window ?? null,
+            in_session_reply: deps.in_session_reply === true,
+            operator_attended: deps.operator_attended === true,
             now: deps.now,
-            ...(typeof deps.loadEstablishedSender === 'function' ? { loadEstablishedSender: deps.loadEstablishedSender } : {}),
-            ...(typeof deps.loadOutboundNumberByPhone === 'function' ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
-            ...(typeof deps.loadDispatchBlockedSenders === 'function' ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),
-          });
-        } catch {
-          continuity = { ok: false, reason: 'sender_continuity_unreadable', verdict: null };
-        }
-        sender_continuity = { ok: continuity?.ok === true, reason: continuity?.reason || null, sender_reason: continuity?.sender_reason || null, established_sender: continuity?.verdict?.established_sender || null, established_source: continuity?.verdict?.established_source || null };
-        if (!continuity?.ok) {
-          logger.warn('queue_dispatch.sender_continuity_refused', { queue_row_id, reason: continuity?.reason, sender_reason: continuity?.sender_reason || null });
-          return { ok: false, reason: continuity?.reason || 'sender_continuity_unreadable' };
+          },
+          {
+            supabase: deps.supabase,
+            ...(deps.finalGateReaders || {}),
+            evaluateAuthority: async () => {
+              const authority = await evaluateCanonicalSendAuthority({
+                getSystemValue: deps.getSystemValue,
+                action: 'queue_send',
+                scopedCanary: deps.scoped_canary === true,
+              });
+              // Recorded, not re-derived. A denial leaves the previous value in place
+              // only because the seam refuses the attempt outright on !ok, so no
+              // provider call can follow a denial.
+              canonical_authority_verdict = authority.ok ? authority : null;
+              return authority;
+            },
+            // SENDER CONTINUITY — the FINAL authoritative check (owner P0, rc-8.5.21), on EVERY attempt
+            // (a retry after a crash included), immediately before the attempt is allocated and the
+            // provider is called: the number about to be used must be the thread's established sender,
+            // read fresh, and that sender must still be able to send. Refused ⇒ no attempt, no provider
+            // call; the runner holds the row visibly (never another number).
+            checkSenderContinuity: async () => {
+              const check = deps.finalSenderContinuityCheck || finalSenderContinuityCheck;
+              let continuity;
+              try {
+                continuity = await check(queue_row, { from: message_fields.from }, {
+                  supabase: deps.supabase,
+                  getSystemValue: deps.getSystemValue,
+                  now: deps.now,
+                  ...(typeof deps.loadEstablishedSender === 'function' ? { loadEstablishedSender: deps.loadEstablishedSender } : {}),
+                  ...(typeof deps.loadOutboundNumberByPhone === 'function' ? { loadOutboundNumberByPhone: deps.loadOutboundNumberByPhone } : {}),
+                  ...(typeof deps.loadDispatchBlockedSenders === 'function' ? { loadDispatchBlockedSenders: deps.loadDispatchBlockedSenders } : {}),
+                });
+              } catch {
+                continuity = { ok: false, reason: 'sender_continuity_unreadable', verdict: null };
+              }
+              sender_continuity = { ok: continuity?.ok === true, reason: continuity?.reason || null, sender_reason: continuity?.sender_reason || null, established_sender: continuity?.verdict?.established_sender || null, established_source: continuity?.verdict?.established_source || null };
+              if (!continuity?.ok) {
+                logger.warn('queue_dispatch.sender_continuity_refused', { queue_row_id, reason: continuity?.reason, sender_reason: continuity?.sender_reason || null });
+                return { ok: false, reason: continuity?.reason || 'sender_continuity_unreadable' };
+              }
+              return { ok: true, reason: null };
+            },
+          }
+        );
+        final_gate = verdict;
+        if (!verdict?.ok) {
+          // The first refusal is the verdict. Sender continuity is checked last,
+          // so when it is the ONLY refusal its own reason surfaces and the runner
+          // still turns it into a visible hold bound to the thread's sender.
+          const reason = verdict?.reason;
+          logger.warn('queue_dispatch.final_gate_refused', { queue_row_id, reason, refusals: verdict?.refusals || [] });
+          return { ok: false, reason: reason || 'final_dispatch_gate_refused' };
         }
         // CONTACT RESTRICTIONS — FINAL provider-submission check (rc-8.5.21 v3 P0-C), on EVERY attempt: a
         // STOP / precautionary hold / property denial / thread hold that landed after the runner's
@@ -262,7 +306,12 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
     }
   );
 
-  return { ...outcome, raw_provider_result, ...(sender_continuity ? { sender_continuity } : {}) };
+  return {
+    ...outcome,
+    raw_provider_result,
+    ...(sender_continuity ? { sender_continuity } : {}),
+    ...(final_gate ? { final_gate: { ok: final_gate.ok, reason: final_gate.reason || null, refusals: final_gate.refusals || [], gate_version: final_gate.gate_version || null } } : {}),
+  };
 }
 
 export default dispatchSellerQueueRow;

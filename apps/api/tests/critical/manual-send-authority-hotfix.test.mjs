@@ -662,6 +662,8 @@ test("7a. two dispatches with the same operator_action_id send once (the §11 se
   const sendProvider = async () => { count += 1; return { sid: `SM_${count}` }; };
   const common = {
     operator_action_id: "op-double-click-1",
+    // The final dispatch gate requires a manual send to name its thread.
+    thread_key: THREAD,
     store,
     operator: OPERATOR,
     getSystemValue: controlPlane(AUTOMATION_STOPPED_MANUAL_ENABLED),

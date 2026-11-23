@@ -38,6 +38,8 @@ const row = (over = {}) => ({
   to_phone_number: "+13125550100",
   campaign_target_id: ANCHOR,
   touch_number: 1,
+  // The atomic claim's token: the final dispatch gate refuses an unclaimed row.
+  lock_token: "claim-matrix-1",
   metadata: {},
   ...over,
 });

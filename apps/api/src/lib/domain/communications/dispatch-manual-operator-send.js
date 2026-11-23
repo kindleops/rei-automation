@@ -24,6 +24,7 @@ import { evaluateManualSendAuthority } from '@/lib/domain/queue/manual-send-auth
 import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
 import { COMMUNICATION_TYPES } from '@/lib/domain/communications/logical-communication-key.js';
+import { evaluateFinalDispatchGate } from '@/lib/domain/queue/final-dispatch-gate.js';
 
 const logger = child({ module: 'domain.communications.manual_dispatch' });
 
@@ -51,6 +52,7 @@ export async function dispatchManualOperatorSend(input = {}) {
 
   let raw_provider_result = null;
   let send_authority = null;
+  let final_gate = null;
   const sendProviderImpl = input.sendProvider;
   const sendProvider = async (args) => {
     // Transport receives the verdict this dispatch ran under (fresh, evaluated
@@ -85,20 +87,46 @@ export async function dispatchManualOperatorSend(input = {}) {
       // authority (manual_send_mode + global_send_shutdown_at); without one it
       // is the canonical automation authority. Same function, same principal
       // as the first check in executeManualInboxSendNow: no second opinion.
+      //
+      // THE FINAL DISPATCH GATE (founder P0 2026-11-23): the SAME gate the queue
+      // bridge runs. Authorized founder manual messaging stays available when the
+      // checks succeed; a suppression list that cannot be read, an explicit
+      // opt-out, an archived or terminal thread, a quarantine, or a legal /
+      // repair hold refuses the manual send exactly as it refuses automation.
       evaluateRuntimeAuthority: async () => {
-        const authority = operator !== null
-          ? await evaluateManualSendAuthority({
-              getSystemValue: input.getSystemValue,
-              operator,
-              action: 'manual_inbox_send_now',
-            })
-          : await evaluateCanonicalSendAuthority({
-              getSystemValue: input.getSystemValue,
-              action: 'manual_inbox_send_now',
-              scopedCanary: input.scoped_canary === true,
-            });
-        if (!authority.ok) return { ok: false, reason: authority.reason };
-        send_authority = authority;
+        const gate = input.finalDispatchGate || evaluateFinalDispatchGate;
+        const verdict = await gate(
+          {
+            path: 'manual',
+            row: input.queue_row || null,
+            to: input.message?.to || input.to_phone_number || null,
+            from: input.message?.from || null,
+            thread_key: input.thread_key || null,
+            operator_action_id,
+            now: input.now,
+          },
+          {
+            supabase: input.supabase,
+            ...(input.finalGateReaders || {}),
+            evaluateAuthority: async () => (operator !== null
+              ? evaluateManualSendAuthority({
+                  getSystemValue: input.getSystemValue,
+                  operator,
+                  action: 'manual_inbox_send_now',
+                })
+              : evaluateCanonicalSendAuthority({
+                  getSystemValue: input.getSystemValue,
+                  action: 'manual_inbox_send_now',
+                  scopedCanary: input.scoped_canary === true,
+                })),
+          }
+        );
+        final_gate = verdict;
+        if (!verdict?.ok) {
+          logger.warn('manual_dispatch.final_gate_refused', { operator_action_id, reason: verdict?.reason, refusals: verdict?.refusals || [] });
+          return { ok: false, reason: verdict?.reason || 'final_dispatch_gate_refused' };
+        }
+        send_authority = verdict.authority;
         return { ok: true };
       },
       assertOutboundContent: async (message) => {
@@ -114,6 +142,7 @@ export async function dispatchManualOperatorSend(input = {}) {
     operator_action_id,
     send_authority: send_authority?.authority || null,
     send_authority_version: send_authority?.authority_version || null,
+    ...(final_gate ? { final_gate: { ok: final_gate.ok, reason: final_gate.reason || null, refusals: final_gate.refusals || [], gate_version: final_gate.gate_version || null } } : {}),
   };
 }
 

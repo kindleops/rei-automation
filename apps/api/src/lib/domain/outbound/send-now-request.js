@@ -240,13 +240,46 @@ export async function buildAndSendNow(
   };
 }
 
-export async function handleSendNowRequestData(request, method = "GET", deps = {}) {
+/**
+ * Log-safe destination: never the number itself (founder P0 2026-11-23 item 6:
+ * phones and message text stay out of request logs). The last four digits are
+ * enough to correlate with an operator's report; nothing more is recorded.
+ */
+export function maskPhoneForLog(value) {
+  const digits = clean(value).replace(/\D/g, "");
+  if (!digits) return null;
+  return `***${digits.slice(-4)}`;
+}
+
+export const SEND_NOW_ALLOWED_METHODS = Object.freeze(["POST"]);
+
+export async function handleSendNowRequestData(request, method = "POST", deps = {}) {
   const {
     logger,
     queueOutboundMessageImpl = queueOutboundMessage,
     processSendQueueImpl = processSendQueue,
     authorizeRequest = authorizeInternalSendRoute,
   } = deps;
+
+  // FOUNDER P0 2026-11-23 item 6: no message sending via URL parameters. A GET
+  // carried the destination phone and the message text in the query string,
+  // where every proxy, access log and browser history keeps them. Only an
+  // authenticated POST with the message in its body can send. Refused before
+  // the request is authenticated or read, so nothing from the URL is ever used.
+  if (!SEND_NOW_ALLOWED_METHODS.includes(clean(method).toUpperCase())) {
+    logger?.warn?.("outbound_send_now.method_not_allowed", { method: clean(method).toUpperCase() || null });
+    return {
+      status: 405,
+      headers: { Allow: SEND_NOW_ALLOWED_METHODS.join(", ") },
+      payload: {
+        ok: false,
+        route: "internal/outbound/send-now",
+        error: "method_not_allowed",
+        reason: "send_now_requires_post_body",
+        message: "Send-now accepts only an authenticated POST with the message in the request body.",
+      },
+    };
+  }
 
   // Authenticate before reading the request at all.
   const auth = authorizeRequest(request);
@@ -258,47 +291,37 @@ export async function handleSendNowRequestData(request, method = "GET", deps = {
     );
   }
 
+  // Log metadata only: a masked destination and the message LENGTH. The phone
+  // and the message text never enter request logs.
   let request_meta = {
     method,
-    phone: null,
+    phone_masked: null,
     use_case: null,
     language: null,
     touch_number: null,
     message_override_present: false,
-    message_override_preview: null,
+    message_length: 0,
   };
 
   try {
-    let normalized_input = null;
-
-    if (method === "GET") {
-      const { searchParams } = new URL(request.url);
-      normalized_input = normalizeSendNowInput({
-        phone: searchParams.get("phone"),
-        use_case: searchParams.get("use_case"),
-        language: searchParams.get("language"),
-        touch_number: searchParams.get("touch_number"),
-        message_text: searchParams.get("message_text"),
-        rendered_message_text: searchParams.get("rendered_message_text"),
-      });
-    } else {
-      const body = await request.json().catch(() => ({}));
-      normalized_input = normalizeSendNowInput(body);
-    }
+    const body = await request.json().catch(() => ({}));
+    const normalized_input = normalizeSendNowInput(body);
 
     request_meta = {
       method,
-      phone: normalized_input.phone,
+      phone_masked: maskPhoneForLog(normalized_input.phone),
       use_case: normalized_input.use_case,
       language: normalized_input.language,
       touch_number: normalized_input.touch_number,
       message_override_present: normalized_input.message_override_present,
-      message_override_preview: normalized_input.message_override_preview,
+      message_length: clean(normalized_input.rendered_message_text).length,
     };
 
     logger?.info?.("outbound_send_now.requested", request_meta);
 
-    const result = await buildAndSendNow(normalized_input, {
+    // The preview is for the caller's own response only; it is never logged.
+    const { message_override_preview: _preview, ...send_input } = normalized_input;
+    const result = await buildAndSendNow(send_input, {
       queueOutboundMessageImpl,
       processSendQueueImpl,
       ...(deps.getSystemValue ? { getSystemValue: deps.getSystemValue } : {}),

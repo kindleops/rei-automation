@@ -21,19 +21,24 @@
  *     stale or overtaken by newer thread activity.
  *   SKIP: cold rows (the cap still applies to them) and anything else.
  *
- * A release never sends. It only returns the row to 'queued' (compare-and-set
- * on the parked state + reason); the runner then claims it and re-applies
- * EVERY gate — suppression, opt-out, contact window, emergency stop,
- * queue_processor_mode, number status / health / cooling / spam, the total
- * ceiling, the sender revalidation — exactly as for any other row.
+ * FOUNDER P0 2026-11-23 (no automatic reactivation): a qualifying row is no
+ * longer returned to 'queued'. It is revalidated (queue-authority.js
+ * revalidateBeforeDispatch) and moved to the canonical review hold
+ * (paused_operator_review, compare-and-set on the parked state + reason) with
+ * the verdict recorded, and the operator is alerted. Only an explicit per-row
+ * owner release makes it sendable, and the final dispatch gate re-checks it.
  * Kill switch: env CONVERSATIONAL_CAP_RELEASE=off.
  */
 
 import { SEND_CLASS, classifySend, sendRowThreadKey } from "@/lib/domain/delivery/send-class.js";
+import { revalidateBeforeDispatch } from "@/lib/domain/queue/queue-authority.js";
+import { buildReauthorizationHoldPatch } from "@/lib/domain/queue/final-dispatch-gate.js";
 
 export const CAP_HOLD_STATUS = "blocked_sender_ineligible";
 export const CAP_HOLD_REASON = "outbound_number_daily_limit_reached";
 export const STALE_REPLY_REVIEW_REASON = "conversational_reply_stale_needs_review";
+// A row that WOULD have been released: held for an operator's explicit, per-row release.
+export const CAP_RELEASE_REVIEW_REASON = "conversational_cap_release_requires_reauthorization";
 // The system's own definition of a prompt reply (IMMEDIATE_INBOUND_REPLY_MAX_AGE_MS,
 // MANUAL_INBOX_SEND_FRESHNESS_MS = 60 min). Older replies would be deferred by the
 // contact window to the next morning — exactly the stale send this must not make.
@@ -135,19 +140,37 @@ export async function releaseConversationalCapHolds({ dry_run = false, limit = B
     if (dry_run || decision.action === "skip") continue;
     const at = now.toISOString();
     const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    // FOUNDER P0 2026-11-23 item 1: a cap release never makes a parked row
+    // sendable again. A row that qualifies for release is revalidated
+    // (revalidateBeforeDispatch) and moved to the canonical review hold with
+    // the verdict recorded; an operator releases it explicitly, per row.
+    const revalidation = decision.action === "release"
+      ? revalidateBeforeDispatch({
+        row,
+        new_inbound_since_plan: false,
+        // Parking a row and letting a job re-queue it is not an authorization.
+        authorization_scope_valid: false,
+      })
+      : null;
     const payload = decision.action === "release"
-      ? {
-        queue_status: "queued",
-        guard_status: null,
-        guard_reason: null,
-        failed_reason: null,
-        updated_at: at,
-        metadata: {
-          ...metadata,
-          skip_reason: null,
-          conversational_cap_release: { released_at: at, previous_reason: CAP_HOLD_REASON, send_class: decision.send_class, basis: decision.basis },
-        },
-      }
+      ? (() => {
+        const held = buildReauthorizationHoldPatch(row, {
+          trigger: "conversational_cap_release",
+          now: at,
+          blockers: revalidation?.blockers || [],
+        });
+        return {
+          ...held,
+          guard_status: "held",
+          guard_reason: CAP_RELEASE_REVIEW_REASON,
+          failed_reason: null,
+          metadata: {
+            ...held.metadata,
+            skip_reason: CAP_RELEASE_REVIEW_REASON,
+            conversational_cap_release: { eligible_at: at, released: false, previous_reason: CAP_HOLD_REASON, send_class: decision.send_class, basis: decision.basis },
+          },
+        };
+      })()
       : {
         guard_reason: STALE_REPLY_REVIEW_REASON,
         failed_reason: STALE_REPLY_REVIEW_REASON,
@@ -174,7 +197,7 @@ export async function releaseConversationalCapHolds({ dry_run = false, limit = B
     } catch {
       outcome.applied = false;
     }
-    if (outcome.applied && decision.action === "review") {
+    if (outcome.applied && (decision.action === "review" || decision.action === "release")) {
       try {
         const notify = deps.notify || (await import("@/lib/domain/notifications/notification-emitter.js")).emitNotificationFromBusinessEvent;
         await notify({
@@ -200,7 +223,10 @@ export async function releaseConversationalCapHolds({ dry_run = false, limit = B
     ok: true,
     dry_run,
     examined: rows.length,
-    released: count("release"),
+    // Nothing is released to the queue any more (founder P0 2026-11-23): rows
+    // that qualify are held for an explicit operator release.
+    released: 0,
+    held_for_reauthorization: count("release"),
     review: count("review"),
     skipped: outcomes.filter((o) => o.action === "skip").length,
     outcomes,

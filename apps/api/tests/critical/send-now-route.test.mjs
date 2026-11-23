@@ -87,8 +87,14 @@ test("send-now POST accepts custom message_text and forwards it as a real overri
   assert.equal(payload.result.queued.queue_item_id, 7001);
 });
 
-test("send-now GET keeps missing touch_number null and accepts rendered_message_text alias", async () => {
-  let queued_payload = null;
+// FOUNDER P0 2026-11-23 item 6: no sending via URL parameters. A GET that is
+// fully AUTHENTICATED and carries a phone + message in the query string is
+// refused with 405 before anything is read, queued or sent, and the URL's
+// phone / message never reach a log line.
+test("send-now GET is refused (405) even when authenticated; nothing from the URL is queued, sent or logged", async () => {
+  let queued = 0;
+  let processed = 0;
+  const { entries, logger } = makeLogger();
 
   const response = await handleSendNowRequestData(
     new Request(
@@ -97,25 +103,52 @@ test("send-now GET keeps missing touch_number null and accepts rendered_message_
     ),
     "GET",
     {
-      logger: makeLogger().logger,
+      logger,
       getSystemValue: HEALTHY,
-      queueOutboundMessageImpl: async (payload) => {
-        queued_payload = payload;
-        return {
-          ok: true,
-          queue_item_id: 7002,
-        };
-      },
-      processSendQueueImpl: async () => ({
-        ok: true,
-        sent: true,
-      }),
+      queueOutboundMessageImpl: async () => { queued += 1; return { ok: true, queue_item_id: 7002 }; },
+      processSendQueueImpl: async () => { processed += 1; return { ok: true, sent: true }; },
     }
   );
 
-  assert.equal(response.status, 200);
-  assert.equal(queued_payload.touch_number, null);
-  assert.equal(queued_payload.rendered_message_text, "Manual reply");
+  assert.equal(response.status, 405);
+  assert.equal(response.headers?.Allow, "POST");
+  assert.equal(response.payload.ok, false);
+  assert.equal(response.payload.error, "method_not_allowed");
+  assert.equal(queued + processed, 0, "a URL-parameter send never queues or sends");
+  const logged = JSON.stringify(entries);
+  assert.ok(!logged.includes("12087034955") && !logged.includes("4955"), "no part of the phone reaches a log");
+  assert.ok(!logged.includes("Manual reply"), "the message text never reaches a log");
+});
+
+test("the route module exports no GET handler (only POST can send)", async () => {
+  const route = await import("@/app/api/internal/outbound/send-now/route.js");
+  assert.equal(typeof route.GET, "undefined");
+  assert.equal(typeof route.POST, "function");
+});
+
+test("send-now POST logs a masked destination and the message LENGTH, never the phone or the text", async () => {
+  const { entries, logger } = makeLogger();
+  await handleSendNowRequestData(
+    new Request("http://localhost/api/internal/outbound/send-now", {
+      method: "POST",
+      body: JSON.stringify({ phone: "12087034955", message_text: "Private seller text" }),
+      headers: { "Content-Type": "application/json", ...AUTH },
+    }),
+    "POST",
+    {
+      logger,
+      getSystemValue: HEALTHY,
+      queueOutboundMessageImpl: async () => ({ ok: true, queue_item_id: 7010 }),
+      processSendQueueImpl: async () => ({ ok: true, sent: true }),
+    }
+  );
+  const logged = JSON.stringify(entries);
+  assert.ok(entries.length > 0);
+  assert.ok(!logged.includes("12087034955"), "raw phone is not logged");
+  assert.ok(!logged.includes("Private seller text"), "message text is not logged");
+  const requested = entries.find((e) => e.event === "outbound_send_now.requested");
+  assert.equal(requested.meta.phone_masked, "***4955");
+  assert.equal(requested.meta.message_length, "Private seller text".length);
 });
 
 test("send-now route returns a structured queue-build failure instead of a blind 500", async () => {
@@ -152,7 +185,8 @@ test("send-now route returns a structured queue-build failure instead of a blind
 
   const completed_entry = entries.find((entry) => entry.event === "outbound_send_now.completed");
   assert.ok(completed_entry, "expected completion log entry");
-  assert.equal(completed_entry.meta.phone, "12087034955");
+  assert.equal(completed_entry.meta.phone, undefined, "the raw phone is never logged");
+  assert.equal(completed_entry.meta.phone_masked, "***4955");
   assert.equal(completed_entry.meta.message_override_present, true);
   assert.equal(completed_entry.meta.queued_stage, "queue_build");
   assert.equal(completed_entry.meta.queued_reason, "queue_build_failed");
@@ -234,7 +268,9 @@ test("send-now refuses a request with no credential, a wrong credential, or a qu
     "GET",
     neverSendDeps(calls)
   );
-  assert.equal(via_query.status, 401);
+  // A GET is refused before authentication is even attempted (405), so a
+  // query-string credential can never be evaluated, let alone accepted.
+  assert.equal(via_query.status, 405);
   assert.equal(calls.queued + calls.processed, 0);
 
   const bearer = await handleSendNowRequestData(sendNowRequest({ authorization: "Bearer test" }), "POST", neverSendDeps({ queued: 0, processed: 0 }));

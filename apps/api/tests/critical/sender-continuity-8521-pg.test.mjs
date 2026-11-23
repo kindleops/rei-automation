@@ -209,7 +209,8 @@ test('PG continuity (adversarial): a FORGED from_phone_number on an established 
     // 4. the FINAL check: the seam itself, called directly with the forged sender (every earlier layer bypassed)
     const store = createSellerCommunicationStore({ supabase: env.sb })
     const sent = []
-    const direct = await dispatchSellerQueueRow({ ...forged, queue_status: 'processing' }, { to: phone, from: FALLBACK_SENDER, body: forged.message_body }, {
+    // lock_token: the final dispatch gate refuses an unclaimed row first; this case is about continuity.
+    const direct = await dispatchSellerQueueRow({ ...forged, queue_status: 'processing', lock_token: 'claim-direct' }, { to: phone, from: FALLBACK_SENDER, body: forged.message_body }, {
       supabase: env.sb, store, now, getSystemValue: itemDeps(env, { provider }).getSystemValue,
       loadOutboundNumberByPhone: itemDeps(env, { provider }).loadOutboundNumberByPhone,
       sendProvider: async (m) => { sent.push(m); return { ok: true, sid: 'SMforged' } },
@@ -220,7 +221,7 @@ test('PG continuity (adversarial): a FORGED from_phone_number on an established 
     assert.equal((await attemptsOf(env, row.id)).length, 0, 'no attempt is allocated')
     // the same seam with the thread's own sender but that sender unhealthy ⇒ sender_unavailable at the final check
     await setHealth(env, OURS, 'cooling', 'cooling')
-    const unhealthy = await dispatchSellerQueueRow({ ...forged, from_phone_number: OURS, queue_status: 'processing' }, { to: phone, from: OURS, body: forged.message_body }, {
+    const unhealthy = await dispatchSellerQueueRow({ ...forged, from_phone_number: OURS, queue_status: 'processing', lock_token: 'claim-direct' }, { to: phone, from: OURS, body: forged.message_body }, {
       supabase: env.sb, store, now, getSystemValue: itemDeps(env, { provider }).getSystemValue, loadOutboundNumberByPhone: itemDeps(env, { provider }).loadOutboundNumberByPhone,
       sendProvider: async (m) => { sent.push(m); return { ok: true, sid: 'SMx' } },
     })

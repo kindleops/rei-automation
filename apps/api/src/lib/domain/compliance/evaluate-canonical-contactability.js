@@ -108,12 +108,15 @@ export async function evaluateCanonicalContactability(
     normalizePhone(thread_key) || normalizePhone(to_phone_number) || clean(thread_key);
   const normalized_to = normalizePhone(to_phone_number) || normalized_thread;
 
+  // FOUNDER P0 2026-11-23 item 5: an unreadable suppression list refuses
+  // automated AND manual sends. Founder manual messaging stays available
+  // whenever the checks succeed; it is never a way around a check that failed.
   if (!supabase) {
     return {
-      blocked: fail_closed_for_automated && !manual_operator_send,
+      blocked: true,
       reason: "suppression_check_unavailable",
       reason_code: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
-      fail_closed: fail_closed_for_automated && !manual_operator_send,
+      fail_closed: true,
     };
   }
 
@@ -180,15 +183,13 @@ export async function evaluateCanonicalContactability(
   if (normalized_to) {
     const suppression = await queryActiveSuppression(supabase, normalized_to);
     if (suppression.lookup_error) {
-      const fail_closed_at_send_time = !is_enqueue_check;
-      if (fail_closed_at_send_time || (fail_closed_for_automated && !manual_operator_send)) {
-        return {
-          blocked: true,
-          reason: "suppression_check_unavailable",
-          reason_code: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
-          fail_closed: true,
-        };
-      }
+      // Always refuses: enqueue or send time, automated or manual.
+      return {
+        blocked: true,
+        reason: "suppression_check_unavailable",
+        reason_code: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
+        fail_closed: true,
+      };
     } else if (suppression.suppressed) {
       return {
         blocked: true,
@@ -255,23 +256,25 @@ export async function evaluateCanonicalContactability(
         .maybeSingle();
       inbox_thread_state = thread_state;
       if (!error && thread_state) {
-        if (!manual_operator_send) {
-          if (thread_state.status === "paused_review") {
-            return {
-              blocked: true,
-              reason: "thread_paused_review",
-              reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-              fail_closed: false,
-            };
-          }
-          if (thread_state.metadata?.incident_quarantine === true) {
-            return {
-              blocked: true,
-              reason: "thread_quarantined",
-              reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-              fail_closed: false,
-            };
-          }
+        // An operator may answer a thread that is in review (that is what review
+        // is for); automation may not. paused_operator_review is the canonical
+        // containment status (queue-authority.js REVIEW_HOLD_STATUS).
+        if (!manual_operator_send && ["paused_review", "paused_operator_review"].includes(thread_state.status)) {
+          return {
+            blocked: true,
+            reason: "thread_paused_review",
+            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+            fail_closed: false,
+          };
+        }
+        // An incident quarantine is a hard block for EVERY sender, operator included.
+        if (thread_state.metadata?.incident_quarantine === true) {
+          return {
+            blocked: true,
+            reason: "thread_quarantined",
+            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+            fail_closed: false,
+          };
         }
         // Belt and braces (2026-10-06): a thread marked suppressed is never
         // texted, even when its sms_suppression_list row is missing.

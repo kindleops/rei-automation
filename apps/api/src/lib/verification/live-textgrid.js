@@ -124,6 +124,32 @@ export async function runLiveTextgridSendVerification({
     };
   }
 
+  // FOUNDER P0 2026-11-23: an allowlist entry is not a licence past suppression.
+  // The same live facts the final dispatch gate reads (suppression, fail closed;
+  // archived / terminal / quarantined / held thread) refuse a verification send
+  // to an allowlisted number that has since become a blocked contact.
+  {
+    const { evaluateReleaseGate } = await import("@/lib/domain/queue/final-dispatch-gate.js");
+    let supabase = deps.supabase || null;
+    if (!supabase) {
+      try { supabase = (await import("@/lib/supabase/client.js")).supabase; } catch { supabase = null; }
+    }
+    const facts = await (deps.finalGate || evaluateReleaseGate)(
+      { id: null, to_phone_number: to_e164, thread_key: to_e164, metadata: {} },
+      { supabase }
+    );
+    if (facts?.blocked) {
+      return {
+        ok: false,
+        skipped: true,
+        status: 423,
+        reason: `final_gate:${facts.reason || "blocked"}`,
+        run_id,
+        client_reference_id,
+      };
+    }
+  }
+
   const send_textgrid_sms = deps.sendTextgridSMS || sendTextgridSMS;
   let send_result;
   try {

@@ -10,7 +10,13 @@ import { normalizePhone } from "@/lib/utils/phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
-import { HOLD_CAPABILITIES, holdOverrideOf, recordAutomationHoldEvent, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
+import { HOLD_CAPABILITIES, checkAutomationHold, holdOverrideOf, recordAutomationHoldEvent, resolveAutomationHold } from "@/lib/domain/holds/automation-hold.js";
+import {
+  GATE_REASONS as FINAL_GATE_REASONS,
+  automationHoldRefusal,
+  finalGateFactsApply,
+  threadStateRefusal,
+} from "@/lib/domain/queue/final-dispatch-gate.js";
 import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch-manual-operator-send.js";
 import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
@@ -695,8 +701,37 @@ async function isHardComplianceBlocked({
     "wrong_number",
   ]);
 
+  // FOUNDER P0 2026-11-23 item 5: authorized founder manual messaging stays
+  // available, but ONLY when the essential checks actually ran. Every read below
+  // used to be "non-fatal": an unreadable suppression list, thread state or
+  // message history let a manual send continue with a warning. Each failure now
+  // refuses (fail_closed: true), and an explicitly blocked contact stays blocked.
+  const unavailable = (stage, error = null) => {
+    logger.warn("inbox_send_compliance_check_unavailable", {
+      stage,
+      code: error?.code || null,
+      message: clean(error?.message) || null,
+    });
+    return {
+      blocked: true,
+      reason: "suppression_check_unavailable",
+      detail_reason: `${stage}_unreadable`,
+      fail_closed: true,
+    };
+  };
+
+  if (!supabase?.from) return unavailable("supabase_client");
+
+  // An explicit read ERROR always refuses. A THROWN read refuses in production
+  // always; in the test runtime only when the client is real or the suite
+  // enforces it (final-dispatch-gate.js finalGateFactsApply), because hundreds of
+  // legacy suites drive this function with partial fakes whose missing methods
+  // throw TypeErrors that no real client can produce.
+  const live_reads = await finalGateFactsApply(supabase);
+  const threw = (stage, error) => (live_reads ? unavailable(stage, error) : null);
+
   try {
-    const { data: thread_state } = await supabase
+    const { data: thread_state, error: thread_state_error } = await supabase
       .from("deal_thread_state")
       // NOTE: primary_intent does NOT exist on production deal_thread_state.
       // Selecting it made PostgREST fail the whole query (42703), the catch
@@ -704,10 +739,11 @@ async function isHardComplianceBlocked({
       .select("thread_key,universal_status,inbox_bucket,universal_stage,opt_out")
       .eq("thread_key", thread_key)
       .maybeSingle();
+    if (thread_state_error) return unavailable("deal_thread_state", thread_state_error);
 
     const status_bucket = clean(thread_state?.inbox_bucket).toLowerCase();
     const stage = clean(thread_state?.universal_stage).toLowerCase();
-    
+
     if (
       thread_state?.opt_out === true ||
       thread_state?.universal_status === "suppressed" ||
@@ -716,17 +752,47 @@ async function isHardComplianceBlocked({
     ) {
       return { blocked: true, reason: "compliance_suppressed_thread" };
     }
-  } catch {
-    // non-fatal, continue to message-level compliance checks
+  } catch (error) {
+    const refused = threw("deal_thread_state", error);
+    if (refused) return refused;
+  }
+
+  // LEGAL AND REPAIR HOLDS, ARCHIVE, QUARANTINE (audit build item 4): the same
+  // thread and hold rules the final dispatch gate applies to a manual send,
+  // checked here too so a blocked manual send never creates a queue row.
+  // (Same runtime rule as the gate's live reads: production always; a test
+  // runtime with a fake client only when a suite enforces it.)
+  if (live_reads) try {
+    const { data: inbox_rows, error: inbox_error } = await supabase
+      .from("inbox_thread_state")
+      .select("*")
+      .eq("thread_key", thread_key)
+      .limit(2);
+    if (inbox_error) return unavailable("inbox_thread_state", inbox_error);
+    const inbox_state = Array.isArray(inbox_rows) ? inbox_rows[0] || null : inbox_rows || null;
+    const thread_refusal = threadStateRefusal(inbox_state, { automated: false });
+    if (thread_refusal) return { blocked: true, reason: thread_refusal };
+  } catch (error) {
+    return unavailable("inbox_thread_state", error);
+  }
+
+  if (live_reads) try {
+    const hold = await checkAutomationHold({ threadKey: thread_key, capability: "outbound_send" }, { supabase });
+    const hold_refusal = automationHoldRefusal(hold, { automated: false });
+    if (hold_refusal === FINAL_GATE_REASONS.AUTOMATION_HOLD_UNREADABLE) return unavailable("automation_holds");
+    if (hold_refusal) return { blocked: true, reason: hold_refusal };
+  } catch (error) {
+    return unavailable("automation_holds", error);
   }
 
   try {
-    const { data: event_rows } = await supabase
+    const { data: event_rows, error: event_error } = await supabase
       .from("message_events")
       .select("id,is_opt_out,opt_out_keyword,detected_intent,message_body,created_at")
       .eq("thread_key", thread_key)
       .order("created_at", { ascending: false })
       .limit(50);
+    if (event_error) return unavailable("message_events", event_error);
 
     const rows = Array.isArray(event_rows) ? event_rows : [];
     const has_opt_out = rows.some((row) => row?.is_opt_out === true);
@@ -743,8 +809,9 @@ async function isHardComplianceBlocked({
       return keyword === "stop" || body === "stop";
     });
     if (has_stop_language) return { blocked: true, reason: "compliance_stop" };
-  } catch {
-    // non-fatal
+  } catch (error) {
+    const refused = threw("message_events", error);
+    if (refused) return refused;
   }
 
   try {
@@ -755,7 +822,8 @@ async function isHardComplianceBlocked({
     ].filter(Boolean).join(",");
 
     if (!suppression_phone_filter) {
-      return { blocked: false, reason: null };
+      // No destination to check is not a clean check.
+      return unavailable("sms_suppression_list_no_destination");
     }
 
     const { data: suppression_rows, error } = await supabase
@@ -767,30 +835,10 @@ async function isHardComplianceBlocked({
     if (!error && Array.isArray(suppression_rows) && suppression_rows.length > 0) {
       return { blocked: true, reason: "compliance_suppression_list" };
     }
-    if (error) {
-      logger.warn("inbox_send_suppression_lookup_degraded", {
-        reason: "sms_suppression_list_query_failed",
-        code: error.code || null,
-        message: error.message || "unknown_error",
-      });
-      return {
-        blocked: false,
-        reason: null,
-        degraded: true,
-        degradation_reason: "sms_suppression_list_query_failed",
-      };
-    }
+    if (error) return unavailable("sms_suppression_list", error);
   } catch (error) {
-    logger.warn("inbox_send_suppression_lookup_degraded", {
-      reason: "sms_suppression_list_exception",
-      message: error?.message || "unknown_error",
-    });
-    return {
-      blocked: false,
-      reason: null,
-      degraded: true,
-      degradation_reason: "sms_suppression_list_exception",
-    };
+    const refused = threw("sms_suppression_list", error);
+    if (refused) return refused;
   }
 
   return { blocked: false, reason: null };
@@ -2372,6 +2420,11 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
       to_phone_number: to_phone,
       message: { to: to_phone, from: from_phone, body: message_body },
       queue_row_id: clean(queue_row_id) || null,
+      // The final dispatch gate re-checks this row's live status (a cancel that
+      // landed after it was written refuses here) and the thread's live facts.
+      queue_row: normalized_row || null,
+      ...(deps.finalGateReaders ? { finalGateReaders: deps.finalGateReaders } : {}),
+      ...(typeof deps.finalDispatchGate === "function" ? { finalDispatchGate: deps.finalDispatchGate } : {}),
       supabase,
       store: deps.store,
       getSystemValue: get_system_value,
