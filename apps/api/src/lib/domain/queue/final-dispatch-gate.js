@@ -97,7 +97,15 @@ const ts = (value) => {
   const t = Date.parse(clean(value));
   return Number.isFinite(t) ? t : null;
 };
-const toMs = (now) => (now instanceof Date ? now.getTime() : ts(now) ?? Date.now());
+// Accepts a Date, an epoch-ms number or an ISO string. A number used to go
+// through Date.parse(String(n)), which is NaN, so every numeric `now` silently
+// became the wall clock and the 24 h reauthorization expiry could not be judged
+// against the caller's time.
+const toMs = (now) => {
+  if (now instanceof Date) return now.getTime();
+  if (typeof now === "number" && Number.isFinite(now)) return now;
+  return ts(now) ?? Date.now();
+};
 
 // ── queue row status ─────────────────────────────────────────────────────────
 

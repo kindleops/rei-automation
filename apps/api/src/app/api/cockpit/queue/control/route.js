@@ -1037,7 +1037,9 @@ export async function POST(request) {
       getSystemValue: async (key) => {
         if (key === 'campaign_mode') return 'live_limited'
         if (key === 'queue_auto_enqueue_enabled') return 'false'
-        if (key === 'queue_emergency_stop_at') return ''
+        // FOUNDER P0 2026-11-23: the emergency stop is read as it really is.
+        // This used to answer '' (no stop) so a row could be created past an
+        // active brake; a brake now refuses creation like every other path.
         return values[key] ?? null
       },
     })
