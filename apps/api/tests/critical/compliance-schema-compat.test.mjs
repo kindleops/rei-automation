@@ -352,7 +352,9 @@ test("I: internal_canary activity_status recognized through phone_id lookup", as
   assert.equal(guard.blocked, false);
 });
 
-test("J: manual operator send blocked by quarantine policy", async () => {
+// FOUNDER P0 2026-11-23: an incident quarantine is a hard block for EVERY
+// sender, the operator included (it used to exempt manual sends).
+test("J: an incident quarantine blocks the automated AND the manual operator send", async () => {
   const supabase = makePhonesSupabase({
     phone_id: "ph_prod_007",
     canonical_e164: THREAD,
@@ -387,7 +389,8 @@ test("J: manual operator send blocked by quarantine policy", async () => {
     },
     { supabase }
   );
-  assert.equal(manual.blocked, false);
+  assert.equal(manual.blocked, true);
+  assert.equal(manual.reason, "thread_quarantined");
 });
 // ── the thread-state checks actually run against the production schema ──────
 const ACTIVE_PHONE = {
