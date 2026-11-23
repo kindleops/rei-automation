@@ -616,7 +616,10 @@ test("DASHBOARD retry-failed / reprocess-paused (and every queue writer) are fen
   }
   // Source shape, CODE only: the fenced files may explain in comments what they
   // used to do (send_queue ...), but their code is exactly the fence and nothing else.
-  const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").split("\n").map((l) => l.trim()).filter(Boolean);
+  // Whole-line `//` comments go FIRST: a line comment may contain a `/*` (the
+  // fence's header says "api/internal/queue/*"), and stripping block comments
+  // first let that fake opener swallow real code up to the next `*/`.
+  const codeOnly = (src) => src.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.trim()).filter(Boolean);
   for (const route of FENCED) {
     const code = codeOnly(fs.readFileSync(path.join(DASH, `api/internal/queue/${route}.ts`), "utf8"));
     assert.deepEqual(code, [
