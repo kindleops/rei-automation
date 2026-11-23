@@ -4,6 +4,19 @@ Base: `c6bc61d0` (the production build on `release/cloudflare-production`).
 Scope: founder P0 items 1, 2, 5, 6 and 9 on the LeadCommand production line.
 Nothing in this change sends a message. Nothing has been deployed.
 
+## Round 3: the round-2 tests now exercise the real logic (no gate change)
+
+The operator's run of `test:p0-dispatch-gate` on `e96f468b` had 7 failures in `tests/critical/p0-final-dispatch-gate-round2.test.mjs`. All 7 were harness faults. The gate and the fence behaved correctly, so the code is unchanged.
+
+- **Owner release tests (6 failures: positive, 4 forged-release cases, overtaken).** The shared `critical-test-environment.mjs` resets `process.env` before **every** test. The suite set `QUEUE_OWNER_RELEASE_SECRET` once, in `test.before`, so the secret was gone by the time each test ran. `signOwnerRelease` returned null, the "released" row carried no release at all, and building its history (`Date.parse(undefined)`) threw inside the injected history reader. The gate then answered `final_gate_row_history_unreadable`, which is the correct fail-closed answer for a reader that throws. The signature and audit checks were never reached.
+  - Fix: the secret is set in a `beforeEach` that runs after the helper's. Fixtures sign with an explicit key and assert the release really is signed. History is built in the test body, so a fixture fault fails loudly and can no longer pass for a gate refusal.
+  - Each case now records the gate's full verdict and asserts **which** check refused: `release_unsigned`, `release_signature_invalid` (random signature, retargeted copy, wrong key, edited body, edited recipient), `release_row_mismatch` (copied record), `release_key_unavailable` (no key at send time), audit missing / another signature / audit unreadable (`release_audit_unreadable`), `status_hold_after_authorization`, `freeze_or_brake_event_after_authorization`.
+  - Each refusal has a control case: the same release with clean history is authorized.
+  - New fail-closed case: on a released row whose status history or freeze events are truly unreadable (a throw, null, or no reader with a client that cannot read), the gate still refuses with `history_unreadable`.
+- **Dashboard fence test (1 failure, "reconcile: no database access").** The source check grepped whole files for `send_queue`, and the fenced files mention `send_queue` in their explanatory comments. It now strips comments and requires each fenced file's code to be exactly the fence import plus `export default fencedQueueHandler('<route>')`. The test also imports **every** fenced route module and calls its real default export: no header gives 401, a wrong secret gives 401, the right secret gives 410 with `writes: 0` and that route's own name, and no configured secret gives 503. `tests/alias-loader.mjs` gains one fallback so this works: on a failed resolve only, an extensionless relative import from a `.ts` file is retried as `.ts`. The dashboard's handlers import siblings that way. Every other resolution is unchanged.
+
+Sentry's review text for task_783e03da was not readable from this run, and Sentry has not reviewed round 2. Its blocking items are checked here against the three-item summary below, not against the review itself.
+
 ## Round 2 (gate `final_dispatch_gate_v2`): what changed
 
 Sentry review task_783e03da (CHANGES REQUESTED on `ea46238b`) had three blocking items. Here is how each is handled.

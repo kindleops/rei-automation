@@ -33,6 +33,7 @@ import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-sel
 import {
   GATE_REASONS,
   FINAL_DISPATCH_GATE_VERSION,
+  evaluateFinalDispatchGate,
   __setFinalDispatchGateModeForTests,
   historicalVerdict,
   isHistoricalRow,
@@ -103,7 +104,11 @@ function spy() {
 }
 
 async function dispatch(row, { over = {}, provider = spy() } = {}) {
+  // The REAL gate, observed: its full verdict (reauthorization detail included)
+  // is kept so a test can prove WHICH check refused, not only that one did.
+  let gate = null;
   const result = await dispatchSellerQueueRow(row, { to: row.to_phone_number, from: FROM, body: BODY }, {
+    finalDispatchGate: async (input, deps) => { gate = await evaluateFinalDispatchGate(input, deps); return gate; },
     store: createMemoryS11Store(),
     supabase: NO_DIRECT_READS,
     sendProvider: provider.fn,
@@ -114,19 +119,37 @@ async function dispatch(row, { over = {}, provider = spy() } = {}) {
     finalSenderContinuityCheck: async () => ({ ok: true, reason: null, verdict: null }),
     finalContactRestrictionCheck: async () => ({ refused: false, reason: null }),
   });
-  return { result, provider };
+  return { result, provider, gate };
 }
 
-let savedSecret;
+// ROUND 3. The shared critical-test environment RESETS process.env before EVERY
+// test (critical-test-environment.mjs beforeEach -> resetCriticalProcessEnv).
+// Round 2 set the release secret once in test.before, so it was gone by the
+// time each test ran: signOwnerRelease returned null, the "released" row had
+// no release at all, releasedHistory(undefined) threw inside the injected
+// history reader, and the gate (correctly) answered history_unreadable. The
+// release tests never reached the signature or audit logic.
+//
+// Now: the secret is set in a beforeEach registered AFTER the helper's (node:test
+// runs file-level hooks in registration order), fixtures sign with an explicit
+// env, and every fixture asserts it really is what it claims to be, so a
+// harness fault fails loudly instead of masquerading as a gate refusal.
+const RELEASE_ENV = Object.freeze({ QUEUE_OWNER_RELEASE_SECRET: SECRET });
 test.before(() => {
   __setFinalDispatchGateModeForTests("enforce");
-  savedSecret = process.env.QUEUE_OWNER_RELEASE_SECRET;
+});
+test.beforeEach(() => {
   process.env.QUEUE_OWNER_RELEASE_SECRET = SECRET;
 });
 test.after(() => {
   __setFinalDispatchGateModeForTests(null);
-  if (savedSecret === undefined) delete process.env.QUEUE_OWNER_RELEASE_SECRET;
-  else process.env.QUEUE_OWNER_RELEASE_SECRET = savedSecret;
+  // The helper's own after/beforeEach restore the snapshot env.
+});
+
+test("HARNESS: inside every test the release key is present (an env reset cannot silently void the release fixtures)", () => {
+  assert.equal(process.env.QUEUE_OWNER_RELEASE_SECRET, SECRET);
+  const r = releasedRow();
+  assert.equal(verifyOwnerReleaseRecord(r.metadata.reauthorization, r).ok, true, "the gate's default env verifies the fixture");
 });
 
 test("baseline: a fresh, claimed row with clean trigger history still reaches the provider once", async () => {
@@ -220,34 +243,100 @@ test("Cockpit approve uses the trigger history too: a row flipped back by hand i
 /** A historical row (written before the brake event) that an owner released 2 minutes ago. */
 function releasedRow({ body = BODY, at = iso(nowMs - 2 * 60_000) } = {}) {
   const base = queueRow({ created_at: iso(nowMs - 3 * 3600_000), message_body: body });
-  const signed = signOwnerRelease({ row: base, actor_user_id: "founder-user-id", reason: "reviewed the thread", at }, process.env);
+  const signed = signOwnerRelease({ row: base, actor_user_id: "founder-user-id", reason: "reviewed the thread", at }, RELEASE_ENV);
+  assert.ok(signed && /^[0-9a-f]{64}$/.test(signed.signature) && signed.at === at && signed.audit_key, "fixture: the release is really signed");
   return { ...base, metadata: { reauthorization: { ...signed, via: "cockpit_owner_release" } } };
 }
-const releasedHistory = (at) => [
-  { from_status: null, to_status: "queued", changed_at: iso(nowMs - 3 * 3600_000) },
-  { from_status: "queued", to_status: "paused_operator_review", changed_at: iso(nowMs - 2 * 3600_000) },
-  { from_status: "paused_operator_review", to_status: "scheduled", changed_at: iso(Date.parse(at) + 500) },
-  { from_status: "scheduled", to_status: "processing", changed_at: iso(nowMs - 1_000) },
-];
-const releaseOver = (row, extra = {}) => ({
-  readStatusHistory: async () => releasedHistory(row.metadata.reauthorization.at),
-  readLatestAuthorityEvent: async () => iso(nowMs - 2.5 * 3600_000),
-  readReleaseAudit: async (r) => ({ found: r.signature === row.metadata.reauthorization.signature }),
-  ...extra,
-});
+const releasedHistory = (at) => {
+  const atMs = Date.parse(at);
+  assert.ok(Number.isFinite(atMs), `fixture: release time is a real time (${at})`);
+  return [
+    { from_status: null, to_status: "queued", changed_at: iso(nowMs - 3 * 3600_000) },
+    { from_status: "queued", to_status: "paused_operator_review", changed_at: iso(nowMs - 2 * 3600_000) },
+    { from_status: "paused_operator_review", to_status: "scheduled", changed_at: iso(atMs + 500) },
+    { from_status: "scheduled", to_status: "processing", changed_at: iso(nowMs - 1_000) },
+  ];
+};
+/**
+ * Readers for a released row. History is computed ONCE, here, so a fixture
+ * fault throws in the test body (loud) and never inside a reader, where the
+ * gate would turn it into history_unreadable.
+ */
+const releaseOver = (row, extra = {}) => {
+  const history = releasedHistory(row.metadata.reauthorization.at);
+  return {
+    readStatusHistory: async () => history,
+    readLatestAuthorityEvent: async () => iso(nowMs - 2.5 * 3600_000),
+    readReleaseAudit: async (r) => ({ found: r.signature === row.metadata.reauthorization.signature }),
+    ...extra,
+  };
+};
 
 test("OWNER RELEASE (positive): a signed release with its audit event authorizes exactly this row", async () => {
   const row = releasedRow();
-  const { result, provider } = await dispatch(row, { over: releaseOver(row) });
+  const audits = [];
+  const { result, provider, gate } = await dispatch(row, { over: releaseOver(row, {
+    readReleaseAudit: async (r) => { audits.push(r); return { found: r.signature === row.metadata.reauthorization.signature }; },
+  }) });
   assert.equal(result.provider_invoked, true, JSON.stringify(result));
   assert.equal(provider.calls.length, 1);
+  // It really was a historical row that only the release let through.
+  assert.equal(gate.ok, true, JSON.stringify(gate));
+  assert.equal(gate.reauthorization.required, true);
+  assert.equal(gate.reauthorization.ok, true);
+  assert.ok(gate.reauthorization.historical_reasons.includes("status_history:paused_operator_review"), gate.reauthorization.historical_reasons.join(","));
+  assert.ok(gate.reauthorization.historical_reasons.includes("created_before_latest_freeze_or_brake_event"));
+  assert.equal(audits.length, 1, "the audit event was read live");
+  assert.equal(audits[0].audit_key, row.metadata.reauthorization.audit_key);
+
+  // The same release does nothing for another row (exactly this row).
+  const other = { ...queueRow({ created_at: row.created_at }), metadata: row.metadata };
+  const o = await dispatch(other, { over: releaseOver(row) });
+  assert.equal(o.result.reason, GATE_REASONS.RELEASE_INVALID);
+  assert.equal(o.gate.reauthorization.detail, "release_row_mismatch");
+  assert.equal(o.provider.calls.length, 0);
+});
+
+test("RELEASED ROW, history truly unreadable: still fail closed (status history, freeze events, or the live default reads)", async () => {
+  const row = releasedRow();
+  for (const extra of [
+    { readStatusHistory: async () => { throw new Error("statement timeout"); } },
+    { readLatestAuthorityEvent: async () => { throw new Error("send_authority_events_empty"); } },
+    { readStatusHistory: async () => null },
+  ]) {
+    const { result, provider } = await dispatch(row, { over: releaseOver(row, extra) });
+    assert.equal(result.reason, GATE_REASONS.HISTORY_UNREADABLE, Object.keys(extra).join(","));
+    assert.equal(provider.calls.length, 0);
+  }
+  // No history readers at all and a client that cannot read: the live reads fail, the gate refuses.
+  const noReaders = readers(row);
+  delete noReaders.readStatusHistory;
+  delete noReaders.readLatestAuthorityEvent;
+  const provider = spy();
+  let gate = null;
+  const result = await dispatchSellerQueueRow(row, { to: PHONE, from: FROM, body: BODY }, {
+    store: createMemoryS11Store(),
+    supabase: NO_DIRECT_READS,
+    sendProvider: provider.fn,
+    getSystemValue: ALLOW,
+    now: NOW,
+    contact_window: { allowed: true, hold: false, timezone: "America/Chicago" },
+    finalGateReaders: noReaders,
+    finalDispatchGate: async (i, d) => { gate = await evaluateFinalDispatchGate(i, d); return gate; },
+    finalSenderContinuityCheck: async () => ({ ok: true }),
+    finalContactRestrictionCheck: async () => ({ refused: false }),
+  });
+  assert.equal(result.reason, GATE_REASONS.HISTORY_UNREADABLE, JSON.stringify(gate));
+  assert.equal(provider.calls.length, 0);
 });
 
 test("BULK SQL FAKED RELEASE: an unsigned round-1 style metadata.reauthorization is refused", async () => {
   const row = queueRow({ created_at: iso(nowMs - 3 * 3600_000), metadata: { reauthorization: { queue_row_id: null, actor: "founder", reason: "bulk", at: iso(nowMs - 60_000), via: "cockpit_owner_release" } } });
   row.metadata.reauthorization.queue_row_id = row.id;
-  const { result, provider } = await dispatch(row, { over: releaseOver(releasedRow(), { readReleaseAudit: async () => ({ found: true }) }) });
-  assert.equal(result.reason, GATE_REASONS.RELEASE_INVALID);
+  // An audit row forged alongside it changes nothing: the signature is checked first.
+  const { result, provider, gate } = await dispatch(row, { over: releaseOver(releasedRow(), { readReleaseAudit: async () => ({ found: true }) }) });
+  assert.equal(result.reason, GATE_REASONS.RELEASE_INVALID, JSON.stringify(gate));
+  assert.equal(gate.reauthorization.detail, "release_unsigned");
   assert.equal(provider.calls.length, 0);
 });
 
@@ -255,11 +344,32 @@ test("BULK SQL FAKED RELEASE: a made-up signature, a signature copied from anoth
   const good = releasedRow();
   const random = { ...good, metadata: { reauthorization: { ...good.metadata.reauthorization, signature: "a".repeat(64) } } };
   const copied = { ...queueRow({ created_at: good.created_at }), metadata: { reauthorization: { ...good.metadata.reauthorization } } }; // another row id
-  for (const row of [random, copied]) {
-    const { result, provider } = await dispatch(row, { over: releaseOver(good, { readReleaseAudit: async () => ({ found: true }) }) });
-    assert.equal(result.reason, GATE_REASONS.RELEASE_INVALID);
+  // The copy also carries the original row's id inside its record; rewriting that
+  // id to the new row is the obvious forgery, and the signature then fails.
+  const copiedRetargeted = (() => {
+    const base = queueRow({ created_at: good.created_at });
+    return { ...base, metadata: { reauthorization: { ...good.metadata.reauthorization, queue_row_id: base.id } } };
+  })();
+  // A row signed with a key the server does not hold.
+  const wrongKey = (() => {
+    const base = queueRow({ created_at: good.created_at });
+    const signed = signOwnerRelease({ row: base, actor_user_id: "founder-user-id", reason: "reviewed", at: good.metadata.reauthorization.at }, { QUEUE_OWNER_RELEASE_SECRET: "attacker-guess" });
+    return { ...base, metadata: { reauthorization: { ...signed, via: "cockpit_owner_release" } } };
+  })();
+  for (const [row, detail] of [[random, "release_signature_invalid"], [copied, "release_row_mismatch"], [copiedRetargeted, "release_signature_invalid"], [wrongKey, "release_signature_invalid"]]) {
+    const { result, provider, gate } = await dispatch(row, { over: releaseOver(good, { readReleaseAudit: async () => ({ found: true }) }) });
+    assert.equal(result.reason, GATE_REASONS.RELEASE_INVALID, `${detail}: ${JSON.stringify(gate)}`);
+    assert.equal(gate.reauthorization.detail, detail);
     assert.equal(provider.calls.length, 0);
   }
+  // No server key at send time: nothing verifies, even the genuine release.
+  delete process.env.QUEUE_OWNER_RELEASE_SECRET;
+  delete process.env.CRON_SECRET;
+  const keyless = await dispatch(good, { over: releaseOver(good) });
+  assert.equal(keyless.result.reason, GATE_REASONS.RELEASE_INVALID);
+  assert.equal(keyless.gate.reauthorization.detail, "release_key_unavailable");
+  assert.equal(keyless.provider.calls.length, 0);
+  process.env.QUEUE_OWNER_RELEASE_SECRET = SECRET;
   assert.equal(verifyOwnerReleaseRecord(good.metadata.reauthorization, good, {}).reason, "release_key_unavailable");
   assert.equal(verifyOwnerReleaseRecord(good.metadata.reauthorization, good, { QUEUE_OWNER_RELEASE_SECRET: "another-key" }).reason, "release_signature_invalid");
 });
@@ -268,17 +378,31 @@ test("BULK SQL FAKED RELEASE: editing the message or the recipient after the rel
   const good = releasedRow();
   const edited = { ...good, message_body: "A different message the owner never saw." };
   const a = await dispatch(edited, { over: releaseOver(good, { readReleaseAudit: async () => ({ found: true }) }) });
-  assert.equal(a.result.reason, GATE_REASONS.RELEASE_INVALID);
+  assert.equal(a.result.reason, GATE_REASONS.RELEASE_INVALID, JSON.stringify(a.gate));
+  assert.equal(a.gate.reauthorization.detail, "release_signature_invalid");
+  assert.equal(a.provider.calls.length, 0);
+  // Recipient edited in the row (thread_key kept consistent so identity alone does not refuse).
+  const moved = { ...good, to_phone_number: "+13125550188", thread_key: "+13125550188" };
+  const b = await dispatch(moved, { over: releaseOver(good, { readReleaseAudit: async () => ({ found: true }) }) });
+  assert.equal(b.result.reason, GATE_REASONS.RELEASE_INVALID, JSON.stringify(b.gate));
+  assert.equal(b.gate.reauthorization.detail, "release_signature_invalid");
+  assert.equal(b.provider.calls.length, 0);
   assert.equal(verifyOwnerReleaseRecord(good.metadata.reauthorization, { ...good, to_phone_number: "+13125550188" }).reason, "release_signature_invalid");
 });
 
 test("BULK SQL FAKED RELEASE: a valid signature with NO matching audit event is refused (and an unreadable audit too)", async () => {
   const row = releasedRow();
   const missing = await dispatch(row, { over: releaseOver(row, { readReleaseAudit: async () => ({ found: false }) }) });
-  assert.equal(missing.result.reason, GATE_REASONS.RELEASE_AUDIT_MISSING);
+  assert.equal(missing.result.reason, GATE_REASONS.RELEASE_AUDIT_MISSING, JSON.stringify(missing.gate));
+  assert.equal(missing.gate.reauthorization.historical_reasons.includes("history_unreadable"), false, "history was readable; only the audit was missing");
   assert.equal(missing.provider.calls.length, 0);
+  // An audit event for a DIFFERENT signature does not count either.
+  const otherSig = await dispatch(row, { over: releaseOver(row, { readReleaseAudit: async (r) => ({ found: r.signature === "b".repeat(64) }) }) });
+  assert.equal(otherSig.result.reason, GATE_REASONS.RELEASE_AUDIT_MISSING);
+  assert.equal(otherSig.provider.calls.length, 0);
   const down = await dispatch(row, { over: releaseOver(row, { readReleaseAudit: async () => { throw new Error("timeout"); } }) });
   assert.equal(down.result.reason, GATE_REASONS.HISTORY_UNREADABLE);
+  assert.equal(down.gate.reauthorization.detail, "release_audit_unreadable", "the AUDIT read failed, not the history read");
   assert.equal(down.provider.calls.length, 0);
 });
 
@@ -289,9 +413,16 @@ test("a release is overtaken by a later hold status (even flipped back by hand) 
     { from_status: "processing", to_status: "paused_global_lock", changed_at: iso(at + 30_000) },
     { from_status: "paused_global_lock", to_status: "queued", changed_at: iso(at + 40_000) }];
   const a = await dispatch(row, { over: releaseOver(row, { readStatusHistory: async () => flipped }) });
-  assert.equal(a.result.reason, GATE_REASONS.REAUTHORIZATION_STALE);
+  assert.equal(a.result.reason, GATE_REASONS.REAUTHORIZATION_STALE, JSON.stringify(a.gate));
+  assert.equal(a.gate.reauthorization.detail, "status_hold_after_authorization");
+  assert.equal(a.provider.calls.length, 0);
   const b = await dispatch(row, { over: releaseOver(row, { readLatestAuthorityEvent: async () => iso(at + 30_000) }) });
   assert.equal(b.result.reason, GATE_REASONS.REAUTHORIZATION_STALE, "lifting the brake after a release does not carry the release");
+  assert.equal(b.gate.reauthorization.detail, "freeze_or_brake_event_after_authorization");
+  assert.equal(b.provider.calls.length, 0);
+  // Control: the same row with the un-overtaken history is authorized, so the two refusals above are the overtaking.
+  const c = await dispatch(row, { over: releaseOver(row) });
+  assert.equal(c.result.provider_invoked, true, JSON.stringify(c.gate));
 });
 
 test("Cockpit owner-release route: the actor is the session user; body text is ignored; no session user = 403", async () => {
@@ -443,30 +574,60 @@ test("DASHBOARD retry-failed / reprocess-paused (and every queue writer) are fen
   const { fencedQueueHandler, authenticateQueueRoute } = await import(pathToFileURL(path.join(DASH, "api/_lib/queueRouteFence.ts")).href);
   const savedMutation = process.env.NEXUS_ALLOW_BACKEND_MUTATION;
   process.env.NEXUS_ALLOW_BACKEND_MUTATION = "true"; // the old guard, fully open: still fenced
+  // A real secret for this test (the env is reset before every test).
+  const savedSecret = process.env.INTERNAL_API_SECRET;
+  process.env.INTERNAL_API_SECRET = "round3-internal-secret";
+  const res = () => { const r = { code: 0, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; } }; return r; };
   try {
-    for (const route of ["retry-failed", "reprocess-paused"]) {
-      const handler = fencedQueueHandler(route);
-      const res = () => { const r = { code: 0, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; } }; return r; };
+    // ROUND 3: the REAL route modules' default exports, not only the fence
+    // factory. (The dashboard's .ts files import siblings without an
+    // extension; tests/alias-loader.mjs resolves those as .ts.)
+    for (const route of FENCED) {
+      const mod = await import(pathToFileURL(path.join(DASH, `api/internal/queue/${route}.ts`)).href);
+      const handler = mod.default;
+      assert.equal(typeof handler, "function", route);
       const unauth = res();
       await handler({ method: "POST", headers: {}, body: { ids: ["q1"] } }, unauth);
       assert.equal(unauth.code, 401, route);
+      const wrong = res();
+      await handler({ method: "POST", headers: { "x-internal-api-secret": "not-the-secret" }, body: { ids: ["q1"] } }, wrong);
+      assert.equal(wrong.code, 401, route);
       const authed = res();
-      await handler({ method: "POST", headers: { "x-internal-api-secret": process.env.INTERNAL_API_SECRET }, body: { ids: ["q1"] } }, authed);
+      await handler({ method: "POST", headers: { "x-internal-api-secret": "round3-internal-secret" }, body: { ids: ["q1"], status: "queued" } }, authed);
       assert.equal(authed.code, 410, route);
+      assert.equal(authed.body.error, "QUEUE_ROUTE_FENCED", route);
+      assert.equal(authed.body.route, `dashboard/api/internal/queue/${route}`, "each file fences ITSELF, not another route");
       assert.equal(authed.body.writes, 0);
     }
+    // Same behaviour from the factory, and no configured secret authorizes nobody.
+    const viaFactory = res();
+    await fencedQueueHandler("retry-failed")({ method: "POST", headers: { "x-internal-api-secret": "round3-internal-secret" } }, viaFactory);
+    assert.equal(viaFactory.code, 410);
     assert.equal(authenticateQueueRoute({ headers: { "x-internal-api-secret": "x" } }, {}).status, 503, "no secret configured authorizes nobody");
+    delete process.env.INTERNAL_API_SECRET;
+    const noSecret = res();
+    await (await import(pathToFileURL(path.join(DASH, "api/internal/queue/reprocess-paused.ts")).href)).default({ method: "POST", headers: { "x-internal-api-secret": "" } }, noSecret);
+    assert.equal(noSecret.code, 503);
   } finally {
     if (savedMutation === undefined) delete process.env.NEXUS_ALLOW_BACKEND_MUTATION;
     else process.env.NEXUS_ALLOW_BACKEND_MUTATION = savedMutation;
+    if (savedSecret === undefined) delete process.env.INTERNAL_API_SECRET;
+    else process.env.INTERNAL_API_SECRET = savedSecret;
   }
+  // Source shape, CODE only: the fenced files may explain in comments what they
+  // used to do (send_queue ...), but their code is exactly the fence and nothing else.
+  const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").split("\n").map((l) => l.trim()).filter(Boolean);
   for (const route of FENCED) {
-    const src = fs.readFileSync(path.join(DASH, `api/internal/queue/${route}.ts`), "utf8");
-    assert.match(src, new RegExp(`fencedQueueHandler\\('${route}'\\)`), route);
-    assert.doesNotMatch(src, /send_queue|getSupabase|supabaseAdmin|runQueueBatch\(/, `${route}: no database access`);
+    const code = codeOnly(fs.readFileSync(path.join(DASH, `api/internal/queue/${route}.ts`), "utf8"));
+    assert.deepEqual(code, [
+      "import { fencedQueueHandler } from '../../_lib/queueRouteFence'",
+      `export default fencedQueueHandler('${route}')`,
+    ], `${route}: the file is the fence and nothing else`);
   }
-  const fence = fs.readFileSync(path.join(DASH, "api/_lib/queueRouteFence.ts"), "utf8");
-  assert.doesNotMatch(fence, /supabase/i);
+  const fenceCode = codeOnly(fs.readFileSync(path.join(DASH, "api/_lib/queueRouteFence.ts"), "utf8")).join("\n");
+  assert.doesNotMatch(fenceCode, /supabase|createClient|(?<!Buffer)\.from\(|\.rpc\(|\.update\(|\.insert\(|fetch\(/i, "the fence creates no client and touches no table");
+  const fenceImports = fenceCode.split("\n").filter((l) => l.startsWith("import "));
+  assert.deepEqual(fenceImports, ["import crypto from 'node:crypto'"]);
   const runner = fs.readFileSync(path.join(DASH, "api/internal/queue/runner.ts"), "utf8");
   assert.match(runner, /if \(QUEUE_RUNNER_FENCED\)/);
 });
