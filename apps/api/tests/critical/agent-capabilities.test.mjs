@@ -60,6 +60,8 @@ test('matrix: the first capabilities, typed + versioned, with tier, side effect 
     'holds.prepare_release_approval': ['internal_write', 'requires_explicit_approval'],
     'campaigns.prepare_resume_approval': ['outbound_prepare', 'requires_explicit_approval'],
     'campaigns.prepare_plan_adjustment_approval': ['internal_write', 'requires_explicit_approval'],
+    // fde1f0b9: update_lead_temperature T2 request, filed only by the gateway, applied only on a named operator's approval
+    'inbox.prepare_temperature_change': ['internal_write', 'requires_explicit_approval'],
   }
   assert.deepEqual(Object.keys(m).sort(), Object.keys(expect).sort())
   for (const [id, [se, tier]] of Object.entries(expect)) {
@@ -541,7 +543,7 @@ test('routes: gate 404 → ops auth → verified named user → rate limit → m
   assert.equal((await handleActionsCatalog(req('/a', { headers: { authorization: 'Bearer bad' } }), opts)).status, 401)
   assert.equal((await handleActionsCatalog(req('/a'), { ...opts, limiter: { check: () => ({ ok: false, code: 'RATE_LIMITED', retry_after_s: 5 }) } })).status, 429)
   const cat = await (await handleActionsCatalog(req('/a'), opts)).json()
-  assert.equal(cat.capabilities.length, 18) // 13 + D1 + the four Action Gateway T2 human-request capabilities
+  assert.equal(cat.capabilities.length, 19) // 13 + D1 + the five Action Gateway T2 human-request capabilities (temperature added in fde1f0b9)
   const inv1 = await handleActionsInvoke(req('/a/invoke', { method: 'POST', body: JSON.stringify({ capability_id: 'campaigns.prepare_launch_approval', input: { campaign_id: CAMPAIGN_ID, start: 'now' } }) }), opts)
   const out = await inv1.json()
   assert.equal(out.status, 'approval_pending')

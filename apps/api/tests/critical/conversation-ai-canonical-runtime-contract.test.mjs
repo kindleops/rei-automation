@@ -30,7 +30,8 @@ const importersOf = (re) => ALL.filter((f) => re.test(read(f))).map(rel).sort()
 test('static: decideAndCompose is the ONLY entry to the pipeline; the pipeline is the only composer caller; the R1 engine has no importer', () => {
   assert.deepEqual(importersOf(/pipeline\/run\.js['"]/), ['lib/domain/conversation-ai/runtime/canonical.js'])
   assert.deepEqual(importersOf(/\bcomposeReply\b/).filter((f) => f !== 'lib/domain/conversation-ai/pipeline/compose.js'), ['lib/domain/conversation-ai/pipeline/run.js'])
-  assert.deepEqual(importersOf(/conversation-ai\/engine\.js['"]|from\s+['"]\.\.?\/engine\.js['"]/), [], 'nothing imports the retired R1 engine')
+  // a relative './engine.js' only names the R1 engine inside lib/domain/conversation-ai (lib/workforce/authority/engine.js is a different module)
+  assert.deepEqual(importersOf(/conversation-ai\/engine\.js['"]|from\s+['"]\.\.?\/engine\.js['"]/).filter((f) => !/conversation-ai\/engine\.js['"]/.test(read(path.join(SRC, f))) ? f.startsWith('lib/domain/conversation-ai/') : true), [], 'nothing imports the retired R1 engine')
   assert.deepEqual(importersOf(/\brunConversationPipeline\b/).filter((f) => f !== 'lib/domain/conversation-ai/pipeline/run.js'), ['lib/domain/conversation-ai/runtime/canonical.js'])
 })
 
