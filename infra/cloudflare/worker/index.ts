@@ -121,6 +121,14 @@ export class ApiContainer extends Container<Env> {
       // conditional, so staging -- which has no CRON_SECRET -- receives
       // nothing and its containment is unchanged.
       ...(env.CRON_SECRET ? { CRON_SECRET: env.CRON_SECRET } : {}),
+      // The dedicated owner-release signing key (apps/api/src/lib/domain/queue/
+      // owner-release-signature.js). Without it the container derives a key from
+      // CRON_SECRET; with it, owner releases are signed and verified with a key
+      // used for nothing else. Verify-only inside the container: it grants no
+      // outbound capability. Conditional, like CRON_SECRET.
+      ...(env.QUEUE_OWNER_RELEASE_SECRET
+        ? { QUEUE_OWNER_RELEASE_SECRET: env.QUEUE_OWNER_RELEASE_SECRET }
+        : {}),
       ...(env.SUPABASE_DB_URL ? { SUPABASE_DB_URL: env.SUPABASE_DB_URL } : {}),
       ...(env.OPS_DASHBOARD_SECRET
         ? { OPS_DASHBOARD_SECRET: env.OPS_DASHBOARD_SECRET }
@@ -305,6 +313,8 @@ interface Env {
   ASSETS: Fetcher;
   API_CONTAINER: DurableObjectNamespace<ApiContainer>;
   CRON_SECRET?: string;
+  /** Dedicated owner-release signing key, forwarded to the container (see envVars). */
+  QUEUE_OWNER_RELEASE_SECRET?: string;
   /** Master switch. Necessary but NOT sufficient: each job also needs its own flag. */
   CRON_ENABLED?: string;
   /** Per-job authority. Absent => "false" => that job does not run. */
