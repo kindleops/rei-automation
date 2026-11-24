@@ -110,7 +110,10 @@
     // returns live_send_blocked/no_outbound_messages_sent and its matcher needs
     // status='active' (the 14 real workflows are 'published'); queue reconcile
     // writes only terminal/delivered states, disjoint from claimable ones.
-    "CRON_WORKFLOW_RUNTIME_ENABLED": "true",
+    // ACQUISITIONS LAUNCH 2026-11-24 (founder: any LeadCommand automated sending path not governed by halting
+    // supervision stays disabled): workflow runtime, scheduled campaign activation and the workflow orchestrator
+    // are off. Agent texts go through the AGNTEI executor (agent runtime tick) under AGNTEI's supervisor.
+    "CRON_WORKFLOW_RUNTIME_ENABLED": "false",
     "CRON_QUEUE_RECONCILE_ENABLED": "true",
     // CAMPAIGN EXECUTION COMMISSIONED (operator authorization, 2026-09-28:
     // "Wire both Cloudflare jobs. Enable their production flags."). Without
@@ -118,7 +121,7 @@
     // its first queue chunk. Neither transmits: activation walks
     // scheduled->active, the feeder writes send_queue rows; queue/run above,
     // under every operator brake, is still the only sender.
-    "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED": "true",
+    "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED": "false",
     "CRON_CAMPAIGN_FEED_ENABLED": "true",
     "CRON_CLOSING_AUTOMATION_ENABLED": "true",
     "CRON_EMAIL_DISPATCH_ENABLED": "true",
@@ -126,7 +129,7 @@
     // The job flag lets the scheduler call the tick; the env flag lets the tick
     // run. system_control.workflow_orchestrator_enabled is the operator kill
     // switch that outranks both. Arming a workflow is a separate operator act.
-    "CRON_WORKFLOW_ORCHESTRATOR_ENABLED": "true",
+    "CRON_WORKFLOW_ORCHESTRATOR_ENABLED": "false",
     "WORKFLOW_ORCHESTRATOR_ENABLED": "true",
     // NOTIFICATION CENTER 2.0 PROJECTOR COMMISSIONED (RC 8.2 post-deploy E1).
     // Every 30 s; writes only the notification_stor* projection tables.

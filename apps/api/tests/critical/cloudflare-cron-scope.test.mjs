@@ -290,8 +290,8 @@ test("production declares the reconciliation and send schedules, and only approv
       // agntei agent texts: the R2 runtime tick (Action Gateway executor), commissioned in the
       // agent-text release. Inert until agent.runtime_limits opens it (see the */1 lane test).
       "CRON_AGENT_RUNTIME_ENABLED",
-      // Campaign execution, operator-commissioned 2026-09-28.
-      "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED",
+      // Campaign execution, operator-commissioned 2026-09-28; scheduled activation off for the
+      // acquisitions launch 2026-11-24 (not governed by halting supervision).
       "CRON_CAMPAIGN_FEED_ENABLED",
       "CRON_CLOSING_AUTOMATION_ENABLED",
       "CRON_DELIVERY_RECONCILE_ENABLED",
@@ -307,9 +307,7 @@ test("production declares the reconciliation and send schedules, and only approv
       "CRON_SELLER_STATE_RECONCILE_ENABLED",
       // Signal Center evaluator, RC 8.2 post-deploy E2.
       "CRON_SIGNAL_EVALUATE_ENABLED",
-      // Workflow orchestrator, operator-commissioned 2026-09-29.
-      "CRON_WORKFLOW_ORCHESTRATOR_ENABLED",
-      "CRON_WORKFLOW_RUNTIME_ENABLED",
+      // Workflow orchestrator and workflow runtime: off for the acquisitions launch 2026-11-24.
     ],
     `unexpected enabled cron flags: ${enabled.join(", ")}`
   );
