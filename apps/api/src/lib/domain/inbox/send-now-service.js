@@ -60,6 +60,12 @@ import {
   runManualOfferGuard,
   MANUAL_OFFER_REFUSAL_REASON,
 } from "@/lib/domain/inbox/manual-offer-guard.js";
+import {
+  MANUAL_BURST_REASONS,
+  buildContentFilterLockClearance,
+  isContentFilterFailureRow,
+  runManualSendBurstGuard,
+} from "@/lib/domain/inbox/manual-send-burst-guard.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -92,6 +98,59 @@ function asBoolean(value, fallback = false) {
 
 function objectMetadata(value = null) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+// ── OPERATOR IDENTITY ON EVERY MANUAL ROW (P0 round 4, item 5) ─────────────
+// The 2026-09-24 burst rows carried no operator: nobody could say who pressed
+// Send six times. The identity comes ONLY from the server: the principal the
+// route's auth layer built (deps.operator) or, on the internal route that has
+// no principal object, the actor the route stamped from the verified
+// x-ops-user-id header (it overwrites any body value before this runs). A name
+// in the request body or its metadata is never the operator.
+const CALLER_FORGEABLE_METADATA_KEYS = [
+  "repeat_ask_override",
+  "content_filter_lock_clearance",
+  "manual_send_operator",
+  "operator_id",
+  "operator_auth_source",
+  "operator_identity_missing",
+];
+
+function stripServerOwnedMetadata(metadata = {}) {
+  const out = { ...objectMetadata(metadata) };
+  for (const key of CALLER_FORGEABLE_METADATA_KEYS) delete out[key];
+  return out;
+}
+
+export function manualSendOperatorIdentity(operator = null, input = {}) {
+  const principal =
+    operator && typeof operator === "object" && !Array.isArray(operator) && operator.authenticated === true
+      ? operator
+      : null;
+  const principal_id = clean(principal?.id);
+  const stamped_actor = clean(input?.repeat_ask_override_actor);
+  const id = principal_id || stamped_actor || null;
+  return {
+    id,
+    email: clean(principal?.email) || null,
+    auth_source: clean(principal?.auth_source) || null,
+    via: clean(principal?.via) || null,
+    source: principal_id
+      ? "server_operator_principal"
+      : stamped_actor
+        ? "route_stamped_actor"
+        : principal
+          ? "server_operator_principal_without_id"
+          : "none",
+  };
+}
+
+function operatorIdentityMetadata(identity) {
+  return {
+    manual_send_operator: identity,
+    operator_id: identity.id,
+    ...(identity.id ? {} : { operator_identity_missing: true }),
+  };
 }
 
 function normalizeBodyForFingerprint(value = "") {
@@ -456,7 +515,10 @@ function buildSendNowMetadata(input = {}, normalized = {}) {
   // rc-8.5.15.1: the repeat-asking-price override is minted server-side only
   // (buildRepeatAskOverride, from the explicit request fields + the verified
   // operator); a copy arriving inside the caller's metadata is discarded.
-  const { repeat_ask_override: _ignored_override, ...input_metadata } = objectMetadata(input.metadata);
+  // P0 round 4: the same for a content-filter lock clearance and the operator
+  // identity, which only the server writes (a forged clearance on a row would
+  // unlock the thread for every later send).
+  const input_metadata = stripServerOwnedMetadata(input.metadata);
   const merged = {
     ...input_metadata,
     source: normalized.source,
@@ -844,7 +906,37 @@ async function isHardComplianceBlocked({
   return { blocked: false, reason: null };
 }
 
-async function shouldSuppressRecentDeliveryFailuresReconciled({
+export const REPEATED_FAILURE_STATUSES = Object.freeze([
+  "failed",
+  "failed_transport",
+  "undelivered",
+  "content_filter_blocked",
+  "delivery_failed",
+]);
+
+/**
+ * Which delivery failure a failed send_queue row records, or null when it is
+ * not a delivery failure (a validation/compliance refusal, an opt-out, an
+ * invalid number: those have their own hard gates).
+ */
+export function repeatedFailureKindOf(row = {}) {
+  if (isContentFilterFailureRow(row)) return "content_filter";
+  const status = clean(row?.queue_status).toLowerCase();
+  if (status === "failed_transport" || status === "undelivered") return "transport";
+  const metadata = objectMetadata(row?.metadata);
+  const reason_text = [
+    row?.failed_reason,
+    metadata.failure_class,
+    metadata.normalized_reason,
+    metadata.provider_error?.message,
+    metadata.provider_error?.failure_class,
+  ].map(clean).join(" ").toLowerCase();
+  if (isTransportFailureReason(reason_text)) return "transport";
+  if (/\bdelivery_failed\b|\bundelivered\b|delivery failed/.test(reason_text)) return "delivery_failed";
+  return null;
+}
+
+export async function shouldSuppressRecentDeliveryFailuresReconciled({
   thread_key,
   to_phone_number,
   from_phone_number,
@@ -854,12 +946,19 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
   const since_24h = new Date(new Date(now).getTime() - 24 * 60 * 60 * 1000).toISOString();
   const since_7d = new Date(new Date(now).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
+  // P0 round 4 (item 4). This read used to match ONLY queue_status='failed' AND
+  // failed_reason='delivery_failed', and then kept only rows whose reason text
+  // looked like a transport failure -- which "delivery_failed" never does, and
+  // a content-filter reason was excluded by name. A failed_transport row was
+  // never read at all. The guard could not fire. It now reads every failed
+  // status, classifies each row by its recorded failure (content filter,
+  // transport, delivery failure), and treats only LATER success evidence
+  // (a delivery or an inbound reply after the failed attempt) as clearing it.
   const { data: failed_rows, error: failed_error } = await supabase
     .from("send_queue")
-    .select("id,thread_key,to_phone_number,from_phone_number,queue_status,failed_reason,provider_message_id,textgrid_message_id,created_at,updated_at")
+    .select("id,thread_key,to_phone_number,from_phone_number,queue_status,failed_reason,provider_message_id,textgrid_message_id,created_at,updated_at,metadata")
     .eq("to_phone_number", to_phone_number)
-    .eq("queue_status", "failed")
-    .eq("failed_reason", "delivery_failed")
+    .in("queue_status", REPEATED_FAILURE_STATUSES)
     .gte("updated_at", since_7d)
     .order("updated_at", { ascending: false })
     .limit(200);
@@ -868,38 +967,31 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
   const rows = Array.isArray(failed_rows) ? failed_rows : [];
   if (!rows.length) return { suppress: false, reason: null };
 
-  const candidate_rows = rows.filter((row) => {
-    if (!from_phone_number) return true;
-    return clean(row?.from_phone_number) === clean(from_phone_number);
-  });
-
   const evaluate_row = async (row) => {
-    const reason_text = `${clean(row?.failed_reason)} ${clean(row?.metadata?.provider_error?.message)}`.trim();
-    if (!isTransportFailureReason(reason_text)) {
-      return { suppressible: false, reason: "non_transport_failure_reason" };
+    const failure_kind = repeatedFailureKindOf(row);
+    if (!failure_kind) {
+      return { suppressible: false, reason: "non_delivery_failure_reason" };
     }
-    if (clean(row?.provider_message_id) || clean(row?.textgrid_message_id)) {
-      return { suppressible: false, reason: "provider_sid_present" };
-    }
+    // A provider id on a FAILED row is not delivery evidence. TextGrid returns
+    // a sid and then filters (content filter) or the carrier rejects
+    // (failed_transport / undelivered); the old "sid present -> not a
+    // failure" exclusion dropped exactly those rows. Delivery evidence is the
+    // message_events check below.
 
     const row_thread_key = clean(row?.thread_key) || thread_key;
     const row_created_at = clean(row?.created_at) || clean(row?.updated_at) || now;
 
-    const [send_event, delivered_event, inbound_after] = await Promise.all([
-      supabase
-        .from("message_events")
-        .select("id")
-        .eq("thread_key", row_thread_key)
-        .eq("direction", "outbound")
-        .eq("event_type", "outbound_send")
-        .limit(1)
-        .maybeSingle(),
+    // Only evidence AFTER this failed attempt clears it. ("Any outbound_send
+    // event on the thread, ever" made every thread with one past success
+    // permanently unsuppressible.)
+    const [delivered_event, inbound_after] = await Promise.all([
       supabase
         .from("message_events")
         .select("id,sent_at,delivered_at,delivery_status")
         .eq("thread_key", row_thread_key)
         .eq("direction", "outbound")
         .or("delivery_status.eq.delivered,delivered_at.not.is.null")
+        .gt("created_at", row_created_at)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -912,29 +1004,28 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
         .limit(1)
         .maybeSingle(),
     ]);
+    if (delivered_event?.error) throw delivered_event.error;
+    if (inbound_after?.error) throw inbound_after.error;
 
-    const has_outbound_send = Boolean(send_event.data?.id);
-    const has_delivered = Boolean(delivered_event.data?.id);
-    const has_later_inbound_reply = Boolean(inbound_after.data?.id);
-    if (has_outbound_send || has_delivered || has_later_inbound_reply) {
+    const has_delivered = Boolean(delivered_event?.data?.id);
+    const has_later_inbound_reply = Boolean(inbound_after?.data?.id);
+    if (has_delivered || has_later_inbound_reply) {
       return {
         suppressible: false,
-        reason: has_later_inbound_reply
-          ? "later_inbound_reply_exists"
-          : has_delivered
-            ? "delivered_event_exists"
-            : "outbound_send_exists",
+        reason: has_later_inbound_reply ? "later_inbound_reply_exists" : "delivered_event_exists",
       };
     }
 
-    return { suppressible: true, reason: "terminal_failure_without_success_evidence" };
+    return { suppressible: true, reason: "terminal_failure_without_success_evidence", failure_kind };
   };
 
   let pair_count = 0;
   let recipient_count = 0;
+  const failure_kinds = {};
   for (const row of rows) {
     const verdict = await evaluate_row(row);
     if (!verdict.suppressible) continue;
+    failure_kinds[verdict.failure_kind] = (failure_kinds[verdict.failure_kind] || 0) + 1;
     const updated = clean(row?.updated_at) || now;
     if (new Date(updated).getTime() >= new Date(since_7d).getTime()) recipient_count += 1;
     if (
@@ -951,6 +1042,7 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
       reason: "repeated_delivery_failed_same_pair",
       pair_count,
       window: "24h",
+      failure_kinds,
       suppression_source: "reconciled",
     };
   }
@@ -961,6 +1053,7 @@ async function shouldSuppressRecentDeliveryFailuresReconciled({
       reason: "repeated_delivery_failed_recipient",
       recipient_count,
       window: "7d",
+      failure_kinds,
       suppression_source: "reconciled",
     };
   }
@@ -1172,7 +1265,9 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
             send_source: metadata_source,
             action: "send_now",
             created_from: "leadcommand_inbox",
-            ...(clean(input.action).toLowerCase() === "send_now" || !clean(input.action) ? { manual_operator_send: true } : {}),
+            ...(clean(input.action).toLowerCase() === "send_now" || !clean(input.action)
+              ? { manual_operator_send: true, ...operatorIdentityMetadata(manualSendOperatorIdentity(deps.operator, input)) }
+              : {}),
             ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
             validation_error: validation.error,
             input_preview: {
@@ -1397,7 +1492,8 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       }
     }
   } catch (guard_err) {
-    // Non-fatal: log and continue — never silently lose a send due to guard failure
+    // Advisory guard for a manual send (the binding burst controls are Step
+    // 4a, which fails closed on the same table).
     logger.warn("inbox_send_guard_check_failed", {
       message: guard_err?.message || "unknown_error",
       to_phone_number: normalized.to_phone_number,
@@ -1460,43 +1556,114 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     now: Date.now(),
   });
 
+  // ── Step 4a: MANUAL SEND BURST CONTROLS (P0 round 4, 2026-09-24 incident) ──
+  // Replaces the exact-body / 5-minute-bucket duplicate guard, which ignored
+  // failed rows and let the send through when its query errored. One read of
+  // the thread's send_queue history decides (manual-send-burst-guard.js):
+  //   * content-filter lock   -- manual immediate sends; cleared only by a
+  //                              person (content_filter_lock_clearance)
+  //   * attempt cap + cooldown -- manual immediate sends; failed attempts count
+  //   * duplicate guard        -- every row this function writes; per thread,
+  //                              failed rows included, similar bodies
+  // An unreadable history refuses. No row is written for a refused attempt.
+  const operator_identity = manualSendOperatorIdentity(deps.operator, input);
+  const early_scheduled_ms = Date.parse(clean(input.scheduled_for || input.scheduled_for_utc));
+  const immediate_manual =
+    is_manual_send_now && !(Number.isFinite(early_scheduled_ms) && early_scheduled_ms > Date.parse(now) + 1000);
+  const clearance = immediate_manual
+    ? buildContentFilterLockClearance(input, {
+        operator: deps.operator ?? null,
+        server_actor: clean(input.repeat_ask_override_actor) || null,
+        now,
+      })
+    : { requested: false };
+  const burst_guard = deps.manualSendBurstGuardImpl || runManualSendBurstGuard;
+  // The ONLY case that does not read: the test runtime driving this function
+  // with the default client and no Supabase configuration (a placeholder URL
+  // that no real deployment has). Never outside NODE_ENV=test, so a production
+  // runtime always reads and refuses when the read fails.
+  const unconfigured_test_client =
+    process.env.NODE_ENV === "test" && supabase === defaultSupabase && !hasSupabaseConfig();
+  let burst = null;
   try {
-    const { count: duplicate_count } = await supabase
-      .from("send_queue")
-      .select("id", { count: "exact", head: true })
-      .eq("to_phone_number", normalized.to_phone_number)
-      .in("queue_status", ["queued", "pending", "approval", "scheduled", "processing", "sent", "delivered"])
-      .contains("metadata", { transport_fingerprint })
-      .gte("created_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
-
-    if ((duplicate_count ?? 0) > 0) {
-      const proof = buildManualSendProof({
-        input,
-        normalized,
-        queue_inserted: false,
-        detail_reason: "transport_fingerprint_duplicate_in_cooldown_window",
-        warning_codes,
-      });
-      logger.warn("inbox_send_now.early_exit", {
-        ...request_log,
-        reason: "duplicate_blocked",
-        detail_reason: "transport_fingerprint_duplicate_in_cooldown_window",
-        queue_inserted: false,
-      });
-      return {
-        ok: false,
-        status: 423,
-        error: "duplicate_blocked",
-        queue_created: false,
-        reason: "duplicate_blocked",
-        detail_reason: "transport_fingerprint_duplicate_in_cooldown_window",
-        queue_inserted: false,
-        proof,
-      };
-    }
-  } catch {
-    // non-fatal; proceed if duplicate guard query is unavailable
+    burst = await burst_guard(
+      {
+        thread_key: normalized.thread_key,
+        to_phone_number: normalized.to_phone_number,
+        message_body: normalized.message_body,
+        immediate_manual,
+        clearance,
+        now,
+      },
+      {
+        supabase,
+        getSystemValue: deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null),
+        live_reads: await finalGateFactsApply(supabase),
+        ...(unconfigured_test_client
+          ? { readHistory: async () => ({ ok: true, rows: [], skipped: true }) }
+          : {}),
+      }
+    );
+  } catch (burst_error) {
+    burst = {
+      ok: false,
+      status: 423,
+      reason: MANUAL_BURST_REASONS.HISTORY_UNREADABLE,
+      detail_reason: "The manual send burst check failed to run, so nothing was sent.",
+      history_error: burst_error?.message || "burst_guard_threw",
+    };
   }
+  if (!burst?.ok) {
+    const reason = clean(burst?.reason) || MANUAL_BURST_REASONS.HISTORY_UNREADABLE;
+    const detail_reason = clean(burst?.detail_reason) || reason;
+    const proof = buildManualSendProof({
+      input,
+      normalized,
+      queue_inserted: false,
+      detail_reason,
+      warning_codes,
+    });
+    logger.warn("inbox_send_now.early_exit", {
+      ...request_log,
+      reason,
+      detail_reason: burst?.detail_code || reason,
+      operator_id: operator_identity.id,
+      attempt_cap: burst?.attempt_cap || null,
+      content_filter_lock: burst?.content_filter_lock || null,
+      duplicate: burst?.duplicate || null,
+      history_error: burst?.history_error || null,
+      queue_inserted: false,
+    });
+    return {
+      ok: false,
+      status: burst?.status || 423,
+      error: reason,
+      reason,
+      // Shown to the operator (Cockpit forwards detail_reason): what stopped
+      // the send and what has to happen next.
+      detail_reason,
+      message: detail_reason,
+      hard_block: true,
+      manual_send_burst: {
+        guard_version: burst?.guard_version || null,
+        attempt_cap: burst?.attempt_cap || null,
+        content_filter_lock: burst?.content_filter_lock || null,
+        clearance_required: burst?.clearance_required === true,
+        duplicate: burst?.duplicate || null,
+        history_error: burst?.history_error || null,
+      },
+      queue_created: false,
+      queue_inserted: false,
+      proof,
+    };
+  }
+  // Persisted only when a lock actually existed and this person cleared it: the
+  // row is the durable audit record, and a later content-filter block on the
+  // thread (newer than this row) locks it again.
+  const content_filter_lock_cleared =
+    burst?.content_filter_lock_cleared === true && clearance?.ok === true
+      ? { ...clearance.clearance, cleared_lock: burst.content_filter_lock || null }
+      : null;
 
   /*
    * DURABLE IDENTITY FOR A ROW THAT DISPATCHES LATER.
@@ -1688,6 +1855,15 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
           ...(repeat_ask.ok ? { repeat_ask_override: repeat_ask.override } : {}),
           ...(offer_guard?.record ? { manual_offer_guard: offer_guard.record } : {}),
+          // P0 round 4: who pressed Send (server identity only), and the
+          // burst-guard verdict this row was written under.
+          ...(is_manual_send_now ? operatorIdentityMetadata(operator_identity) : {}),
+          ...(content_filter_lock_cleared ? { content_filter_lock_clearance: content_filter_lock_cleared } : {}),
+          manual_send_burst_guard: {
+            version: burst?.guard_version || null,
+            immediate_manual,
+            config: burst?.config || null,
+          },
         },
       },
       insert_deps
@@ -1894,6 +2070,12 @@ function isManualSendHardBlockReason(reason = "") {
     "outbound_number_daily_limit_reached",
     "outbound_number_total_ceiling_reached",
     "no_eligible_sender_for_thread",
+    // P0 round 4 burst controls: never an operator override, never a reword.
+    MANUAL_BURST_REASONS.ATTEMPT_CAP,
+    MANUAL_BURST_REASONS.CONTENT_FILTER_LOCKED,
+    MANUAL_BURST_REASONS.HISTORY_UNREADABLE,
+    MANUAL_BURST_REASONS.CLEARANCE_INVALID,
+    "content_filter_blocked",
   ]).has(clean(reason).toLowerCase());
 }
 
@@ -1913,6 +2095,25 @@ function mapProcessedManualSendFailure(reason = "", error_message = "") {
   const normalized_reason = clean(reason).toLowerCase();
   const normalized_error = clean(error_message).toLowerCase();
   const combined = `${normalized_reason} ${normalized_error}`.trim();
+
+  // P0 round 4 item 2: a content-filter block is not "send failed, try
+  // again". It locks the thread for manual sends (manual-send-burst-guard.js)
+  // and the operator is told so, instead of being left to reword and resend.
+  if (
+    combined.includes("content filter") ||
+    combined.includes("content_filter_blocked") ||
+    combined.includes("blocked_by_textgrid_content_filter")
+  ) {
+    return {
+      reason: "content_filter_blocked",
+      detail_reason:
+        "TextGrid's content filter blocked this message; the seller did not receive it. " +
+        "Manual sends to this thread are now locked: rewording and resending will be refused " +
+        "until a person reviews the thread and clears the lock (content_filter_lock_clearance with a reason).",
+      hard_block: true,
+      operator_override_allowed: false,
+    };
+  }
 
   if (
     normalized_reason === "hard_idempotency_blocked_24h" ||
@@ -2138,7 +2339,16 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
   const bypassed_runtime_brake = false;
   const bypassed_queue_emergency_stop = false;
 
-  const input_metadata = objectMetadata(input.metadata);
+  // Server-owned keys (operator identity, content-filter clearance) are never
+  // taken from the caller's metadata.
+  const input_metadata = stripServerOwnedMetadata(input.metadata);
+  const operator_identity = manualSendOperatorIdentity(operator, input);
+  if (!operator_identity.id) {
+    logger.warn("inbox_send_now.operator_identity_missing", {
+      thread_key: clean(input.thread_key) || null,
+      identity_source: operator_identity.source,
+    });
+  }
   const resolved_source =
     clean(input.source) ||
     clean(input.send_source) ||
@@ -2249,6 +2459,8 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         // Which authority licensed this send, durable on the row.
         ...(send_authority_metadata || {}),
+        // Who pressed Send (server identity only; P0 round 4 item 5).
+        ...operatorIdentityMetadata(operator_identity),
         manual_send_attempted_at: now,
         manual_lock_token,
       }
@@ -2380,7 +2592,9 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
       || clean(manual_input.idempotency_key),
     thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
     to_phone_number: to_phone,
-    operator_email: clean(manual_input.operator_email) || null,
+    // The verified principal's email when the auth layer has one; the body
+    // value only as the legacy fallback.
+    operator_email: operator_identity.email || clean(manual_input.operator_email) || null,
     prior_logical_communication_id: clean(manual_input.prior_logical_communication_id) || null,
   }, { supabase });
 
@@ -2646,6 +2860,10 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
         sent: false,
         final_queue_status: failed_row?.queue_status || "failed",
         reason: failure_error.message,
+        failure_class:
+          clean(failed_row?.metadata?.failure_class) ||
+          clean(failed_row?.metadata?.provider_error?.failure_class) ||
+          null,
       };
     } catch (bk_error) {
       logger.error("inbox_send_now.bookkeeping_failure_failed", {
@@ -2706,9 +2924,22 @@ export async function executeManualInboxSendNow(raw_input = {}, deps = {}) {
     };
   }
 
+  // The provider's own failure words travel with the mapping, so a content
+  // filter reported in the provider result (not only in a thrown error) is
+  // recognised and the operator is told the thread is now locked.
+  const provider_failure_text = [
+    provider_error?.message,
+    bookkeeping_result?.reason,
+    bookkeeping_result?.failure_class,
+    send_result?.failure_class,
+    send_result?.normalized_reason,
+    send_result?.error_message,
+    typeof send_result?.error === "string" ? send_result.error : send_result?.error?.message,
+    send_result?.message,
+  ].map(clean).filter(Boolean).join(" ");
   const mapped_failure = mapProcessedManualSendFailure(
     bookkeeping_result?.reason || "failed",
-    provider_error?.message || bookkeeping_result?.reason || ""
+    provider_failure_text
   );
 
   return {
