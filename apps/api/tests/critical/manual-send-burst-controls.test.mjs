@@ -77,7 +77,7 @@ afterEach(async () => {
 
 function parseOrFilter(filter) {
   // "thread_key.eq.\"+1500\",to_phone_number.eq.\"+1500\""
-  const parts = String(filter).match(/[a-z_]+\.eq\.("(?:[^"]|"")*"|[^,]+)/g) || [];
+  const parts = String(filter).match(/[a-z0-9_]+\.eq\.("(?:[^"]|"")*"|[^,]+)/g) || [];
   return parts.map((p) => {
     const [col, , ...rest] = p.split(".");
     let val = rest.join(".");
@@ -86,8 +86,12 @@ function parseOrFilter(filter) {
   });
 }
 
-function makeFakeSupabase({ send_queue = [], message_events = [], send_queue_error = null, send_queue_throws = false } = {}) {
-  const tables = { send_queue: send_queue.map((r) => ({ ...r })), message_events: message_events.map((r) => ({ ...r })) };
+function makeFakeSupabase({ send_queue = [], message_events = [], extra_tables = {}, send_queue_error = null, send_queue_throws = false } = {}) {
+  const tables = {
+    send_queue: send_queue.map((r) => ({ ...r })),
+    message_events: message_events.map((r) => ({ ...r })),
+    ...Object.fromEntries(Object.entries(extra_tables).map(([k, rows]) => [k, rows.map((r) => ({ ...r }))])),
+  };
   const calls = { send_queue_reads: [], updates: 0 };
 
   function builder(table) {
@@ -132,7 +136,14 @@ function makeFakeSupabase({ send_queue = [], message_events = [], send_queue_err
       },
       not() { return b; },
       contains() { return b; },
-      ilike() { return b; },
+      // Honoured, not ignored: the send-time 21610 blacklist check is
+      // `failed_reason ILIKE '%21610%'`, and ignoring it made every failed row
+      // read as a carrier blacklist.
+      ilike(col, pattern) {
+        const re = new RegExp(`^${String(pattern).split("%").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`, "i");
+        st.filters.push((r) => re.test(String(r?.[col] ?? "")));
+        return b;
+      },
       order(col, opts = {}) { st.order = { col, asc: opts.ascending !== false }; return b; },
       limit(n) { st.limit = n; return b; },
       maybeSingle: async () => {
@@ -500,8 +511,8 @@ test("5a. identity comes from the server principal, else the route-stamped actor
 // THE 2026-09-24 BURST through the real manual path
 // ═════════════════════════════════════════════════════════════════════════════
 
-function burstHarness({ provider }) {
-  const supabase = makeFakeSupabase();
+function burstHarness({ provider, fake = {} }) {
+  const supabase = makeFakeSupabase(fake);
   const provider_calls = [];
   let action_n = 0;
   const h = rowDeps(supabase);
@@ -616,6 +627,80 @@ test("BURST: after a person clears the lock (with a reason) one new send goes ou
   assert.equal(third.ok, false);
   assert.equal(third.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP);
   assert.equal(h.provider_calls.length, 2);
+});
+
+// ── POLICY (founder 2026-11-26): a clearance authorizes ONE send through the
+// content-filter lock and through the repeated-failure suppression those same
+// failures caused. It never bypasses DNC / opt-out / sms_suppression_list /
+// carrier blacklist / eligibility / duplicate / any other compliance block.
+
+const FILTERED = () => ({ ok: false, failure_class: "content_filter_blocked", error: "Blocked by TextGrid content filter" });
+const CLEARANCE = Object.freeze({ reason: "Reviewed: removed the word cash, plain question." });
+
+test("CLEARANCE: the repeated-failure suppression caused by the content-filter failures does not stop the cleared send", async () => {
+  // Locked thread (content-filter block 5 min ago) + a 4b verdict made of
+  // content-filter / transport failures on the same pair.
+  const blocked_at = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const supabase = makeFakeSupabase({
+    send_queue: [{ id: "cf1", thread_key: THREAD, to_phone_number: THREAD, from_phone_number: FROM_88, queue_status: "failed", message_body: REWORDS[0], created_at: blocked_at, metadata: { failure_class: "content_filter_blocked" } }],
+  });
+  const h = rowDeps(supabase, {
+    recentDeliveryFailuresImpl: async () => ({ suppress: true, reason: "repeated_delivery_failed_same_pair", pair_count: 2, window: "24h", failure_kinds: { content_filter: 1, transport: 1 } }),
+  });
+  const r = await createInboxSendNowQueueRow({ ...SEND, message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE }, { ...h.deps, operator: OPERATOR });
+  assert.equal(r.ok, true, `${r.reason}: ${r.detail_reason}`);
+  assert.equal(h.inserted.length, 1);
+  assert.deepEqual(r.warning_codes, ["recent_delivery_failures"], "recorded on the row, not a block");
+  assert.equal(h.inserted[0].metadata.content_filter_lock_clearance.actor, OPERATOR.id);
+
+  // Without the clearance the same thread is still locked.
+  const h2 = rowDeps(makeFakeSupabase({ send_queue: supabase.tables.send_queue.filter((x) => x.id === "cf1") }));
+  const locked = await createInboxSendNowQueueRow({ ...SEND, message_body: REWORDS[3] }, { ...h2.deps, operator: OPERATOR });
+  assert.equal(locked.reason, MANUAL_BURST_REASONS.CONTENT_FILTER_LOCKED);
+});
+
+test("CLEARANCE: a cleared thread whose number is on the suppression list (opt-out) is still blocked, at enqueue AND at send time", async () => {
+  const opt_out = { id: "sup-1", phone_number: THREAD, phone_e164: THREAD, is_active: true, suppression_reason: "opt_out", suppression_type: "stop" };
+
+  // Enqueue: the real hard compliance check (not stubbed) refuses before any row.
+  const h = burstHarness({ provider: FILTERED, fake: { extra_tables: { sms_suppression_list: [] } } });
+  await executeManualInboxSendNow({ ...SEND, message_body: REWORDS[0] }, h.deps);
+  assert.equal(h.provider_calls.length, 1);
+  h.supabase.tables.sms_suppression_list.push(opt_out); // the seller opts out after the block
+  const enqueue = await executeManualInboxSendNow(
+    { ...SEND, message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE },
+    { ...h.deps, hardComplianceCheckImpl: undefined }
+  );
+  assert.equal(enqueue.ok, false);
+  assert.equal(enqueue.reason, "compliance_blocked");
+  assert.equal(enqueue.detail_reason, "compliance_suppression_list");
+  assert.equal(h.provider_calls.length, 1, "the clearance does not reach the provider");
+  assert.equal(h.supabase.tables.send_queue.length, 1, "no row for the refused send");
+
+  // Send time: enqueue check stubbed open, the send-time contactability check still refuses.
+  const h2 = burstHarness({ provider: FILTERED, fake: { extra_tables: { sms_suppression_list: [] } } });
+  await executeManualInboxSendNow({ ...SEND, message_body: REWORDS[0] }, h2.deps);
+  h2.supabase.tables.sms_suppression_list.push(opt_out);
+  const at_send = await executeManualInboxSendNow({ ...SEND, message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE }, h2.deps);
+  assert.equal(at_send.ok, false);
+  assert.equal(at_send.reason, "compliance_blocked_at_send_time");
+  assert.equal(h2.provider_calls.length, 1);
+});
+
+test("CLEARANCE: a real carrier blacklist (21610) on the pair still blocks the cleared send", async () => {
+  const h = burstHarness({ provider: FILTERED });
+  await executeManualInboxSendNow({ ...SEND, message_body: REWORDS[0] }, h.deps);
+  assert.equal(h.provider_calls.length, 1);
+  // The carrier reports the pair blacklisted (an older attempt, outside the cap window).
+  h.supabase.tables.send_queue.push({
+    id: "bl1", thread_key: THREAD, to_phone_number: THREAD, from_phone_number: FROM_88, queue_status: "failed",
+    failed_reason: "Error 21610: attempt to send to unsubscribed recipient", message_body: "an older unrelated note about the weather",
+    created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+  });
+  const r = await executeManualInboxSendNow({ ...SEND, message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE }, h.deps);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "compliance_blocked_at_send_time");
+  assert.equal(h.provider_calls.length, 1);
 });
 
 test("BURST: transport failures (no content filter) are capped at 2 attempts per 10 minutes", async () => {

@@ -1427,6 +1427,15 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   }
 
   // ── Step 3b: Delivery-failure safety guard (reconciled) ────────────
+  // POLICY (founder 2026-11-26): a person's content-filter lock clearance
+  // authorizes ONE manual send through the lock (Step 4a) and through THIS
+  // repeated-failure suppression, which those same content-filter / transport
+  // failures caused. For a manual send this guard is advisory (a warning code
+  // on the row), so the cleared send is not stopped here. If it is ever made
+  // binding for manual sends, it must still let a valid clearance through for
+  // failure_kinds made only of content_filter / transport. A clearance never
+  // reaches the opt-out / suppression-list / DNC / 21610-blacklist /
+  // eligibility checks: those run before and after this step unchanged.
   // Block sends to numbers that have recently hit 21610 blacklist or repeated
   // delivery_failed thresholds. Non-fatal: guard errors never block the send.
   try {
