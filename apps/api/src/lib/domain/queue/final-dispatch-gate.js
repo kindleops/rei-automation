@@ -71,8 +71,23 @@
 //     lock_token and pass queue_verify_dispatch_authorization (the atomic
 //     claim's own verifier).
 
+//
+// CONTENT-FILTER LOCK AT DISPATCH (carry-over of review task_e46cf83a, launch
+// condition 6). Check 6b below: the thread's send_queue history is read at the
+// last hop and contentFilterDispatchRefusal (manual-send-burst-guard.js, the
+// same classifier the write-time guard uses) refuses when the thread is locked
+// by a TextGrid content-filter block that no person has cleared, or when the
+// row being sent was written before the thread's latest block. It applies to
+// EVERY path (queue runner, Cockpit, internal send-now, manual send,
+// automation): a row queued before the block, or written by a path that never
+// ran the write-time guard, cannot leave. An unreadable history refuses.
+
 import { normalizePhone } from "@/lib/utils/phones.js";
 import { verifyOwnerReleaseRecord } from "@/lib/domain/queue/owner-release-signature.js";
+import {
+  contentFilterDispatchRefusal,
+  readThreadSendHistory,
+} from "@/lib/domain/inbox/manual-send-burst-guard.js";
 
 export const FINAL_DISPATCH_GATE_VERSION = "final_dispatch_gate_v2";
 
@@ -114,6 +129,9 @@ export const GATE_REASONS = Object.freeze({
   RELEASE_INVALID: "final_gate_owner_release_invalid",
   RELEASE_AUDIT_MISSING: "final_gate_owner_release_audit_missing",
   OPERATOR_ACTION_MISSING: "final_gate_operator_action_missing",
+  CONTENT_FILTER_LOCKED: "final_gate_content_filter_locked",
+  CONTENT_FILTER_BLOCK_AFTER_ROW: "final_gate_content_filter_blocked_after_row_written",
+  CONTENT_FILTER_HISTORY_UNREADABLE: "final_gate_content_filter_history_unreadable",
   SUPPRESSION_UNREADABLE: "final_gate_suppression_unreadable",
   SUPPRESSED: "final_gate_phone_suppressed",
   AUTOMATION_SUPPRESSED: "final_gate_automation_suppression_active",
@@ -472,6 +490,16 @@ export function decideFinalDispatch(facts = {}) {
     const a = facts.automation_suppression;
     if (!a || a.error) push(GATE_REASONS.SUPPRESSION_UNREADABLE);
     else if (a.active) push(GATE_REASONS.AUTOMATION_SUPPRESSED);
+    // 6b. content-filter lock (every path, automated AND manual). Fails closed:
+    //     a missing or unreadable history refuses.
+    const cf = facts.content_filter;
+    if (!cf || cf.error || !Array.isArray(cf.rows)) push(GATE_REASONS.CONTENT_FILTER_HISTORY_UNREADABLE);
+    else {
+      const subject = Object.keys(row).length ? row : null;
+      const lock = contentFilterDispatchRefusal({ row: subject, rows: cf.rows });
+      if (lock?.reason === "content_filter_locked") push(GATE_REASONS.CONTENT_FILTER_LOCKED);
+      else if (lock) push(GATE_REASONS.CONTENT_FILTER_BLOCK_AFTER_ROW);
+    }
     // 7-8. archive / terminal / legal / repair / review / quarantine on the thread
     if (facts.thread_error) push(GATE_REASONS.THREAD_STATE_UNREADABLE);
     else push(threadStateRefusal(facts.thread, { automated }));
@@ -624,6 +652,7 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
       thread_error: GATE_REASONS.NO_CLIENT,
       campaign_error: GATE_REASONS.NO_CLIENT,
       hold: { fail_closed: true, hold_type: "lookup_error" },
+      content_filter: { error: GATE_REASONS.NO_CLIENT, rows: null },
       ...(row_id ? { row_error: GATE_REASONS.NO_CLIENT, history: { history_error: GATE_REASONS.NO_CLIENT, authority_error: GATE_REASONS.NO_CLIENT } } : {}),
       claim: { ok: false, reason: GATE_REASONS.NO_CLIENT },
     };
@@ -657,7 +686,7 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
     }),
   ]);
 
-  const [suppression, automationSuppression, thread, hold, campaign] = await Promise.all([
+  const [suppression, automationSuppression, thread, hold, campaign, sendHistory] = await Promise.all([
     settle(async () => {
       if (typeof deps.readSuppression === "function") return deps.readSuppression(dest);
       const { queryActiveSuppression } = await import("@/lib/domain/compliance/query-active-suppression.js");
@@ -700,6 +729,16 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
       if (r?.error) throw r.error;
       return (r?.data || [])[0] || null;
     }),
+    // 6b. The thread's send_queue history (by thread key AND recipient, the
+    //     write-time guard's own read), for the content-filter lock.
+    settle(async () => {
+      const raw_key = clean(thread_key) || clean(subject?.thread_key) || null;
+      const h = typeof deps.readThreadSendHistory === "function"
+        ? await deps.readThreadSendHistory({ thread_key: raw_key, to_phone_number: dest })
+        : await readThreadSendHistory({ supabase, thread_key: raw_key, to_phone_number: dest, live_reads: true });
+      if (!h || h.ok !== true || !Array.isArray(h.rows)) throw new Error(clean(h?.error) || "send_history_unreadable");
+      return h.rows;
+    }),
   ]);
 
   return {
@@ -715,6 +754,9 @@ export async function loadFinalDispatchFacts({ to = null, thread_key = null, row
     hold: hold.error ? { fail_closed: true, hold_type: "lookup_error" } : hold.value,
     campaign: campaign.error ? null : campaign.value,
     campaign_error: campaign.error ? clean(campaign.error?.message) || "campaign_read_failed" : null,
+    content_filter: sendHistory.error
+      ? { error: clean(sendHistory.error?.message) || "send_history_read_failed", rows: null }
+      : { error: null, rows: sendHistory.value },
   };
 }
 

@@ -10,7 +10,9 @@ import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
 import { requireOpsDashboardAuth } from "@/lib/security/dashboard-auth.js";
-import { createInboxSendNowQueueRow } from "@/lib/domain/inbox/send-now-service.js";
+// The route's send path: createInboxSendNowQueueRow (lock + cap + guards, any
+// action) then processSendQueueItem (final dispatch gate), via the handler.
+import { handleInternalInboxSendNow } from "@/lib/domain/inbox/internal-send-now-handler.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 import { processSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
 import { classifyQueueBusinessOutcome } from "@/lib/domain/queue/failure-classifier.js";
@@ -55,15 +57,20 @@ export async function POST(request) {
     // ── Create queue row via service ─────────────────────────────────
     // An audited repeat-asking-price override carries the verified operator only
     // (x-ops-user-id), never an actor named in the body.
-    const result = await createInboxSendNowQueueRow({
-      ...body,
-      repeat_ask_override_actor: clean(request.headers.get("x-ops-user-id")) || null,
-    });
-    let row_result = null;
-    const dry_run = body?.dry_run === true;
-    if (result?.queue_created && result?.queue_row_id && !dry_run) {
-      row_result = await processSendQueueItem(result.queue_row_id, { now: new Date().toISOString() });
-    }
+    //
+    // Whatever body.action says (send_now, queue_reply, auto_reply, ...), the
+    // service applies the content-filter lock and the per-thread attempt cap
+    // before any row exists (review task_e46cf83a), and the final dispatch gate
+    // re-checks the lock when processSendQueueItem dispatches the row.
+    // (handleInternalInboxSendNow calls createInboxSendNowQueueRow, then
+    // processSendQueueItem only for a row that was actually created.)
+    const { result, payload } = await handleInternalInboxSendNow(
+      {
+        ...body,
+        repeat_ask_override_actor: clean(request.headers.get("x-ops-user-id")) || null,
+      },
+      { processSendQueueItem }
+    );
 
     logger.info("inbox_send_now.completed", {
       ok: result.ok,
@@ -72,23 +79,7 @@ export async function POST(request) {
       queue_created: result.queue_created,
     });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        handled: true,
-        outcome: result.ok ? "queued" : "blocked",
-        error: result.error || null,
-        queue_id: result.queue_id || null,
-        queue_key: result.queue_key || null,
-        queue_row_id: result.queue_row_id || null,
-        row_result,
-        failure: result.ok ? null : {
-          reason: result.error || "send_now_blocked",
-          failure_bucket: classifyQueueBusinessOutcome({ reason: result.error })?.failure_bucket || null,
-        },
-      },
-      { status: 200 }
-    );
+    return NextResponse.json(payload, { status: 200 });
   } catch (error) {
     const handled = classifyQueueBusinessOutcome({
       message: error?.message,

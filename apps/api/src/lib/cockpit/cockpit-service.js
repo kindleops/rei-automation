@@ -839,15 +839,27 @@ export async function runInboxAction({
         scheduled_for_local: scheduleResolution?.scheduled_for_local || undefined,
         timezone: scheduleResolution?.timezone || clean(payload.timezone) || undefined,
       },
-      { supabase }
+      // The server principal (never payload text): it is the operator recorded
+      // on the row and the only identity that can clear a content-filter lock
+      // from these actions. The content-filter lock and the per-thread attempt
+      // cap apply to queue / auto / schedule replies exactly as to send-now
+      // (review task_e46cf83a); a refusal comes back as a 423 with its reason.
+      { supabase, operator }
     )
 
     if (!queueResult.ok || !queueResult.queue_id) {
-      return blockedResponse(action, queueResult.error || 'send_queue_insert_failed', {
+      return blockedResponse(action, queueResult.error || queueResult.reason || 'send_queue_insert_failed', {
         status: queueResult.status || 423,
         dry_run: false,
         thread_key: threadKey,
-        diagnostics: { send_error: queueResult.error },
+        queue_created: false,
+        queue_inserted: queueResult.queue_inserted === true,
+        hard_block: queueResult.hard_block === true,
+        diagnostics: {
+          send_error: queueResult.error,
+          detail_reason: queueResult.detail_reason || null,
+          manual_send_burst: queueResult.manual_send_burst || null,
+        },
       })
     }
 

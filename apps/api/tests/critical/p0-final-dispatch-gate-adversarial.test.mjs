@@ -79,6 +79,9 @@ const healthyReaders = (over = {}) => ({
   readThreadState: async () => ({ thread_key: PHONE, status: "active", is_archived: false, last_inbound_at: null, metadata: {} }),
   readAutomationHold: async () => ({ held: false, fail_closed: false }),
   readCampaign: async () => ({ id: "camp-1", status: "active" }),
+  // Check 6b (content-filter lock at dispatch): the thread's send_queue
+  // history, no content-filter block on it.
+  readThreadSendHistory: async () => ({ ok: true, rows: [] }),
   // Round 2 history reads: a row inserted queued, claimed to processing, the
   // latest freeze/brake event an hour before NOW, the atomic claim held.
   readStatusHistory: async () => [

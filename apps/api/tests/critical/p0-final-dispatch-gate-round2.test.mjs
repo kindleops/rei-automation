@@ -89,6 +89,8 @@ const readers = (row, over = {}) => ({
   readThreadState: async () => ({ thread_key: PHONE, status: "active", is_archived: false, last_inbound_at: null, metadata: {} }),
   readAutomationHold: async () => ({ held: false, fail_closed: false }),
   readCampaign: async () => ({ id: "camp-1", status: "active" }),
+  // Check 6b (content-filter lock at dispatch): no block on the thread.
+  readThreadSendHistory: async () => ({ ok: true, rows: [] }),
   readStatusHistory: async () => FRESH_HISTORY,
   readLatestAuthorityEvent: async () => iso(nowMs - 3600_000),
   readReleaseAudit: async () => ({ found: false }),

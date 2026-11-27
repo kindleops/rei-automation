@@ -28,8 +28,10 @@ import {
   MANUAL_BURST_CONTROL_KEYS,
   MANUAL_BURST_DEFAULTS,
   MANUAL_BURST_REASONS,
+  OPERATOR_SEND_MARKER,
   bodySimilarity,
   buildContentFilterLockClearance,
+  contentFilterDispatchRefusal,
   contentFilterLockOf,
   evaluateManualSendBurst,
   isAttemptRow,
@@ -38,7 +40,15 @@ import {
   readThreadSendHistory,
   runManualSendBurstGuard,
 } from "@/lib/domain/inbox/manual-send-burst-guard.js";
-import { __setFinalDispatchGateModeForTests } from "@/lib/domain/queue/final-dispatch-gate.js";
+import {
+  GATE_REASONS,
+  __setFinalDispatchGateModeForTests,
+  evaluateFinalDispatchGate,
+} from "@/lib/domain/queue/final-dispatch-gate.js";
+import { handleInternalInboxSendNow } from "@/lib/domain/inbox/internal-send-now-handler.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { drainPostSendProjections } from "@/lib/domain/inbox/post-send-projection.js";
 import { createMemoryS11Store } from "../helpers/s11-memory-store.mjs";
 
@@ -231,6 +241,11 @@ test("1d. what counts as an attempt: failures and in-flight MANUAL rows yes; can
   }
   assert.equal(isAttemptRow({ queue_status: "queued", metadata: { manual_operator_send: true } }), true);
   assert.equal(isAttemptRow({ queue_status: "queued", metadata: {} }), false);
+  // Review task_e46cf83a: a queued / scheduled queue-reply, auto-reply or
+  // schedule-reply row (any operator path) counts too.
+  assert.equal(isAttemptRow({ queue_status: "queued", metadata: { [OPERATOR_SEND_MARKER]: true } }), true);
+  assert.equal(isAttemptRow({ queue_status: "scheduled", metadata: { [OPERATOR_SEND_MARKER]: true } }), true);
+  assert.equal(isAttemptRow({ queue_status: "scheduled", metadata: {} }), false);
   assert.equal(isAttemptRow({ queue_status: "cancelled" }), false);
   assert.equal(isAttemptRow({ queue_status: "paused_invalid_queue_row" }), false);
   // A content-filtered row counts whatever status a later rotation gave it.
@@ -309,11 +324,25 @@ test("2e. an invalid clearance on a locked thread is refused with the clearance 
 
 test("3a. similar body to a FAILED attempt on the thread in the window is a duplicate (also for non-manual rows)", () => {
   const rows = [{ id: "f1", queue_status: "failed", message_body: "Hi John, would you take $50k cash for the house?", created_at: minutesAgo(20) }];
-  const v = evaluateManualSendBurst({ rows, message_body: "Hi John - would you take $50k cash for your house??", immediate_manual: false, now: NOW });
+  const v = evaluateManualSendBurst({ rows, message_body: "Hi John - would you take $50k cash for your house??", now: NOW });
   assert.equal(v.ok, false);
   assert.equal(v.reason, MANUAL_BURST_REASONS.DUPLICATE);
   assert.equal(v.duplicate.matched_row_id, "f1");
   assert.equal(v.duplicate.matched_status, "failed");
+});
+
+test("3a-2. no argument switches the lock or the cap off: an old caller's immediate_manual:false is ignored (review task_e46cf83a)", () => {
+  const blocked = [{ id: "cf1", queue_status: "failed", message_body: "original text of the reply here", created_at: minutesAgo(30), metadata: { failure_class: "content_filter_blocked" } }];
+  const locked = evaluateManualSendBurst({ rows: blocked, message_body: "a reworded attempt that is different", immediate_manual: false, now: NOW });
+  assert.equal(locked.ok, false);
+  assert.equal(locked.reason, MANUAL_BURST_REASONS.CONTENT_FILTER_LOCKED);
+  const two = [
+    { id: "a", queue_status: "failed", message_body: "first wording of the offer text", created_at: minutesAgo(6) },
+    { id: "b", queue_status: "queued", message_body: "something entirely different here now", created_at: minutesAgo(2), metadata: { [OPERATOR_SEND_MARKER]: true } },
+  ];
+  const capped = evaluateManualSendBurst({ rows: two, message_body: "a third unrelated message body text", immediate_manual: false, now: NOW });
+  assert.equal(capped.ok, false);
+  assert.equal(capped.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP);
 });
 
 test("3b. similarity: exact after normalization is 1; short bodies match only exactly; unrelated bodies do not match", () => {
@@ -719,4 +748,291 @@ test("BURST: transport failures (no content filter) are capped at 2 attempts per
     assert.equal(r.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP);
     assert.match(r.detail_reason, /failed attempts count/);
   }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 6. EVERY OPERATOR PATH (review task_e46cf83a, CHANGES REQUESTED)
+//
+// The lock and the cap used to run only for an immediate send-now. Cockpit's
+// Queue reply / Auto-reply / Schedule reply and the internal send-now route
+// with action "queue_reply" wrote rows (queued, scheduled_for = now) that
+// skipped both, and nothing re-checked the lock at dispatch.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const ago = (m) => new Date(Date.now() - m * 60 * 1000).toISOString();
+const ahead = (m) => new Date(Date.now() + m * 60 * 1000).toISOString();
+
+/** A thread whose last send TextGrid's content filter blocked 5 minutes ago. */
+const lockedThread = () => makeFakeSupabase({
+  send_queue: [{ id: "cf1", thread_key: THREAD, to_phone_number: THREAD, from_phone_number: FROM_88, queue_status: "failed", message_body: REWORDS[0], created_at: ago(5), metadata: { failure_class: "content_filter_blocked" } }],
+});
+
+/** Exactly what cockpit-service.js runInboxAction passes for these actions. */
+function cockpitInput(action, body) {
+  const svc_action = action === "auto-reply" ? "auto_reply" : action === "schedule-reply" ? "schedule_reply" : "queue_reply";
+  return {
+    ...SEND,
+    message_body: body,
+    repeat_ask_override: false,
+    repeat_ask_override_actor: null,
+    source: "inbox",
+    action: svc_action,
+    created_from: "leadcommand_inbox",
+    message_type: action === "auto-reply" ? "auto_reply" : action === "schedule-reply" ? "manual_scheduled_reply" : "manual_reply",
+    use_case_template: action === "auto-reply" ? "auto_reply" : "manual_reply",
+    type: "outbound",
+    ...(action === "schedule-reply" ? { scheduled_for: ahead(120) } : {}),
+  };
+}
+
+const OPERATOR_PATHS = [
+  ["cockpit queue-reply", (body) => cockpitInput("queue-reply", body)],
+  ["cockpit auto-reply", (body) => cockpitInput("auto-reply", body)],
+  ["cockpit schedule-reply (2 h ahead)", (body) => cockpitInput("schedule-reply", body)],
+  ["map command", (body) => ({ ...SEND, message_body: body, source: "map_command", action: "send_ownership_check", created_from: "leadcommand_map", message_type: "ownership_check", use_case_template: "ownership_check" })],
+  ["send-now scheduled ahead", (body) => ({ ...SEND, message_body: body, scheduled_for: ahead(60) })],
+];
+
+test("6a. a locked thread refuses EVERY operator path before any row (queue reply, auto reply, schedule reply, map command, scheduled send-now)", async () => {
+  for (const [name, build] of OPERATOR_PATHS) {
+    const h = rowDeps(lockedThread());
+    const r = await createInboxSendNowQueueRow(build(REWORDS[3]), { ...h.deps, operator: OPERATOR });
+    assert.equal(r.ok, false, name);
+    assert.equal(r.reason, MANUAL_BURST_REASONS.CONTENT_FILTER_LOCKED, `${name}: ${r.reason}`);
+    assert.equal(r.hard_block, true, name);
+    assert.equal(r.queue_inserted, false, name);
+    assert.equal(r.manual_send_burst.clearance_required, true, name);
+    assert.equal(h.inserted.length, 0, `${name}: no row`);
+  }
+});
+
+test("6b. every operator path counts against the per-thread cap, and the cap refuses every path", async () => {
+  for (const [name, build] of OPERATOR_PATHS) {
+    // One failed send-now 3 minutes ago, then this path writes a row: that is
+    // two attempts in 10 minutes.
+    const supabase = makeFakeSupabase({
+      send_queue: [{ id: "f1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "failed_transport", message_body: "an earlier note about the closing date", created_at: ago(3) }],
+    });
+    const h = rowDeps(supabase);
+    const first = await createInboxSendNowQueueRow(build(REWORDS[1]), { ...h.deps, operator: OPERATOR });
+    assert.equal(first.ok, true, `${name}: ${first.reason} ${first.detail_reason || ""}`);
+    const row = h.inserted[0];
+    assert.equal(row.queue_status, "queued", name);
+    assert.equal(row.metadata[OPERATOR_SEND_MARKER], true, `${name}: the row is marked as an operator send`);
+    assert.equal(row.metadata.manual_send_burst_guard.lock_and_cap_applied, true, name);
+    assert.equal(row.metadata.operator_id, OPERATOR.id, `${name}: the row records who wrote it`);
+
+    // Every path is now refused by the cap: the waiting row counted.
+    for (const [other, build_other] of OPERATOR_PATHS) {
+      const r = await createInboxSendNowQueueRow(build_other(REWORDS[4]), { ...h.deps, operator: OPERATOR });
+      assert.equal(r.ok, false, `${name} then ${other}`);
+      assert.equal(r.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP, `${name} then ${other}: ${r.reason}`);
+    }
+    assert.equal(h.inserted.length, 1, `${name}: refused attempts write nothing`);
+  }
+});
+
+test("6c. a scheduled operator row (status scheduled after the Cockpit patch) still counts against the cap", async () => {
+  const supabase = makeFakeSupabase({
+    send_queue: [
+      { id: "s1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "scheduled", message_body: "the first scheduled reply about the roof", created_at: ago(2), scheduled_for: ahead(120), metadata: { [OPERATOR_SEND_MARKER]: true } },
+      { id: "s2", thread_key: THREAD, to_phone_number: THREAD, queue_status: "scheduled", message_body: "the second scheduled reply about closing", created_at: ago(1), scheduled_for: ahead(240), metadata: { [OPERATOR_SEND_MARKER]: true } },
+    ],
+  });
+  const h = rowDeps(supabase);
+  const r = await createInboxSendNowQueueRow(cockpitInput("queue-reply", REWORDS[2]), { ...h.deps, operator: OPERATOR });
+  assert.equal(r.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP);
+  assert.equal(h.inserted.length, 0);
+});
+
+test("6d. clearance on a queue reply: a server-identified person with a reason clears it; no principal or no reason is refused", async () => {
+  const h = rowDeps(lockedThread());
+  const no_operator = await createInboxSendNowQueueRow({ ...cockpitInput("queue-reply", REWORDS[3]), content_filter_lock_clearance: CLEARANCE }, h.deps);
+  assert.equal(no_operator.reason, MANUAL_BURST_REASONS.CLEARANCE_INVALID, "no server identity, no clearance");
+  const no_reason = await createInboxSendNowQueueRow({ ...cockpitInput("queue-reply", REWORDS[3]), content_filter_lock_clearance: { reason: "ok" } }, { ...h.deps, operator: OPERATOR });
+  assert.equal(no_reason.reason, MANUAL_BURST_REASONS.CLEARANCE_INVALID);
+  assert.equal(h.inserted.length, 0);
+  const cleared = await createInboxSendNowQueueRow({ ...cockpitInput("queue-reply", REWORDS[3]), content_filter_lock_clearance: CLEARANCE }, { ...h.deps, operator: OPERATOR });
+  assert.equal(cleared.ok, true, `${cleared.reason}: ${cleared.detail_reason}`);
+  assert.equal(h.inserted[0].metadata.content_filter_lock_clearance.actor, OPERATOR.id);
+  assert.equal(h.inserted[0].metadata.content_filter_lock_clearance.cleared_lock.blocked_row_id, "cf1");
+});
+
+// ── the internal route, action "queue_reply" ────────────────────────────────
+
+function internalRoute(supabase) {
+  const h = rowDeps(supabase);
+  const dispatched = [];
+  return {
+    h,
+    dispatched,
+    call: (body, actor = "ops-user-7") =>
+      handleInternalInboxSendNow(
+        // What route.js builds: the body plus the x-ops-user-id actor.
+        { ...body, repeat_ask_override_actor: actor },
+        { queueRowDeps: h.deps, processSendQueueItem: async (id) => { dispatched.push(id); return { ok: true, id }; } }
+      ),
+  };
+}
+
+test("6e. POST /api/internal/inbox/send-now with action queue_reply on a locked thread: refused, no row, nothing dispatched", async () => {
+  for (const action of ["queue_reply", "auto_reply", "send_now"]) {
+    const route = internalRoute(lockedThread());
+    const { payload } = await route.call({ ...SEND, action, source: "inbox", message_body: REWORDS[2] });
+    assert.equal(payload.outcome, "blocked", action);
+    assert.equal(payload.failure.reason, MANUAL_BURST_REASONS.CONTENT_FILTER_LOCKED, action);
+    assert.equal(payload.failure.hard_block, true, action);
+    assert.equal(payload.queue_row_id, null, action);
+    assert.equal(route.h.inserted.length, 0, `${action}: no row`);
+    assert.equal(route.dispatched.length, 0, `${action}: processSendQueueItem never called`);
+  }
+});
+
+test("6f. the internal route's queue_reply counts against the cap; the next request is refused and not dispatched", async () => {
+  const route = internalRoute(makeFakeSupabase({
+    send_queue: [{ id: "f1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "failed", message_body: "an earlier note about the closing date", created_at: ago(4) }],
+  }));
+  const first = await route.call({ ...SEND, action: "queue_reply", source: "inbox", message_body: REWORDS[1] });
+  assert.equal(first.payload.outcome, "queued", JSON.stringify(first.payload.failure));
+  assert.equal(route.dispatched.length, 1);
+  assert.equal(route.h.inserted[0].metadata[OPERATOR_SEND_MARKER], true);
+  assert.equal(route.h.inserted[0].metadata.operator_id, "ops-user-7", "the route-stamped actor is recorded");
+  const second = await route.call({ ...SEND, action: "queue_reply", source: "inbox", message_body: REWORDS[4] });
+  assert.equal(second.payload.outcome, "blocked");
+  assert.equal(second.payload.failure.reason, MANUAL_BURST_REASONS.ATTEMPT_CAP);
+  assert.equal(route.dispatched.length, 1, "the refused request was not dispatched");
+  assert.equal(route.h.inserted.length, 1);
+});
+
+test("6g. the internal route: the stamped x-ops-user-id actor with a reason can clear; without an actor it cannot", async () => {
+  const anon = internalRoute(lockedThread());
+  const refused = await anon.call({ ...SEND, action: "queue_reply", source: "inbox", message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE }, null);
+  assert.equal(refused.payload.failure.reason, MANUAL_BURST_REASONS.CLEARANCE_INVALID);
+  assert.equal(anon.dispatched.length, 0);
+  const named = internalRoute(lockedThread());
+  const ok = await named.call({ ...SEND, action: "queue_reply", source: "inbox", message_body: REWORDS[3], content_filter_lock_clearance: CLEARANCE });
+  assert.equal(ok.payload.outcome, "queued", JSON.stringify(ok.payload.failure));
+  assert.equal(named.dispatched.length, 1);
+  assert.equal(named.h.inserted[0].metadata.content_filter_lock_clearance.actor, "ops-user-7");
+});
+
+// ── dispatch: the final gate re-checks the lock on every path ───────────────
+
+test("6h. contentFilterDispatchRefusal: locked thread; row written before the latest block (even after a clearance); clean cases pass", () => {
+  const queued_before = { id: "q-old", thread_key: THREAD, queue_status: "queued", created_at: minutesAgo(20), metadata: { [OPERATOR_SEND_MARKER]: true } };
+  const block = { id: "cf1", thread_key: THREAD, queue_status: "failed", created_at: minutesAgo(10), metadata: { failure_class: "content_filter_blocked" } };
+  const clearance_row = { id: "c1", thread_key: THREAD, queue_status: "sent", created_at: minutesAgo(5), metadata: { content_filter_lock_clearance: { actor: OPERATOR.id, cleared_at: minutesAgo(5) } } };
+  const fresh = { id: "q-new", thread_key: THREAD, queue_status: "queued", created_at: minutesAgo(1), metadata: {} };
+
+  assert.equal(contentFilterDispatchRefusal({ row: queued_before, rows: [queued_before, block] }).reason, "content_filter_locked");
+  assert.equal(contentFilterDispatchRefusal({ row: fresh, rows: [block] }).reason, "content_filter_locked", "any row, any path, on a locked thread");
+  assert.equal(contentFilterDispatchRefusal({ row: null, rows: [block] }).reason, "content_filter_locked", "a manual send with no row yet");
+  assert.equal(
+    contentFilterDispatchRefusal({ row: queued_before, rows: [queued_before, block, clearance_row] }).reason,
+    "content_filter_blocked_after_row_written",
+    "the clearance reviewed the new wording, not the row queued before the block"
+  );
+  assert.equal(contentFilterDispatchRefusal({ row: fresh, rows: [block, clearance_row] }), null, "a row written after a person cleared the lock");
+  assert.equal(contentFilterDispatchRefusal({ row: clearance_row, rows: [block] }), null, "the cleared row itself");
+  assert.equal(contentFilterDispatchRefusal({ row: fresh, rows: [] }), null);
+});
+
+const GATE_NOW = NOW;
+const gateIso = (m) => new Date(NOW_MS - m * 60 * 1000).toISOString();
+const NO_DIRECT_READS = { from() { throw new Error("unexpected direct read: inject a reader"); } };
+
+function gateDeps(row, history) {
+  return {
+    supabase: NO_DIRECT_READS,
+    evaluateAuthority: async () => ({ ok: true }),
+    checkSenderContinuity: async () => ({ ok: true, reason: null }),
+    readQueueRow: async () => row,
+    readSuppression: async () => ({ suppressed: false, lookup_error: null }),
+    readAutomationSuppression: async () => ({ active: false }),
+    readThreadState: async () => ({ thread_key: THREAD, status: "active", is_archived: false, last_inbound_at: null, metadata: {} }),
+    readAutomationHold: async () => ({ held: false, fail_closed: false }),
+    readCampaign: async () => null,
+    readStatusHistory: async () => [
+      { from_status: null, to_status: "queued", changed_at: row.created_at },
+      { from_status: "queued", to_status: "processing", changed_at: gateIso(0) },
+    ],
+    readLatestAuthorityEvent: async () => gateIso(24 * 60 - 60),
+    readReleaseAudit: async () => ({ found: false }),
+    verifyDispatchClaim: async () => ({ ok: true }),
+    readThreadSendHistory: typeof history === "function" ? history : async () => ({ ok: true, rows: history }),
+  };
+}
+
+const gateInput = (row) => ({
+  path: "queue",
+  row,
+  to: THREAD,
+  from: FROM_88,
+  thread_key: THREAD,
+  claim_token: row.lock_token,
+  contact_window: { allowed: true, hold: false, timezone: "America/Chicago" },
+  now: GATE_NOW,
+});
+
+test("6i. FINAL DISPATCH GATE: a row queued before the block is refused at dispatch; a clean row passes; unreadable history refuses", async () => {
+  __setFinalDispatchGateModeForTests("enforce");
+  const queued = { id: "q-before", thread_key: THREAD, to_phone_number: THREAD, from_phone_number: FROM_88, queue_status: "processing", lock_token: "claim-q", created_at: gateIso(20), message_body: REWORDS[1], metadata: { [OPERATOR_SEND_MARKER]: true, action: "queue_reply" } };
+  const block = { id: "cf1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "failed", created_at: gateIso(10), message_body: REWORDS[0], metadata: { failure_class: "content_filter_blocked" } };
+  const clearance_row = { id: "c1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "sent", created_at: gateIso(5), message_body: REWORDS[3], metadata: { content_filter_lock_clearance: { actor: OPERATOR.id, cleared_at: gateIso(5) } } };
+
+  // Baseline: the same row on a clean thread passes every check.
+  const clean_verdict = await evaluateFinalDispatchGate(gateInput(queued), gateDeps(queued, [queued]));
+  assert.equal(clean_verdict.ok, true, JSON.stringify(clean_verdict.refusals));
+
+  // Blocked after it was queued: refused, provider never reached.
+  const locked = await evaluateFinalDispatchGate(gateInput(queued), gateDeps(queued, [block, queued]));
+  assert.equal(locked.ok, false);
+  assert.ok(locked.refusals.includes(GATE_REASONS.CONTENT_FILTER_LOCKED), JSON.stringify(locked.refusals));
+  assert.equal(locked.reason, GATE_REASONS.CONTENT_FILTER_LOCKED);
+
+  // Still refused after a person cleared the thread with a NEW message.
+  const after_clear = await evaluateFinalDispatchGate(gateInput(queued), gateDeps(queued, [clearance_row, block, queued]));
+  assert.equal(after_clear.ok, false);
+  assert.equal(after_clear.reason, GATE_REASONS.CONTENT_FILTER_BLOCK_AFTER_ROW);
+
+  // An automated row (no operator marker) on a locked thread: refused too.
+  const automated = { ...queued, id: "auto-1", created_at: gateIso(2), metadata: { follow_up_id: "fu-1" } };
+  const auto_verdict = await evaluateFinalDispatchGate(gateInput(automated), gateDeps(automated, [block]));
+  assert.equal(auto_verdict.reason, GATE_REASONS.CONTENT_FILTER_LOCKED);
+
+  // Fail closed: an unreadable history refuses.
+  for (const reader of [async () => ({ ok: false, error: "statement timeout" }), async () => { throw new Error("db down"); }, async () => ({ ok: true, rows: null })]) {
+    const v = await evaluateFinalDispatchGate(gateInput(queued), gateDeps(queued, reader));
+    assert.equal(v.ok, false);
+    assert.equal(v.reason, GATE_REASONS.CONTENT_FILTER_HISTORY_UNREADABLE, JSON.stringify(v.refusals));
+  }
+});
+
+test("6j. FINAL DISPATCH GATE, manual path: a manual send on a locked thread is refused at dispatch", async () => {
+  __setFinalDispatchGateModeForTests("enforce");
+  const block = { id: "cf1", thread_key: THREAD, to_phone_number: THREAD, queue_status: "failed", created_at: gateIso(10), metadata: { failure_class: "content_filter_blocked" } };
+  const deps = gateDeps({ id: "unused", created_at: gateIso(1) }, [block]);
+  delete deps.readQueueRow;
+  const v = await evaluateFinalDispatchGate(
+    { path: "manual", row: null, to: THREAD, thread_key: THREAD, operator_action_id: "opact-1", now: GATE_NOW },
+    deps
+  );
+  assert.equal(v.ok, false);
+  assert.equal(v.reason, GATE_REASONS.CONTENT_FILTER_LOCKED, JSON.stringify(v.refusals));
+});
+
+test("6k. wiring: Cockpit queue/auto/schedule reply pass the server principal; the internal route goes through the handler; the gate runs check 6b", () => {
+  const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../src");
+  const read = (rel) => fs.readFileSync(path.join(SRC, rel), "utf8");
+  const cockpit = read("lib/cockpit/cockpit-service.js");
+  const reply = cockpit.slice(cockpit.indexOf("if (action === 'queue-reply' || action === 'schedule-reply' || action === 'auto-reply')"));
+  assert.match(reply, /createInboxSendNowQueueRow\(/);
+  assert.match(reply.slice(0, reply.indexOf("if (!queueResult.ok")), /\{ supabase, operator \}/);
+  const route = read("app/api/internal/inbox/send-now/route.js");
+  assert.match(route, /handleInternalInboxSendNow\(/);
+  assert.match(route, /processSendQueueItem/);
+  const gate = read("lib/domain/queue/final-dispatch-gate.js");
+  assert.match(gate, /contentFilterDispatchRefusal\(/);
+  const svc = read("lib/domain/inbox/send-now-service.js");
+  assert.doesNotMatch(svc, /immediate_manual/, "no flag left that could switch the lock or the cap off");
 });

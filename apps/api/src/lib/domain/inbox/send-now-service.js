@@ -62,6 +62,7 @@ import {
 } from "@/lib/domain/inbox/manual-offer-guard.js";
 import {
   MANUAL_BURST_REASONS,
+  OPERATOR_SEND_MARKER,
   buildContentFilterLockClearance,
   isContentFilterFailureRow,
   runManualSendBurstGuard,
@@ -1569,23 +1570,29 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
   // Replaces the exact-body / 5-minute-bucket duplicate guard, which ignored
   // failed rows and let the send through when its query errored. One read of
   // the thread's send_queue history decides (manual-send-burst-guard.js):
-  //   * content-filter lock   -- manual immediate sends; cleared only by a
-  //                              person (content_filter_lock_clearance)
-  //   * attempt cap + cooldown -- manual immediate sends; failed attempts count
+  //   * content-filter lock   -- every row this function writes; cleared only
+  //                              by a person (content_filter_lock_clearance)
+  //   * attempt cap + cooldown -- every row this function writes; failed
+  //                              attempts count
   //   * duplicate guard        -- every row this function writes; per thread,
   //                              failed rows included, similar bodies
   // An unreadable history refuses. No row is written for a refused attempt.
+  //
+  // EVERY ACTION, EVERY SOURCE, EVERY SCHEDULE (review task_e46cf83a). Every
+  // caller of this function is an operator path that creates a seller-thread
+  // send: Cockpit send-now / map command (via executeManualInboxSendNow),
+  // Cockpit queue-reply / auto-reply / schedule-reply, and
+  // POST /api/internal/inbox/send-now with any action. Round 4 applied the
+  // lock and the cap only when is_manual_send_now and not scheduled ahead, so
+  // queue_reply / auto_reply rows (queued, scheduled_for = now) and scheduled
+  // replies skipped both. Nothing here depends on the action any more. The lock
+  // is also re-checked at dispatch (final-dispatch-gate.js) for every row.
   const operator_identity = manualSendOperatorIdentity(deps.operator, input);
-  const early_scheduled_ms = Date.parse(clean(input.scheduled_for || input.scheduled_for_utc));
-  const immediate_manual =
-    is_manual_send_now && !(Number.isFinite(early_scheduled_ms) && early_scheduled_ms > Date.parse(now) + 1000);
-  const clearance = immediate_manual
-    ? buildContentFilterLockClearance(input, {
-        operator: deps.operator ?? null,
-        server_actor: clean(input.repeat_ask_override_actor) || null,
-        now,
-      })
-    : { requested: false };
+  const clearance = buildContentFilterLockClearance(input, {
+    operator: deps.operator ?? null,
+    server_actor: clean(input.repeat_ask_override_actor) || null,
+    now,
+  });
   const burst_guard = deps.manualSendBurstGuardImpl || runManualSendBurstGuard;
   // The ONLY case that does not read: the test runtime driving this function
   // with the default client and no Supabase configuration (a placeholder URL
@@ -1600,7 +1607,6 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         thread_key: normalized.thread_key,
         to_phone_number: normalized.to_phone_number,
         message_body: normalized.message_body,
-        immediate_manual,
         clearance,
         now,
       },
@@ -1866,11 +1872,17 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           ...(offer_guard?.record ? { manual_offer_guard: offer_guard.record } : {}),
           // P0 round 4: who pressed Send (server identity only), and the
           // burst-guard verdict this row was written under.
-          ...(is_manual_send_now ? operatorIdentityMetadata(operator_identity) : {}),
+          // Every operator row (any action) records who wrote it, so a cleared
+          // queue / auto / scheduled reply carries the same audit as send-now.
+          ...operatorIdentityMetadata(operator_identity),
           ...(content_filter_lock_cleared ? { content_filter_lock_clearance: content_filter_lock_cleared } : {}),
+          // Counts this row against the per-thread attempt cap while it waits
+          // (queued / scheduled), whatever its action. Server-written.
+          [OPERATOR_SEND_MARKER]: true,
           manual_send_burst_guard: {
             version: burst?.guard_version || null,
-            immediate_manual,
+            lock_and_cap_applied: true,
+            action: clean(normalized.action) || null,
             config: burst?.config || null,
           },
         },

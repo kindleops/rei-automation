@@ -14,7 +14,17 @@
 // THREE CONTROLS, ONE READ. All three are judged from the thread's own
 // send_queue history, read once, so they cannot disagree with each other:
 //
-//   1. ATTEMPT CAP + COOLDOWN (manual immediate sends). At most `cap` outbound
+// SCOPE (carry-over of review task_e46cf83a). Controls 1 and 2 apply to EVERY
+// operator path that writes a seller-thread send through
+// createInboxSendNowQueueRow: send now, queue reply, auto reply, schedule
+// reply, map command and the internal send-now route, whatever the action,
+// source or schedule. Round 4 applied them to immediate manual sends only, so
+// a reworded Queue reply / Auto-reply / Schedule reply after a block went
+// through. The lock is ALSO re-checked at dispatch (contentFilterDispatchRefusal,
+// called by final-dispatch-gate.js on every path), so a row queued before the
+// block, or written by any other path, cannot leave on a locked thread.
+//
+//   1. ATTEMPT CAP + COOLDOWN (every operator send). At most `cap` outbound
 //      attempts per thread per `window_minutes`, where a FAILED attempt
 //      (failed, failed_transport, undelivered, content_filter_blocked, ...)
 //      counts exactly like a sent one. Then a hard stop until the oldest
@@ -22,8 +32,8 @@
 //      returned. Configured through system_control (keys below); absent,
 //      blank or out-of-range values use the strict default.
 //
-//   2. CONTENT-FILTER LOCK (manual immediate sends). After a
-//      content_filter_blocked failure the THREAD is locked for manual sends
+//   2. CONTENT-FILTER LOCK (every operator send, and every dispatch). After a
+//      content_filter_blocked failure the THREAD is locked for sends
 //      until a person explicitly clears it (content_filter_lock_clearance with
 //      a reason, by a server-identified operator). The lock is per thread, not
 //      per sender: on 09-24 the sender changed (…88 -> …70) through the
@@ -45,7 +55,9 @@
 
 import { normalizePhone } from "@/lib/utils/phones.js";
 
-export const MANUAL_BURST_GUARD_VERSION = "manual_send_burst_guard_v1";
+// v2: lock + cap on every operator path (not only immediate send-now), and
+// the dispatch-time lock check used by final-dispatch-gate.js.
+export const MANUAL_BURST_GUARD_VERSION = "manual_send_burst_guard_v2";
 
 export const MANUAL_BURST_REASONS = Object.freeze({
   ATTEMPT_CAP: "manual_send_attempt_cap_reached",
@@ -97,10 +109,19 @@ const ATTEMPTED_STATUSES = new Set([
   "delivery_failed",
 ]);
 
-// Not yet attempted. A MANUAL row in one of these is an operator send in
-// flight (written, about to be claimed), so it counts; an automated row parked
-// in one of them is not an attempt yet.
-const IN_FLIGHT_STATUSES = new Set(["queued", "pending", "ready", "approval", "retry", "retrying"]);
+// Not yet attempted. An OPERATOR row in one of these (send now, queue reply,
+// auto reply, schedule reply, map command, internal send-now) is an operator
+// send in flight (written, waiting to be claimed), so it counts; an automated
+// row parked in one of them is not an attempt yet.
+const IN_FLIGHT_STATUSES = new Set(["queued", "scheduled", "pending", "ready", "approval", "retry", "retrying"]);
+
+/**
+ * Metadata stamped on every row an operator path writes through
+ * createInboxSendNowQueueRow, whatever its action or source (review
+ * task_e46cf83a). It is server-written (stripped from caller metadata) and
+ * makes a queued / scheduled operator row count against the attempt cap.
+ */
+export const OPERATOR_SEND_MARKER = "operator_seller_send";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -189,7 +210,11 @@ export function isContentFilterFailureRow(row = {}) {
 
 function isManualRow(row = {}) {
   const m = objectOf(row?.metadata);
-  return m.manual_operator_send === true || lower(m.manual_operator_send) === "true";
+  return (
+    m.manual_operator_send === true ||
+    lower(m.manual_operator_send) === "true" ||
+    m[OPERATOR_SEND_MARKER] === true
+  );
 }
 
 /** When this row's attempt happened (never a later receipt/updated_at). */
@@ -318,6 +343,47 @@ export function contentFilterLockOf(rows = []) {
   return { locked: false };
 }
 
+/**
+ * DISPATCH-TIME lock check (final-dispatch-gate.js, every path: queue runner,
+ * Cockpit, internal send-now, manual send, automation). Pure.
+ *
+ * A send must not leave while the thread is locked, and a row written BEFORE
+ * the thread's latest content-filter block never leaves even after a person
+ * has cleared the lock: the clearance reviewed the new wording on the
+ * clearance row, not the older row's. The row being dispatched counts as
+ * history (a cleared row is itself the clearance that unlocks the thread).
+ *
+ * @returns {null | { reason, content_filter_lock }}
+ */
+export function contentFilterDispatchRefusal({ row = null, rows = [] } = {}) {
+  const history = Array.isArray(rows) ? [...rows] : [];
+  const row_id = clean(row?.id);
+  if (row && typeof row === "object" && (!row_id || !history.some((r) => clean(r?.id) === row_id))) {
+    history.push(row);
+  }
+  const lock = contentFilterLockOf(history);
+  if (lock.locked) {
+    return { reason: "content_filter_locked", content_filter_lock: lock };
+  }
+  const created = ms(row?.created_at);
+  if (row_id && Number.isFinite(created)) {
+    const later_block = history.find(
+      (r) => clean(r?.id) !== row_id && isContentFilterFailureRow(r) && ms(r?.created_at) > created
+    );
+    if (later_block) {
+      return {
+        reason: "content_filter_blocked_after_row_written",
+        content_filter_lock: {
+          locked: false,
+          blocked_row_id: clean(later_block.id) || null,
+          blocked_at: clean(later_block.created_at) || null,
+        },
+      };
+    }
+  }
+  return null;
+}
+
 // ── the decision (pure) ─────────────────────────────────────────────────────
 
 function refusal(reason, detail, extra = {}) {
@@ -334,12 +400,19 @@ function refusal(reason, detail, extra = {}) {
 }
 
 /**
- * Decide whether this manual send may create a row.
+ * Decide whether an operator send may create a row.
+ *
+ * The content-filter lock and the attempt cap apply to EVERY call, whatever
+ * the action (send now, queue reply, auto reply, schedule reply, map command,
+ * internal send-now) or the schedule. Round 4 gated them on an
+ * `immediate_manual` flag, so a queue-reply / auto-reply / schedule-reply
+ * written with scheduled_for = now went round both (review task_e46cf83a).
+ * There is no longer any argument that switches them off; an
+ * `immediate_manual` passed by an old caller is ignored.
  *
  * @param {object} args
  * @param {Array}   args.rows            the thread's send_queue history
  * @param {string}  args.message_body    the body about to be written
- * @param {boolean} args.immediate_manual  a manual send dispatching now (cap + lock apply)
  * @param {object}  args.config          loadManualBurstConfig() result
  * @param {object}  args.clearance       buildContentFilterLockClearance() result
  * @param {string}  args.now             ISO instant
@@ -347,7 +420,6 @@ function refusal(reason, detail, extra = {}) {
 export function evaluateManualSendBurst({
   rows = [],
   message_body = "",
-  immediate_manual = true,
   config = MANUAL_BURST_DEFAULTS,
   clearance = { requested: false },
   now = new Date().toISOString(),
@@ -356,7 +428,7 @@ export function evaluateManualSendBurst({
   const history = Array.isArray(rows) ? rows : [];
   let cleared_lock = null;
 
-  if (immediate_manual) {
+  {
     // 2. CONTENT-FILTER LOCK first: it is the most specific reason, and the
     //    one the operator must act on (a reword will be blocked again).
     const lock = contentFilterLockOf(history);
@@ -486,7 +558,7 @@ export async function readThreadSendHistory({ supabase, thread_key, to_phone_num
  * Read + decide. Fails closed: history that cannot be read refuses.
  */
 export async function runManualSendBurstGuard(
-  { thread_key, to_phone_number, message_body, immediate_manual = true, clearance = { requested: false }, now = new Date().toISOString() } = {},
+  { thread_key, to_phone_number, message_body, clearance = { requested: false }, now = new Date().toISOString() } = {},
   { supabase, getSystemValue = null, live_reads = true, readHistory = readThreadSendHistory } = {}
 ) {
   const config = await loadManualBurstConfig({ getSystemValue });
@@ -498,7 +570,7 @@ export async function runManualSendBurstGuard(
       { history_error: history?.error || "unknown", config }
     );
   }
-  const verdict = evaluateManualSendBurst({ rows: history.rows, message_body, immediate_manual, config, clearance, now });
+  const verdict = evaluateManualSendBurst({ rows: history.rows, message_body, config, clearance, now });
   return { ...verdict, config, history_rows_read: history.rows.length, history_skipped: history.skipped === true };
 }
 
