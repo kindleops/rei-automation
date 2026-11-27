@@ -456,7 +456,12 @@ await new Promise((r) => control.listen(PORTS.control, '127.0.0.1', r))
 // ── 8. world.json: every seed's ids + its expected eligibility NOW (the pool read's own verdict) ─────────────
 const { gateway } = makeGateway(env, { legacyComposer: false })
 const pool = await gateway.call({ credential: creds.sterling, tool: 'agent_lead_pool', args: { market: MARKET, limit: 100 } })
-const verdict = (id) => { const r = (pool.result?.rows || []).find((x) => (x.campaign_target_id || x.thread_id) === id); return r ? { eligible: r.eligible, ineligible_reason: r.ineligible_reason, next_purpose: r.next_purpose, window_open: r.window_open, next_permitted_at: r.next_permitted_at } : null }
+// each pool row carries the hold check it was judged on: holds {active, blocks_ai_action, rows} | null + hold_lookup_failed
+// (founder rule 2026-11-27: eligible only with holds.active 0; an unreadable hold check fails closed)
+const verdict = (id) => { const r = (pool.result?.rows || []).find((x) => (x.campaign_target_id || x.thread_id) === id); return r ? { eligible: r.eligible, ineligible_reason: r.ineligible_reason, next_purpose: r.next_purpose, window_open: r.window_open, next_permitted_at: r.next_permitted_at, holds: r.holds ?? null, hold_lookup_failed: r.hold_lookup_failed === true } : null }
+for (const r of pool.result?.rows || []) {
+  if (r.eligible === true && !(r.holds?.active === 0 && r.holds.blocks_ai_action === false && r.hold_lookup_failed === false)) throw new Error(`agent_lead_pool row ${r.campaign_target_id || r.thread_id} is eligible without a clear hold section`)
+}
 const readerEligibility = async (threadId) => {
   if (!threadId) return null
   const c = await env.db.pool.connect()

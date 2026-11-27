@@ -492,6 +492,17 @@ test('PG agent text: the lead pool — the agent-text path\'s OWN verdicts (code
     assert.equal(by(L.held.campaign_target_id).ineligible_reason, 'AUTOMATION_HOLD')
     const quiet = by(t.thread_id)
     assert.deepEqual([quiet.has_conversation, quiet.next_purpose, quiet.eligible], [true, 'reengage', true], JSON.stringify(quiet))
+    // every row carries the hold check it was judged on (founder rule 2026-11-27): the clear rows show the check ran clear
+    const CLEAR = { active: 0, blocks_ai_action: false, rows: [] }
+    for (const id of [L.ok.campaign_target_id, L.sup.campaign_target_id, L.contacted.campaign_target_id, L.renter.campaign_target_id, t.thread_id])
+      assert.deepEqual([by(id).holds, by(id).hold_lookup_failed], [CLEAR, false], JSON.stringify(by(id)))
+    // the held lead: an active hold, blocks_ai_action, type and capability only (never the hold's reason text or key)
+    const heldRow = by(L.held.campaign_target_id)
+    assert.deepEqual([heldRow.eligible, heldRow.hold_lookup_failed, heldRow.holds.blocks_ai_action, heldRow.holds.rows], [false, false, true, [{ hold_type: 'operator_hold', blocked_capabilities: ['ai_action'] }]], JSON.stringify(heldRow))
+    assert.ok(heldRow.holds.active >= 1)
+    assert.ok(!JSON.stringify(all.result).includes('operator reviewing') && !JSON.stringify(all.result).includes('h-pool'))
+    // no row is eligible without holds.active === 0
+    for (const r of all.result.rows) if (r.eligible) assert.ok(r.holds?.active === 0 && r.holds.blocks_ai_action === false && r.hold_lookup_failed === false, JSON.stringify(r))
     assert.equal(all.result.agent_texts_available, true)
     for (const k of ['contacted', 'held', 'renter']) {
       assert.equal((await assign(gateway, cred, { campaign_target_id: L[k].campaign_target_id })).code, 'LEAD_ASSIGNED')

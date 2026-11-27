@@ -26,14 +26,35 @@ export async function mustProperty(reads, id) {
 }
 export const threadResource = (t, extra = {}) => ({ type: 'thread', id: t.id, refs: { thread_key: t.thread_key, thread_id: t.id, property_id: t.property_id || null, market: t.market || null, ...extra } })
 
-/** THE hold authority, each capability the action exercises; any hold (or an unreadable registry) refuses. */
-export async function holdDeny(services, scope, capabilities) {
+const HOLD_TYPE_RE = /^[a-z0-9_:-]{1,40}$/
+/**
+ * THE hold authority with what it saw. Checks each capability the action exercises, in order, and stops at the first
+ * that is not clear. Returns:
+ *   deny     null when every capability is clear, else the refusal holdDeny gives (unchanged codes)
+ *   holds    { active, blocks_ai_action, rows } ONLY when the registry answered: clear = { 0, false, [] }; a hold =
+ *            { >= 1, true, [{ hold_type, blocked_capabilities }] } (a type label and capability names only: never a
+ *            reason text, a key, a phone or a name). null when the lookup failed or answered something that is
+ *            neither held nor clear (fail closed: unreadable hold data never reads as clear).
+ *   hold_lookup_failed  true exactly when holds is null.
+ */
+export async function holdScan(services, scope, capabilities) {
   for (const capability of capabilities) {
     let h
     try { h = await services.holdCheck({ ...scope, capability }) } catch { h = { held: true, fail_closed: true } }
-    if (h?.held !== false) return { decision: 'deny', code: h?.fail_closed ? 'AUTOMATION_HOLD_LOOKUP_FAILED' : 'AUTOMATION_HOLD', evidence: { hold: h?.fail_closed ? 'lookup_failed' : 'held', capability, hold_type: h?.hold_type || null } }
+    if (h?.held !== false) {
+      const deny = { decision: 'deny', code: h?.fail_closed ? 'AUTOMATION_HOLD_LOOKUP_FAILED' : 'AUTOMATION_HOLD', evidence: { hold: h?.fail_closed ? 'lookup_failed' : 'held', capability, hold_type: h?.hold_type || null } }
+      if (h?.held !== true || h?.fail_closed) return { deny, holds: null, hold_lookup_failed: true }
+      const n = Array.isArray(h.hold_ids) ? h.hold_ids.length : (Array.isArray(h.holds) ? h.holds.length : 0)
+      const t = String(h.hold_type ?? (Array.isArray(h.holds) ? h.holds[0]?.hold_type : '') ?? '').trim().toLowerCase()
+      return { deny, holds: { active: Math.max(1, n), blocks_ai_action: true, rows: [{ hold_type: HOLD_TYPE_RE.test(t) ? t : null, blocked_capabilities: [capability] }] }, hold_lookup_failed: false }
+    }
   }
-  return null
+  return { deny: null, holds: { active: 0, blocks_ai_action: false, rows: [] }, hold_lookup_failed: false }
+}
+
+/** THE hold authority, each capability the action exercises; any hold (or an unreadable registry) refuses. */
+export async function holdDeny(services, scope, capabilities) {
+  return (await holdScan(services, scope, capabilities)).deny
 }
 export { checkAutomationHold }
 

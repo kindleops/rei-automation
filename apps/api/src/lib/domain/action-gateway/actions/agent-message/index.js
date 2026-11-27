@@ -19,7 +19,7 @@ import { TIERS } from '../../constants.js'
 import { client, TEXT } from '../t2/_schema.js'
 import { cleanText } from '../t2/shared.js'
 import { LEAD_INPUT, resolveLead, leadParams } from '../t34/queue-agent-message.js'
-import { holdDeny, permissionDeny } from '../t34/shared.js'
+import { holdDeny, holdScan, permissionDeny } from '../t34/shared.js'
 
 export const LEAD_ASSIGNMENT_WRITE = 'action_gateway_dw_lead_assignment'
 
@@ -71,7 +71,7 @@ export const EVENTS_READ_SPEC = Object.freeze({
 
 export const LEAD_POOL_READ_SPEC = Object.freeze({
   name: 'agent_lead_pool', title: 'Addressable leads of a market', capability: 'leads.read_pool', tier: TIERS.T1, scope: null, resource: 'system',
-  description: 'The leads of one market an agent can address: every campaign target (campaign_target_id; with the thread of its number when one exists) and every thread with no target. Per row: property_id (raw, as leadcommand_search_leads gives it), property_ref (the encoded form the event feed uses: pid_ + digits as g..p), campaign_target_id | null, thread_id | null, market, has_conversation, next_purpose (first_touch / reply / followup / reengage: reply = answer the latest seller message), eligible and ineligible_reason (the SAME refusal code sms_send_agent_text would give: CONTACT_NOT_ELIGIBLE, AUTOMATION_HOLD, STOP_REQUESTED, CONTACT_NOT_PERMITTED, ALREADY_CONTACTED, PRESEND_INELIGIBLE, CAMPAIGN_TARGET_NOT_READY, LEAD_NOT_IN_AI_SEND_SCOPE, FOLLOWUP_QUIET_HOURS …) with ineligible_detail, plus window_open / next_permitted_at (the 08:00–21:00 recipient window right now; a time, not eligibility) and owner (self / another_agent / null). Never a phone number, a name or message text. Page with next_cursor.',
+  description: 'The leads of one market an agent can address: every campaign target (campaign_target_id; with the thread of its number when one exists) and every thread with no target. Per row: property_id (raw, as leadcommand_search_leads gives it), property_ref (the encoded form the event feed uses: pid_ + digits as g..p), campaign_target_id | null, thread_id | null, market, has_conversation, next_purpose (first_touch / reply / followup / reengage: reply = answer the latest seller message), eligible and ineligible_reason (the SAME refusal code sms_send_agent_text would give: CONTACT_NOT_ELIGIBLE, AUTOMATION_HOLD, STOP_REQUESTED, CONTACT_NOT_PERMITTED, ALREADY_CONTACTED, PRESEND_INELIGIBLE, CAMPAIGN_TARGET_NOT_READY, LEAD_NOT_IN_AI_SEND_SCOPE, FOLLOWUP_QUIET_HOURS …) with ineligible_detail; holds {active, blocks_ai_action, rows: [{hold_type, blocked_capabilities}]} = the hold check the verdict was judged on (eligible only with holds.active 0; an active hold always overrides eligibility), or holds null with hold_lookup_failed true when the hold lookup failed (fail closed; eligible false), or holds null when the row was refused before the hold check; plus window_open / next_permitted_at (the 08:00–21:00 recipient window right now; a time, not eligibility) and owner (self / another_agent / null). Never a phone number, a name or message text. Page with next_cursor.',
   input: obj({ market: str(80, { minLength: 2 }), limit: int(1, 100), cursor: str(80, { pattern: '^(ct|th):[0-9a-f-]{36}$' }) }, ['market']),
   limits: { per_min: 20 },
   wraps: { service: 'public.action_gateway_agent_lead_pool (link #32) + the agent-text send path\'s own guards (outreach/agent-text.js: the purpose rules, the AI send scope when set, the send-time contact guard, pre-send eligibility)' },
@@ -88,6 +88,22 @@ export const SEND_CONTROLS_READ_SPEC = Object.freeze({
 /** The feed's form of a property id (action_gateway.property_ref_of): pid_ + digits as g..p; null for a non-numeric id. */
 export const propertyRefOf = (id) => { const v = String(id ?? '').trim(); return /^[0-9]{1,20}$/.test(v) ? `pid_${[...v].map((d) => 'ghijklmnop'[Number(d)]).join('')}` : (/^pid_[g-p]{1,20}$/.test(v) ? v : null) }
 
+// A row's hold section (founder rule 2026-11-27: an active hold always overrides eligibility; missing or unreadable hold
+// data fails closed). Same shape as leadcommand_get_thread_contact_eligibility's holds: { active, blocks_ai_action, rows }.
+// holds null = the hold check did not run clear: hold_lookup_failed true when it failed, false when the row was refused
+// before the check (it is already ineligible).
+const NOT_CHECKED = Object.freeze({ holds: null, hold_lookup_failed: false })
+export const POOL_ROW_UNREADABLE = Object.freeze({ eligible: false, ineligible_reason: 'LEAD_FACTS_UNREADABLE', ineligible_detail: null, next_purpose: null, window: Object.freeze({ open: false, next_permitted_at: null }), ...NOT_CHECKED })
+
+/** True only for a hold section that shows the check ran and found no hold. */
+export const holdsClear = (v) => v?.hold_lookup_failed !== true && v?.holds != null && v.holds.active === 0 && v.holds.blocks_ai_action === false
+/** The last word on a pool row: eligible true never leaves here without a hold section that shows the check ran clear. */
+export function holdGatedVerdict(v) {
+  if (v?.eligible !== true || holdsClear(v)) return v
+  if (Number(v?.holds?.active) > 0) return { ...v, eligible: false, ineligible_reason: 'AUTOMATION_HOLD', ineligible_detail: null, holds: { ...v.holds, blocks_ai_action: true }, hold_lookup_failed: false }
+  return { ...v, eligible: false, ineligible_reason: 'AUTOMATION_HOLD_LOOKUP_FAILED', ineligible_detail: null, holds: null, hold_lookup_failed: true }
+}
+
 /** One pool row's verdict: what queue_agent_text would decide for the purpose an agent's next text would take (window aside). */
 async function poolVerdict(row, { reads, services, policy, aiPolicy, nowIso }) {
   const lead = { phone: row.phone, thread_id: row.thread_id, property_id: row.property_id, prospect_id: row.prospect_id, master_owner_id: row.master_owner_id }
@@ -98,29 +114,34 @@ async function poolVerdict(row, { reads, services, policy, aiPolicy, nowIso }) {
     messages = row.thread_id ? await loadThreadHistory(reads.client, row.phone) : []
     if (row.prospect_id) { const r = await reads.client.from('prospects').select('*').eq('prospect_id', String(row.prospect_id)).limit(1); if (r?.error) throw new Error('prospect'); prospect = r?.data?.[0] || null }
     if (row.property_id) property = await reads.property(row.property_id)
-  } catch { return { eligible: false, ineligible_reason: 'LEAD_FACTS_UNREADABLE', ineligible_detail: null, next_purpose: null, window: { open: false, next_permitted_at: null } } }
+  } catch { return { ...POOL_ROW_UNREADABLE } }
   const next = nextPurposeOf(messages, { now: nowIso, reengageQuietHours: Number(policy?.reengage_min_quiet_hours) || 72 })
   // an agent text's purpose: an unanswered seller message is answered (purpose reply, in_reply_to = that message)
   const purpose = next === 'answer' ? 'reply' : next
   const latest = messages[messages.length - 1] || null
   const inReplyTo = purpose === 'reply' ? latest?.id || null : null
   const win = () => { const w = agentTextWindow({ phone: row.phone, property, purpose, now: nowIso, answers: inReplyTo ? latest : null }).timing; return { open: w.lawful === true, next_permitted_at: w.lawful === true ? null : w.next_permitted_at || null } }
-  const out = (code, detail = null) => ({ eligible: !code, ineligible_reason: code || null, ineligible_detail: detail, next_purpose: purpose, has_conversation: messages.length > 0, window: win() })
+  const out = (code, detail = null, hs = NOT_CHECKED) => ({ eligible: !code, ineligible_reason: code || null, ineligible_detail: detail, next_purpose: purpose, has_conversation: messages.length > 0, window: win(), holds: hs.holds, hold_lookup_failed: hs.hold_lookup_failed })
+  // refused before the hold check: already ineligible, holds null (not checked)
   if (purpose === 'first_touch' && !row.campaign_target_id) return out('FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET')
   const sc = agentTextScopeVerdict(aiPolicy, { thread_key: row.phone, market: row.market || null })
   if (sc) return out(sc.code)
   // the send policy's order: holds, then the thread's permission (STOP in any language, suppression / opt-out marks), then
   // the purpose rules and the shared guards — so the code is the one queue_agent_text would return
-  const h = await holdDeny(services, { threadKey: row.phone, threadId: row.thread_id || null, propertyId: row.property_id || null, masterOwnerId: row.master_owner_id || null }, AGENT_TEXT_HOLD_CAPABILITIES)
+  const scan = await holdScan(services, { threadKey: row.phone, threadId: row.thread_id || null, propertyId: row.property_id || null, masterOwnerId: row.master_owner_id || null }, AGENT_TEXT_HOLD_CAPABILITIES)
+  const hs = { holds: scan.holds, hold_lookup_failed: scan.hold_lookup_failed }
+  const h = scan.deny
   const p = !h && row.thread_id ? await permissionDeny(reads, { id: row.thread_id, refs: { thread_key: row.phone } }) : null
   const early = h || p
-  if (early) return out(early.code, (early.evidence?.reasons || []).join(',').slice(0, 120) || null)
+  if (early) return out(early.code, (early.evidence?.reasons || []).join(',').slice(0, 120) || null, hs)
   const target = row.campaign_target_id ? { id: row.campaign_target_id, property_id: row.property_id, ...(row.target || {}) } : null
   const pv = agentTextPurposeVerdict({ purpose, inReplyTo, messages, target, policy, now: nowIso })
-  if (!pv.ok) return out(pv.code)
+  if (!pv.ok) return out(pv.code, null, hs)
   const g = await evaluateAgentTextContactGuards({ supabase: reads.client, lead, target, purpose, prospect, property, now: nowIso, holdChecker: (a) => services.holdCheck(a), answers: pv.answers, window: false })
   const detail = g.ok ? null : String(g.evidence?.reason || g.evidence?.block_reason || '').toLowerCase().replace(/[^a-z0-9_:]/g, '_').slice(0, 60) || null
-  return out(g.ok ? null : g.code, detail)
+  // the send-time guard re-reads the hold registry: a hold it sees is an active hold here too
+  const gs = !g.ok && g.code === 'AUTOMATION_HOLD' ? { holds: { active: Math.max(1, hs.holds?.active || 0), blocks_ai_action: true, rows: hs.holds?.rows || [] }, hold_lookup_failed: false } : hs
+  return out(g.ok ? null : g.code, detail, gs)
 }
 
 const leadLogic = (op) => ({
@@ -177,7 +198,7 @@ export const AGENT_MESSAGE_FAMILY_LOGIC = Object.freeze({
       const nowIso = new Date(now()).toISOString()
       const rows = []
       for (const row of r.data.rows || []) {
-        const v = aiPolicy ? await poolVerdict(row, { reads, services, policy: { ...DEFAULT_AGENT_TEXT_POLICY, ...(st?.policy || {}) }, aiPolicy, nowIso }) : { eligible: false, ineligible_reason: 'AI_SEND_POLICY_UNREADABLE', ineligible_detail: null, next_purpose: null, window: { open: false, next_permitted_at: null } }
+        const v = holdGatedVerdict(aiPolicy ? await poolVerdict(row, { reads, services, policy: { ...DEFAULT_AGENT_TEXT_POLICY, ...(st?.policy || {}) }, aiPolicy, nowIso }) : { ...POOL_ROW_UNREADABLE, ineligible_reason: 'AI_SEND_POLICY_UNREADABLE' })
         let owner = null
         try {
           const a = await definerRead(reads, 'action_gateway_lead_assignment_get', { p_campaign_target_id: row.campaign_target_id || null, p_thread_id: row.campaign_target_id ? null : row.thread_id })
@@ -185,12 +206,14 @@ export const AGENT_MESSAGE_FAMILY_LOGIC = Object.freeze({
         } catch { owner = null }
         rows.push({ property_id: row.property_id ?? null, campaign_target_id: row.campaign_target_id ?? null, thread_id: row.thread_id ?? null, market: row.market ?? null,
           property_ref: propertyRefOf(row.property_id), has_conversation: v.has_conversation ?? Boolean(row.thread_id), next_purpose: v.next_purpose, eligible: v.eligible, ineligible_reason: v.ineligible_reason, ineligible_detail: v.ineligible_detail,
+          holds: v.holds ? { active: v.holds.active, blocks_ai_action: v.holds.blocks_ai_action, rows: (v.holds.rows || []).map((x) => ({ hold_type: x.hold_type ?? null, blocked_capabilities: [...(x.blocked_capabilities || [])] })) } : null,
+          hold_lookup_failed: v.hold_lookup_failed === true,
           window_open: v.window.open, next_permitted_at: v.window.next_permitted_at, owner })
       }
       const last = (r.data.rows || []).at(-1)
       return { resource_type: 'system', market: input.market, rows, next_cursor: r.data.has_more && last ? last.row_key : null,
         agent_texts_available: st?.available === true, unavailable_reason: st?.available ? null : st?.code || null,
-        note: 'eligible = what sms_send_agent_text (queue_agent_text) would decide now apart from the window, lead ownership, the caps and your text itself; ineligible_reason is its refusal code; next_purpose reply means: answer the latest seller message (in_reply_to_message_id). Hold the lead (assign_lead) before sending.' }
+        note: 'eligible = what sms_send_agent_text (queue_agent_text) would decide now apart from the window, lead ownership, the caps and your text itself; ineligible_reason is its refusal code; next_purpose reply means: answer the latest seller message (in_reply_to_message_id). holds = the hold check this verdict was judged on ({active, blocks_ai_action, rows: hold types and capabilities only}); eligible is true only with holds.active 0. holds null = not checked clear: hold_lookup_failed true (the hold lookup failed: fail closed) or the row was refused before the check. An active hold always overrides eligibility. Hold the lead (assign_lead) before sending.' }
     },
   },
   events_since: {

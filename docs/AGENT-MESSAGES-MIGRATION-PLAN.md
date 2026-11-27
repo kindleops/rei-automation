@@ -47,7 +47,21 @@ posttest → fingerprint equals pre-apply → re-apply → posttest).
 - the agents' event feed (`action_gateway.lead_events`, read through `events_since`): `inbound_message`, `opt_out`,
   `lead_state_changed`, `lead_transferred`, `delivery_changed` (incl. the carrier's `delivered` / `undelivered`);
 - the lead pool read (`agent_lead_pool`) and the send-controls read (`send_controls`, now with `agent_text_enabled` and
-  `agent_text_refusal`);
+  `agent_text_refusal`). Each pool row carries the hold check its verdict was judged on (founder rule 2026-11-27: an
+  active hold always overrides eligibility, and missing or unreadable hold data fails closed). The section is
+  `holds: { active, blocks_ai_action, rows }`, the same shape as `leadcommand_get_thread_contact_eligibility`'s `holds`.
+  Its rows hold only hold types and capabilities: no reason text, no phone and no names. The cases:
+  - the check ran and found no hold: `active: 0`, `blocks_ai_action: false`, `rows: []`;
+  - a hold: `active >= 1`, `blocks_ai_action: true`, `eligible: false`, `ineligible_reason: AUTOMATION_HOLD`;
+  - the lookup failed: `holds: null`, `hold_lookup_failed: true`, `eligible: false`,
+    `ineligible_reason: AUTOMATION_HOLD_LOOKUP_FAILED`;
+  - refused before the hold check (`FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET`, a scope refusal, `AI_SEND_POLICY_UNREADABLE`,
+    `LEAD_FACTS_UNREADABLE`): `holds: null`, `hold_lookup_failed: false`, `eligible: false`.
+
+  `eligible: true` is never returned without `holds.active === 0`. The read enforces that as a last step and turns any
+  other combination into `AUTOMATION_HOLD` or `AUTOMATION_HOLD_LOOKUP_FAILED`. Agntei's acquisitions engine treats a row
+  that says eligible but has no clear hold section as unknown and does not send its first touch. The RPC
+  `action_gateway_agent_lead_pool` is unchanged (no migration): the section comes from the gateway's own hold check;
 - day-cap reservations (`agent_text_lead_day`, `agent_text_initiated_day`, `agent_text_global_day`, plus the shared
   `inbound_reply` reservation for an answer);
 - `lc_agent_lead_holder`: LeadCommand's own conversation engine **stands down** on a lead an agent holds;
@@ -125,7 +139,7 @@ Recommended order: rehearse on the clone (§3), deploy the code, apply A, apply 
 5. **Rollback rehearsal.** Take a schema fingerprint before step 4 (`pg_dump -s` of `action_gateway`, `agent` and `public`, sorted). Then run B's rollback and its rollback posttest, A's rollback and its rollback posttest, and diff the fingerprint; it must be identical. Then re-apply A and B.
 6. **Read-only exercise on the clone**, with switches OFF, as `lc_action_gateway` through the Action MCP pointed at the clone:
    - `leadcommand_send_controls` shows `agent_text_enabled:false` and `agent_text_refusal:'AGENT_TEXT_KILL_SWITCH_OFF'`;
-   - `leadcommand_agent_lead_pool {market}` on a real market returns rows with no phones or names, and `agent_texts_available:false`;
+   - `leadcommand_agent_lead_pool {market}` on a real market returns rows with no phones or names, and `agent_texts_available:false`. Each row has a `holds` section, or `holds:null` on a refused row, and no row says `eligible:true` without `holds.active:0`;
    - `sms_send_agent_text` returns `AGENT_TEXT_KILL_SWITCH_OFF`; `sms_send_agent_message` returns `AGENT_COMPOSES_TEXT`.
 7. **Feed volume estimate.** About one `lead_events` row per inbound, plus one per lead-state change or transfer, plus about three per agent text (enqueued, sent, the carrier's verdict).
 

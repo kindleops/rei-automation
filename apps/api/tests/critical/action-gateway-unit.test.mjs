@@ -145,6 +145,129 @@ test('STATIC: the gateway module has no import path to the send stack (queue wri
   }
 })
 
+// ── agent_lead_pool: every row carries the hold check it was judged on (founder rule 2026-11-27: an active hold always
+//    overrides eligibility; missing or unreadable hold data fails closed) ─────────────────────────────────────────────
+const POOL_PHONES = { clear: '+13125550301', held: '+13125550302', failed: '+13125550303', noTarget: '+13125550304', outside: '+13125550305' }
+const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+const CLEAR_SECTION = { active: 0, blocks_ai_action: false, rows: [] }
+
+function poolHarness({ holdCheck, switches } = {}) {
+  const calls = []
+  // a chainable fake of the supabase query builder: every read answers no rows
+  const chain = () => new Proxy({}, { get: (_, k) => (k === 'then' ? (res, rej) => Promise.resolve({ data: [], error: null }).then(res, rej) : () => chain()) })
+  const poolRows = [
+    { row_key: `ct:${uid(1)}`, campaign_target_id: uid(1), thread_id: uid(11), phone: POOL_PHONES.clear, property_id: '227876901', market: 'Chicago, IL' },
+    { row_key: `ct:${uid(2)}`, campaign_target_id: uid(2), thread_id: null, phone: POOL_PHONES.held, property_id: '227876902', market: 'Chicago, IL' },
+    { row_key: `ct:${uid(3)}`, campaign_target_id: uid(3), thread_id: null, phone: POOL_PHONES.failed, property_id: '227876903', market: 'Chicago, IL' },
+    { row_key: `th:${uid(14)}`, campaign_target_id: null, thread_id: uid(14), phone: POOL_PHONES.noTarget, property_id: '227876904', market: 'Chicago, IL' },
+    { row_key: `ct:${uid(5)}`, campaign_target_id: uid(5), thread_id: null, phone: POOL_PHONES.outside, property_id: '227876905', market: 'Elsewhere' },
+  ]
+  const reads = {
+    client: { from: () => chain(), rpc: async (fn) => (fn === 'action_gateway_agent_lead_pool' ? { data: { rows: poolRows, has_more: false }, error: null } : { data: null, error: null }) },
+    switches: switches || (async () => ({ ai_conversation_send_policy: JSON.stringify({ enabled: true, scope: { market_ids: ['Chicago, IL'] } }) })),
+    property: async () => null,
+    thread: async () => null,
+    // the clear row's thread carries a STOP: the hold check ran clear, then the permission refused
+    permission: async () => ({ blocked: true, reasons: ['stop_requested'] }),
+  }
+  const services = {
+    holdCheck: async (a) => {
+      calls.push({ key: a.threadKey, capability: a.capability })
+      return holdCheck(a)
+    },
+  }
+  return { reads, services, calls }
+}
+const defaultHoldCheck = async (a) => {
+  if (a.threadKey === POOL_PHONES.held && a.capability === 'ai_action') return { held: true, fail_closed: false, hold_type: 'operator_hold', hold_ids: ['hold-1', 'hold-2'], reason: `operator reviewing; owner Sam says call ${POOL_PHONES.held}` }
+  if (a.threadKey === POOL_PHONES.failed) throw new Error('registry unreachable')
+  return { held: false, fail_closed: false, hold_type: null, hold_ids: [] }
+}
+
+test('agent_lead_pool: holdScan reports the hold check it ran (clear / held / failed / malformed), no reason text; holdDeny refusals are unchanged', async () => {
+  const { holdScan, holdDeny } = await import('../../src/lib/domain/action-gateway/actions/t34/shared.js')
+  const caps = ['ai_action', 'auto_reply']
+  const svc = (fn) => ({ holdCheck: fn })
+  const clear = await holdScan(svc(async () => ({ held: false })), {}, caps)
+  assert.deepEqual(clear, { deny: null, holds: CLEAR_SECTION, hold_lookup_failed: false })
+  const held = await holdScan(svc(async (a) => (a.capability === 'auto_reply' ? { held: true, fail_closed: false, hold_type: 'Operator_Hold', hold_ids: ['h1'], reason: 'call Sam at 312 555 0161' } : { held: false })), {}, caps)
+  assert.deepEqual(held.holds, { active: 1, blocks_ai_action: true, rows: [{ hold_type: 'operator_hold', blocked_capabilities: ['auto_reply'] }] })
+  assert.equal(held.deny.code, 'AUTOMATION_HOLD')
+  assert.ok(!JSON.stringify(held.holds).includes('Sam') && !JSON.stringify(held.holds).includes('555'))
+  const thrown = await holdScan(svc(async () => { throw new Error('down') }), {}, caps)
+  assert.deepEqual([thrown.deny.code, thrown.holds, thrown.hold_lookup_failed], ['AUTOMATION_HOLD_LOOKUP_FAILED', null, true])
+  const failClosed = await holdScan(svc(async () => ({ held: true, fail_closed: true })), {}, caps)
+  assert.deepEqual([failClosed.deny.code, failClosed.holds, failClosed.hold_lookup_failed], ['AUTOMATION_HOLD_LOOKUP_FAILED', null, true])
+  // neither held nor clear: unreadable hold data never reads as clear (the refusal code stays the one holdDeny gave)
+  for (const bad of [null, {}, { held: 'no' }, { held: undefined }]) {
+    const m = await holdScan(svc(async () => bad), {}, caps)
+    assert.deepEqual([m.deny.code, m.holds, m.hold_lookup_failed], ['AUTOMATION_HOLD', null, true], JSON.stringify(bad))
+  }
+  // hold_type that is not a plain label is dropped, never echoed
+  const odd = await holdScan(svc(async () => ({ held: true, fail_closed: false, hold_type: 'reviewing: call 3125550161 please' })), {}, ['ai_action'])
+  assert.deepEqual(odd.holds.rows, [{ hold_type: null, blocked_capabilities: ['ai_action'] }])
+  // holdDeny (assign_lead, transfer_lead, queue_agent_text) is the same refusal as before
+  assert.equal(await holdDeny(svc(async () => ({ held: false })), {}, caps), null)
+  assert.deepEqual(await holdDeny(svc(async () => { throw new Error('x') }), {}, caps), { decision: 'deny', code: 'AUTOMATION_HOLD_LOOKUP_FAILED', evidence: { hold: 'lookup_failed', capability: 'ai_action', hold_type: null } })
+  assert.deepEqual(await holdDeny(svc(async () => ({ held: true, fail_closed: false, hold_type: 'operator_hold' })), {}, caps), { decision: 'deny', code: 'AUTOMATION_HOLD', evidence: { hold: 'held', capability: 'ai_action', hold_type: 'operator_hold' } })
+})
+
+test('agent_lead_pool: every row carries the hold section it was judged on — clear, held, lookup failed, and the rows refused before the check', async () => {
+  const { AGENT_MESSAGE_FAMILY_LOGIC } = await import('../../src/lib/domain/action-gateway/actions/agent-message/index.js')
+  const { reads, services, calls } = poolHarness({ holdCheck: defaultHoldCheck })
+  const res = await AGENT_MESSAGE_FAMILY_LOGIC.agent_lead_pool.read({ input: { market: 'Chicago, IL' }, reads, services, principal: { agent_id: 'agt_unit_pool' }, now: () => Date.parse('2026-11-27T17:00:00Z') })
+  const by = (id) => res.rows.find((r) => r.campaign_target_id === id || r.thread_id === id)
+  assert.equal(res.rows.length, 5)
+  // clear: the check ran and found none → active 0; the row is then refused by the thread's permission (STOP)
+  const clear = by(uid(1))
+  assert.deepEqual([clear.eligible, clear.ineligible_reason, clear.holds, clear.hold_lookup_failed], [false, 'STOP_REQUESTED', CLEAR_SECTION, false])
+  // held: active >= 1, blocks_ai_action, eligible false; hold types and capabilities only
+  const held = by(uid(2))
+  assert.deepEqual([held.eligible, held.ineligible_reason, held.holds, held.hold_lookup_failed], [false, 'AUTOMATION_HOLD', { active: 2, blocks_ai_action: true, rows: [{ hold_type: 'operator_hold', blocked_capabilities: ['ai_action'] }] }, false])
+  // lookup failed: holds null, hold_lookup_failed true, eligible false
+  const failed = by(uid(3))
+  assert.deepEqual([failed.eligible, failed.ineligible_reason, failed.holds, failed.hold_lookup_failed], [false, 'AUTOMATION_HOLD_LOOKUP_FAILED', null, true])
+  // refused before the hold check: holds null (not checked), eligible false, and the registry was never asked
+  const noTarget = by(uid(14))
+  assert.deepEqual([noTarget.eligible, noTarget.ineligible_reason, noTarget.holds, noTarget.hold_lookup_failed], [false, 'FIRST_TOUCH_REQUIRES_CAMPAIGN_TARGET', null, false])
+  const outside = by(uid(5))
+  assert.deepEqual([outside.eligible, outside.ineligible_reason, outside.holds, outside.hold_lookup_failed], [false, 'LEAD_NOT_IN_AI_SEND_SCOPE', null, false])
+  assert.ok(!calls.some((c) => c.key === POOL_PHONES.noTarget || c.key === POOL_PHONES.outside), JSON.stringify(calls))
+  // the send policy's order: the hold check runs before the permission, every agent-text capability in order until one holds
+  assert.deepEqual(calls.filter((c) => c.key === POOL_PHONES.clear).map((c) => c.capability), ['ai_action', 'auto_reply', 'campaign', 'follow_up', 'outbound_send'])
+  // no row is eligible without holds.active === 0
+  for (const r of res.rows) if (r.eligible) assert.ok(r.holds && r.holds.active === 0 && r.holds.blocks_ai_action === false && r.hold_lookup_failed === false, JSON.stringify(r))
+  // privacy: never a phone (nor its digits), a name or the hold's reason text
+  const s = JSON.stringify(res)
+  for (const p of Object.values(POOL_PHONES)) assert.ok(!s.includes(p.slice(2)), p)
+  assert.ok(!/Sam|operator reviewing/.test(s))
+  assert.match(res.note, /holds/)
+
+  // the AI send policy unreadable: every row ineligible, holds null (not checked), no hold lookup
+  const u = poolHarness({ holdCheck: defaultHoldCheck, switches: async () => { throw new Error('switches down') } })
+  const unread = await AGENT_MESSAGE_FAMILY_LOGIC.agent_lead_pool.read({ input: { market: 'Chicago, IL' }, reads: u.reads, services: u.services, principal: { agent_id: 'agt_unit_pool' }, now: () => Date.parse('2026-11-27T17:00:00Z') })
+  for (const r of unread.rows) assert.deepEqual([r.eligible, r.ineligible_reason, r.holds, r.hold_lookup_failed], [false, 'AI_SEND_POLICY_UNREADABLE', null, false], JSON.stringify(r))
+  assert.equal(u.calls.length, 0)
+})
+
+test('agent_lead_pool: holdGatedVerdict — eligible true never leaves without a hold section that shows the check ran clear', async () => {
+  const { holdGatedVerdict, holdsClear } = await import('../../src/lib/domain/action-gateway/actions/agent-message/index.js')
+  const base = { ineligible_reason: null, ineligible_detail: null, next_purpose: 'first_touch', window: { open: true, next_permitted_at: null } }
+  const sections = [undefined, null, CLEAR_SECTION, { active: 1, blocks_ai_action: true, rows: [] }, { active: 0, blocks_ai_action: true, rows: [] }, { active: 3, blocks_ai_action: false, rows: [] }, { active: '0', blocks_ai_action: false, rows: [] }, { blocks_ai_action: false, rows: [] }, {}]
+  for (const eligible of [true, false]) for (const holds of sections) for (const hold_lookup_failed of [undefined, false, true]) {
+    const v = holdGatedVerdict({ ...base, eligible, ineligible_reason: eligible ? null : 'X', holds, hold_lookup_failed })
+    const tag = JSON.stringify({ eligible, holds, hold_lookup_failed })
+    if (v.eligible) assert.ok(v.holds?.active === 0 && v.holds.blocks_ai_action === false && v.hold_lookup_failed !== true && holdsClear(v), tag)
+    if (eligible && !(holds === CLEAR_SECTION && hold_lookup_failed !== true)) {
+      assert.equal(v.eligible, false, tag)
+      assert.ok(['AUTOMATION_HOLD', 'AUTOMATION_HOLD_LOOKUP_FAILED'].includes(v.ineligible_reason), tag)
+      if (v.ineligible_reason === 'AUTOMATION_HOLD_LOOKUP_FAILED') assert.deepEqual([v.holds, v.hold_lookup_failed], [null, true], tag)
+      else assert.ok(v.holds.active > 0 && v.holds.blocks_ai_action === true, tag)
+    }
+    if (!eligible) assert.equal(v.ineligible_reason, 'X', tag) // an ineligible verdict keeps its own code
+  }
+})
+
 test('test detector findPhoneLike: catches every real NANP / E.164 rendering, never a UUID / hash / timestamp / pid digit run', async () => {
   const { findPhoneLike } = await import('../helpers/action-gateway-pg.mjs')
   for (const p of ['+13125550161', '13125550161', '3125550161', '312-555-0161', '(312) 555-0161', '312.555.0161', '+1 312 555 0161', '1-312-555-0161', '+442071838750', 'call 312 555 0161 today'])
