@@ -1027,7 +1027,8 @@ test("6k. wiring: Cockpit queue/auto/schedule reply pass the server principal; t
   const cockpit = read("lib/cockpit/cockpit-service.js");
   const reply = cockpit.slice(cockpit.indexOf("if (action === 'queue-reply' || action === 'schedule-reply' || action === 'auto-reply')"));
   assert.match(reply, /createInboxSendNowQueueRow\(/);
-  assert.match(reply.slice(0, reply.indexOf("if (!queueResult.ok")), /\{ supabase, operator \}/);
+  // The server principal is applied LAST, after any test-seam deps.
+  assert.match(reply.slice(0, reply.indexOf("if (!queueResult.ok")), /supabase, operator \}/);
   const route = read("app/api/internal/inbox/send-now/route.js");
   assert.match(route, /handleInternalInboxSendNow\(/);
   assert.match(route, /processSendQueueItem/);

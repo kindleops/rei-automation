@@ -9,7 +9,11 @@ export async function POST(request) {
   if (!auth.ok) return withCors(request, auth.response)
   const payload = await parseJsonSafe(request)
   try {
-    const result = await runInboxAction({ action: 'queue-reply', payload })
+    // The SERVER's operator principal (ensureMutationAuth ->
+    // resolveOperatorPrincipal), never a payload field: it is the operator
+    // recorded on the row and the only identity that can clear a
+    // content-filter lock (review task_96738436 F1).
+    const result = await runInboxAction({ action: 'queue-reply', payload, operator: auth.operator })
     const status = result.ok ? 200 : (result.reason === 'invalid_canonical_thread_key' ? 400 : 423)
     return responseFromResult(result, status)
   } catch (error) {

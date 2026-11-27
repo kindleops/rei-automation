@@ -97,6 +97,9 @@ export async function POST(request) {
           source: 'inbox_bulk_follow_up',
           dry_run: false,
         },
+        // The SERVER's operator principal, never a payload field: each row
+        // records who scheduled it (review task_96738436 F1).
+        operator: auth.operator,
       });
       results[index] = {
         thread_key: recipient.thread_key,

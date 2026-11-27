@@ -461,7 +461,17 @@ async function loadThreadsWithPendingFollowUp(keys = [], { supabase } = {}) {
   return blocked;
 }
 
+// TEST SEAM (route-level test of /api/cockpit/inbox/bulk-follow-up, review
+// task_96738436 F1): replaces the whole plan so the route's per-recipient
+// schedule-reply call can be observed. Settable ONLY under NODE_ENV=test.
+let BULK_PLAN_TEST_OVERRIDE = null;
+export function __setBulkFollowUpPlanForTests(fn = null) {
+  if (process.env.NODE_ENV !== "test") throw new Error("bulk_follow_up_plan_test_seam_is_test_only");
+  BULK_PLAN_TEST_OVERRIDE = typeof fn === "function" ? fn : null;
+}
+
 export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() } = {}, deps = {}) {
+  if (BULK_PLAN_TEST_OVERRIDE) return BULK_PLAN_TEST_OVERRIDE({ threadKeys, now });
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
   if (!keys.length) {

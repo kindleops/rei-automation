@@ -555,11 +555,22 @@ export async function runQueueAction({
   })
 }
 
+// TEST SEAM (route-level tests, review task_96738436 F1). The Cockpit routes
+// call runInboxAction with no database argument, so a route test can only
+// reach a fake through here. Settable ONLY under NODE_ENV=test (throws
+// otherwise), so production always runs with the real client. It can never
+// supply the operator: the principal is the route's argument, applied last.
+let INBOX_ACTION_TEST_DEPS = null
+export function __setInboxActionDepsForTests(deps = null) {
+  if (process.env.NODE_ENV !== 'test') throw new Error('inbox_action_test_seam_is_test_only')
+  INBOX_ACTION_TEST_DEPS = deps && typeof deps === 'object' ? deps : null
+}
+
 export async function runInboxAction({
   action,
   payload = {},
-  supabase = defaultSupabase,
-  getFlags = getSystemFlags,
+  supabase = INBOX_ACTION_TEST_DEPS?.supabase || defaultSupabase,
+  getFlags = INBOX_ACTION_TEST_DEPS?.getFlags || getSystemFlags,
   // The authenticated operator principal, minted by the route's auth layer
   // (cockpit/_shared.js resolveOperatorPrincipal). A top-level argument on
   // purpose: `payload.operator` is client data and is never consulted.
@@ -844,7 +855,7 @@ export async function runInboxAction({
       // from these actions. The content-filter lock and the per-thread attempt
       // cap apply to queue / auto / schedule replies exactly as to send-now
       // (review task_e46cf83a); a refusal comes back as a 423 with its reason.
-      { supabase, operator }
+      { ...(INBOX_ACTION_TEST_DEPS?.queueRowDeps || {}), supabase, operator }
     )
 
     if (!queueResult.ok || !queueResult.queue_id) {
