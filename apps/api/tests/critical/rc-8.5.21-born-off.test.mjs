@@ -31,6 +31,7 @@ import { WORKFORCE_FLAG, WORKFORCE_MODEL_INTERPRET_FLAG, workforceEnabled, model
 // off unless the row is exactly 'enabled'
 import { MANUAL_SEND_MODE_KEY, normalizeManualSendMode, MANUAL_SEND_MODE_ENABLED } from '../../src/lib/domain/queue/manual-send-authority.js'
 import { AGENT_TEXT_SWITCH_KEY, AGENT_TEXT_POLICY_KEY, agentTextSwitchOn } from '../../src/lib/domain/outreach/agent-text.js'
+import { DEV_FORCE_SEND_FLAG, DEV_FORCE_SEND_FLAG_VALUE, isDevForceSendExplicitlyAllowed } from '../../src/app/api/dev/force-send/route.js'
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src')
 const REPO = path.resolve(SRC, '../../..')
@@ -53,6 +54,8 @@ const NEW_ENV_FLAGS = Object.freeze({
   // the model interpreter additionally needs Workforce itself on (tests/critical/workforce-born-off.test.mjs)
   [WORKFORCE_FLAG]: (env) => workforceEnabled(env),
   [WORKFORCE_MODEL_INTERPRET_FLAG]: (env) => modelInterpretEnabled({ ...env, [WORKFORCE_FLAG]: '1' }),
+  // P0 round 4 (condition 6 item 8): the dev force-send route refuses unless the deployment explicitly sets the arming literal
+  [DEV_FORCE_SEND_FLAG]: (env) => isDevForceSendExplicitlyAllowed(env),
 })
 const NEW_SYSTEM_CONTROL_KEYS = Object.freeze({
   [MANUAL_SEND_MODE_KEY]: (raw) => normalizeManualSendMode(raw) === MANUAL_SEND_MODE_ENABLED,
@@ -91,6 +94,8 @@ test('every NEW env flag is OFF when the variable is absent, empty or not the ar
   assert.equal(workforceEnabled({ [WORKFORCE_FLAG]: '1' }), true)
   assert.equal(modelInterpretEnabled({ [WORKFORCE_FLAG]: '1', [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), true)
   assert.equal(modelInterpretEnabled({ [WORKFORCE_MODEL_INTERPRET_FLAG]: '1' }), false, 'the interpreter never arms without Workforce')
+  assert.equal(isDevForceSendExplicitlyAllowed({ [DEV_FORCE_SEND_FLAG]: DEV_FORCE_SEND_FLAG_VALUE }), true)
+  assert.equal(isDevForceSendExplicitlyAllowed({ [DEV_FORCE_SEND_FLAG]: '1' }), false, 'only the exact arming literal')
   // paid research: with no setting the ceiling is the $10 testing ceiling. agntei reconciliation: production's owner
   // decision of 2026-10-20 (Package A) lets RESEARCH_PAID_CEILING_USD raise it to a hard max of $200, never more
   assert.ok(paidResearchCeiling({}) <= 10)
